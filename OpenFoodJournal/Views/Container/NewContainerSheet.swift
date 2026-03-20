@@ -143,6 +143,20 @@ struct NewContainerSheet: View {
 
                     let container = TrackedContainer.from(food, startWeight: weight, gramsPerServing: grams)
                     modelContext.insert(container)
+
+                    // Auto-save the grams-per-serving mapping back to the food
+                    // so it pre-fills next time this food is used in a container.
+                    let hasGramMapping = food.servingMappings.contains { $0.to.unit.lowercased() == "g" }
+                    if !hasGramMapping {
+                        let unit = food.servingUnit ?? "serving"
+                        let qty = food.servingQuantity ?? 1.0
+                        let mapping = ServingMapping(
+                            from: ServingAmount(value: qty, unit: unit),
+                            to: ServingAmount(value: grams, unit: "g")
+                        )
+                        food.servingMappings.append(mapping)
+                    }
+
                     try? modelContext.save()
                     dismiss()
                 } label: {
