@@ -13,6 +13,7 @@
 //   4. Future                — light gray text, no circle stroke
 
 import SwiftUI
+import SwiftData
 
 // MARK: - Day Cell State
 
