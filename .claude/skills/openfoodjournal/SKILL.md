@@ -17,15 +17,17 @@ This is the single source of truth for any LLM agent working on this project. Re
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle ID | `k3vnc.OpenFoodJournal` |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
-| Proxy API | Render at `macros-proxy.onrender.com` (Gemini 2.5 Flash) |
+| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini 2.5 Flash) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
 ## Architecture Overview
 
 ```
-MacrosApp (creates ModelContainer + 4 @Observable services)
-  └─ ContentView (3-tab TabView)
-       ├─ Journal tab → DailyLogView (date selector, macro summary, meal sections, FAB)
+MacrosApp (creates ModelContainer + 5 @Observable services)
+  └─ ContentView (5-tab TabView)
+       ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, FAB)
+       ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list)
+       ├─ Containers tab → ContainerListView (active/completed container tracking)
        ├─ History tab → HistoryView (date picker, MacroChartView, day detail)
        └─ Settings tab → SettingsView (goals, health, data export)
 ```
@@ -39,10 +41,14 @@ MacrosApp (creates ModelContainer + 4 @Observable services)
 See [references/models.md](references/models.md) for full property lists.
 
 - **`DailyLog`** — `@Model`, keyed by `@Attribute(.unique) date` normalized to midnight. Owns `[NutritionEntry]` via cascade delete.
-- **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + optional extended fields. `@Attribute(.externalStorage)` on `sourceImage`.
+- **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/servingQuantity/servingUnit/servingMappings. `@Attribute(.externalStorage)` on `sourceImage`.
+- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Created from entries or manual input.
+- **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
 - **`UserGoals`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for each goal property to avoid property-wrapper conflicts.
 - **`MealType`** — enum: `.breakfast`, `.lunch`, `.dinner`, `.snack`
 - **`ScanMode`** — enum: `.label`, `.foodPhoto`, `.manual`
+- **`ServingMapping`** — Codable struct with `from: ServingAmount` / `to: ServingAmount` for per-food unit conversions (e.g. 1 cup = 244g)
+- **`MicronutrientValue`** — Codable struct with `value: Double` / `unit: String` for dynamic micronutrient storage
 
 ## Services
 
@@ -93,10 +99,15 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
 - **Skills**: This file is the project skill. Update it when architecture or requirements change.
 - **Commits**: Descriptive messages. Push after every significant change.
 
-## Current State (Last Updated: 2026-03-19)
+## Current State (Last Updated: 2026-03-20)
 
 - App structure complete: all models, services, and views implemented
-- Builds successfully with `xcodebuild` after fixing 6 compiler errors (see `docs/retrospective.md`)
-- Render proxy (`macros-proxy.onrender.com`) does NOT exist yet — scan will throw network error
-- Entitlements not configured in Xcode — camera and HealthKit prompts won't appear
+- 5-tab layout: Journal, Food Bank, Containers, History, Settings
+- Builds successfully with `xcodebuild` (generic/platform=iOS)
+- Render proxy deployed at `openfoodjournal.onrender.com` (Gemini 2.5 Flash proxy in `server/` subdirectory)
+- Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
+- Container Tracking: create from Food Bank food, enter start weight, complete with final weight → derived nutrition logged
+- Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
+- WeeklyCalendarStrip with progress rings on DailyLogView
+- Entitlements configured: Camera, HealthKit privacy descriptions in Info.plist
 - No unit tests beyond Xcode template stubs
