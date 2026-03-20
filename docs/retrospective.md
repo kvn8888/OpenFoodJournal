@@ -393,3 +393,304 @@ The key interaction: the user can see *exactly* how many servings they consumed 
 - **Snapshot > Reference** for any entity that represents "what happened" rather than "what exists now." This applies to invoices, transactions, container tracking — anything where historical accuracy matters.
 - **SwiftData `@Query` with `#Predicate` is powerful** but the predicate must only reference stored properties (not computed ones). We filter on `finalWeight == nil` instead of the computed `isActive` property.
 - **Build early, build often**: Every model change was followed by a `xcodebuild` run. Codable conformance on custom types (`[String: MicronutrientValue]`, `[ServingMapping]`) can fail silently in previews but break in real builds.
+
+---
+
+# Adding Turso as a Cloud Database: Server-First Sync for a SwiftData App
+
+This section covers adding Turso (a hosted SQLite-compatible database via libSQL) as the primary cloud database for OpenFoodJournal, with SwiftData remaining as the local cache. The goal: every food logged, every container tracked, every goal changed — persisted to the cloud, accessible from any device.
+
+---
+
+## The Architecture Decision: Why Not Just CloudKit?
+
+The app already had CloudKit sync via SwiftData's `.automatic` configuration:
+
+```swift
+let config = ModelConfiguration(
+    isStoredInMemoryOnly: false,
+    cloudKitDatabase: .automatic
+)
+```
+
+CloudKit is zero-config and "just works" for Apple-to-Apple sync. But it has real limitations:
+
+1. **Apple-only**: No web dashboard, no Android client, no way to query the data outside Apple's ecosystem
+2. **Opaque sync**: You can't easily debug what's been synced, run migrations, or inspect the data
+3. **No server-side logic**: Can't run aggregations, scheduled jobs, or trigger notifications from the database
+4. **Rate limits**: CloudKit has request limits that are fine for personal use but would complicate any future multi-user features
+
+Turso gives us a real SQL database we can query from anywhere, with a REST API we control.
+
+---
+
+## Choosing the Sync Pattern: Local-First with Server Push
+
+There are three common patterns for mobile-to-server sync:
+
+### 1. Server-first (read from server, write to server)
+Every operation requires network. Fast for reads if cached, but the app is useless offline.
+
+### 2. Local-first with background sync
+Write locally, sync in the background. The app works offline, but conflict resolution gets complex.
+
+### 3. Local-first with fire-and-forget push
+Write to SwiftData immediately (user sees instant feedback), then fire an async task to push the change to the server. If the push fails, the local state is still correct — the server catches up later.
+
+**We chose option 3.** Here's why:
+
+- The app is a personal food journal — there's no multi-device concurrent editing to worry about
+- Loss of a single sync is not catastrophic (you still have local data)
+- The pattern is simple to implement: no queue, no retry logic, no conflict resolution
+- Adding retry/queue later is a natural extension without rearchitecting
+
+---
+
+## The Server Side: Express + Turso in 700 Lines
+
+### Database Module (`server/db.js`)
+
+The Turso client setup is minimal by design — a single file that creates the connection and runs migrations:
+
+```javascript
+const { createClient } = require("@libsql/client");
+
+// Turso client — uses env vars in production, local SQLite file for dev
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL || "file:local.db",
+  authToken: process.env.TURSO_AUTH_TOKEN,
+});
+```
+
+The `file:local.db` fallback is key for development — no Turso account needed to work locally.
+
+### Schema Design
+
+Five tables mirror the five SwiftData models:
+
+```sql
+-- daily_logs: one row per calendar day
+CREATE TABLE IF NOT EXISTS daily_logs (
+    id TEXT PRIMARY KEY,
+    date TEXT UNIQUE NOT NULL,  -- YYYY-MM-DD, normalized
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- nutrition_entries: each food logged to a day
+CREATE TABLE IF NOT EXISTS nutrition_entries (
+    id TEXT PRIMARY KEY,
+    daily_log_id TEXT NOT NULL REFERENCES daily_logs(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    calories REAL NOT NULL DEFAULT 0,
+    protein REAL NOT NULL DEFAULT 0,
+    carbs REAL NOT NULL DEFAULT 0,
+    fat REAL NOT NULL DEFAULT 0,
+    micronutrients TEXT NOT NULL DEFAULT '{}',  -- JSON blob
+    serving_mappings TEXT NOT NULL DEFAULT '[]', -- JSON blob
+    ...
+);
+```
+
+The interesting choice: **micronutrients and serving_mappings are JSON blobs**, not normalized tables. SQLite (and by extension Turso) handles JSON well with `json_extract()`, and the querying pattern is always "load all micronutrients for an entry" — never "find all entries with Vitamin C > 50mg." The JSON blob matches the access pattern perfectly.
+
+### REST API (`server/routes.js`)
+
+The API uses Express Router with a factory pattern — the router receives the database client at construction time:
+
+```javascript
+function createRouter(db) {
+    const router = require("express").Router();
+
+    // POST /entries — create a nutrition entry
+    router.post("/entries", async (req, res) => {
+        const { id, date, name, meal_type, calories, protein, carbs, fat,
+                micronutrients, serving_mappings, ...rest } = req.body;
+
+        // Find or create the daily log for this date
+        const logId = await findOrCreateLog(date);
+
+        await db.execute({
+            sql: `INSERT INTO nutrition_entries
+                  (id, daily_log_id, name, meal_type, calories, protein, carbs, fat,
+                   micronutrients, serving_mappings, ...)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ...)`,
+            args: [id, logId, name, meal_type, calories, protein, carbs, fat,
+                   JSON.stringify(micronutrients || {}),
+                   JSON.stringify(serving_mappings || []), ...],
+        });
+
+        res.status(201).json({ id, daily_log_id: logId });
+    });
+
+    return router;
+}
+```
+
+The `findOrCreateLog(date)` helper is the server's equivalent of `NutritionStore.fetchOrCreateLog()` — it ensures a daily log exists for the given date before inserting an entry.
+
+### The Sync Endpoint
+
+The most interesting endpoint is `GET /api/sync`:
+
+```javascript
+router.get("/sync", async (req, res) => {
+    const { since } = req.query;
+
+    // If a timestamp is provided, only return changes since then (incremental)
+    // Otherwise return everything (full sync on app launch)
+    const timeFilter = since
+        ? { sql: "WHERE updated_at > ?", args: [since] }
+        : { sql: "", args: [] };
+
+    const [logs, entries, foods, containers, goals] = await Promise.all([
+        db.execute(`SELECT * FROM daily_logs ${timeFilter.sql}`, timeFilter.args),
+        db.execute(`SELECT * FROM nutrition_entries ${timeFilter.sql}`, timeFilter.args),
+        db.execute(`SELECT * FROM saved_foods ${timeFilter.sql}`, timeFilter.args),
+        db.execute(`SELECT * FROM tracked_containers ${timeFilter.sql}`, timeFilter.args),
+        db.execute("SELECT * FROM user_goals WHERE id = 'default'"),
+    ]);
+
+    res.json({
+        daily_logs: logs.rows,
+        nutrition_entries: entries.rows.map(parseEntryRow),
+        saved_foods: foods.rows.map(parseFoodRow),
+        tracked_containers: containers.rows.map(parseContainerRow),
+        user_goals: goals.rows[0] || null,
+        synced_at: new Date().toISOString(),
+    });
+});
+```
+
+All five table queries run in parallel via `Promise.all()`. The `parseXxxRow()` helpers JSON-parse the micronutrients and serving_mappings blobs back into objects.
+
+---
+
+## The iOS Side: SyncService as a Thin Network Layer
+
+### Design Principles
+
+1. **No business logic in SyncService** — it's purely HTTP request construction and response decoding
+2. **Fire-and-forget everywhere** — callers use `Task { try? await sync?.method() }` to push changes without blocking the UI
+3. **`@Observable @MainActor`** — so views can show sync status (loading spinner, error banner) if desired
+4. **All API types are `Codable`** — Swift's `JSONDecoder` handles the snake_case ↔ camelCase mapping via `CodingKeys`
+
+### The API Type Layer
+
+Each server table has a corresponding Swift struct:
+
+```swift
+struct APIEntry: Codable {
+    let id: String
+    let dailyLogId: String
+    let name: String
+    let calories: Double
+    let protein: Double
+    // ... all fields
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, calories, protein
+        case dailyLogId = "daily_log_id"
+        // ... snake_case mappings
+    }
+}
+```
+
+These are **separate from the SwiftData models** intentionally. The API types are thin DTOs — they don't have relationships, they don't have computed properties, and they use `String` for IDs (matching the database `TEXT` primary keys). The SwiftData models use `UUID` for IDs. The translation happens at the boundary.
+
+### Wiring Into Existing Code
+
+The integration pattern is consistent across all mutation points. Here's how a nutrition entry gets synced:
+
+```swift
+// In NutritionStore — the original local-only method
+func log(_ entry: NutritionEntry, to date: Date) {
+    let log = fetchOrCreateLog(for: date)
+    modelContext.insert(entry)
+    entry.dailyLog = log
+    log.entries.append(entry)
+    save()
+
+    // NEW: fire-and-forget sync to server
+    let sync = syncService
+    Task { try? await sync?.createEntry(entry, date: date) }
+}
+```
+
+The `let sync = syncService` capture is deliberate — it avoids capturing `self` in the Task closure, which would create a retain cycle.
+
+For views that don't go through NutritionStore (like Food Bank swipe-to-delete), the pattern is the same — `@Environment(SyncService.self)`:
+
+```swift
+.swipeActions(edge: .trailing, allowsFullSwipe: true) {
+    Button(role: .destructive) {
+        let foodId = food.id
+        modelContext.delete(food)
+        try? modelContext.save()
+        Task { try? await syncService.deleteFood(id: foodId) }
+    } label: {
+        Label("Delete", systemImage: "trash")
+    }
+}
+```
+
+Note the `let foodId = food.id` capture *before* the delete — after `modelContext.delete(food)`, the food object may be invalidated.
+
+### Network Helpers
+
+The HTTP layer is minimal — four generic methods (`get`, `post`, `put`, `delete`) that all funnel through one `execute` method:
+
+```swift
+private func execute(_ request: URLRequest) async throws -> Data {
+    let (data, response): (Data, URLResponse)
+    do {
+        (data, response) = try await session.data(for: request)
+    } catch {
+        let syncErr = SyncError.networkError(error)
+        self.syncError = syncErr
+        throw syncErr
+    }
+
+    guard let httpResponse = response as? HTTPURLResponse else {
+        throw SyncError.invalidResponse
+    }
+
+    guard (200..<300).contains(httpResponse.statusCode) else {
+        let message = (try? JSONDecoder().decode(ServerError.self, from: data))?.error
+            ?? "Unknown error"
+        throw SyncError.serverError(httpResponse.statusCode, message)
+    }
+
+    return data
+}
+```
+
+The `syncError` property is `@Observable`, so any view observing `syncService.syncError` will automatically update if a sync fails.
+
+---
+
+## What I Got Right
+
+1. **The fire-and-forget pattern** is the right call for a personal journal app. The user never waits for network — SwiftData is always authoritative for the current session.
+2. **Separate API types from SwiftData models** keeps the boundary clean. If the API changes, you update the Codable structs — not your data model.
+3. **`file:local.db` fallback** means any developer can run the server locally with `node index.js` — no Turso account needed.
+4. **JSON blobs for micronutrients** match the actual access pattern and avoid a pivot table that would be queried in a way SQLite isn't optimized for.
+5. **`Promise.all()` on the sync endpoint** — running all five queries in parallel instead of sequentially cuts the response time significantly.
+
+## What I Got Wrong (or Left Undone)
+
+1. **No sync-on-launch yet**: The `fetchAll()` method exists but nothing calls it. On first launch after installing on a new device, the user would see an empty journal. The TODO is to call `fetchAll()` in the `.task` modifier and merge server data into SwiftData.
+2. **No retry queue**: If a sync push fails (airplane mode, server down), it's silently dropped. A proper implementation would queue failed mutations and replay them when connectivity returns. `BackgroundTasks` framework with `BGProcessingTask` would be the Apple-sanctioned approach.
+3. **No conflict resolution**: If the user edits an entry on two devices, last-write-wins based on `updated_at` timestamp. This is fine for single-user but would need CRDTs or operational transforms for multi-user.
+4. **`try? await` swallows errors**: The fire-and-forget pattern means sync failures are invisible. A future iteration should surface persistent failures in a banner or settings screen.
+5. **No bulk mutation endpoint**: Deleting a daily log deletes all its entries — each entry gets a separate `DELETE /api/entries/:id` call. A `DELETE /api/daily-logs/:id` with cascade would be more efficient.
+
+---
+
+## Lessons Learned
+
+- **Start with the simplest sync that could work**. Fire-and-forget with no retry is ~100 lines of code. A queue + retry + conflict resolution system is ~1000. Ship the simple version, add complexity when users actually lose data.
+- **JSON blobs in SQLite are fine** when the access pattern is "load all, save all." Don't normalize just because it feels like the right thing to do. Normalize when you need to query *into* the blob.
+- **The API type layer is boilerplate but invaluable**. Writing `CodingKeys` for every field is tedious, but it means the compiler catches every API/model mismatch at build time instead of crashing at runtime.
+- **Capture values before mutating state**. The `let foodId = food.id` before `modelContext.delete(food)` pattern prevents use-after-free bugs. SwiftData objects become invalid after deletion.
+- **Local-first doesn't mean local-only**. The architecture supports adding a full sync-on-launch mechanism without changing any of the write paths. The mutation side and the read-sync side are independent.
