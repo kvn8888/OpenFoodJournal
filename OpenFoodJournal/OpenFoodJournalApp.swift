@@ -1,21 +1,50 @@
-//
-//  OpenFoodJournalApp.swift
-//  OpenFoodJournal
-//
-//  Created by Kevin Chen on 3/19/26.
-//
+// Macros — Food Journaling App
+// AGPL-3.0 License
 
 import SwiftUI
-import CoreData
+import SwiftData
 
 @main
-struct OpenFoodJournalApp: App {
-    let persistenceController = PersistenceController.shared
+struct MacrosApp: App {
+    private let modelContainer: ModelContainer
+    @State private var nutritionStore: NutritionStore
+    @State private var scanService = ScanService()
+    @State private var healthKitService = HealthKitService()
+    @State private var userGoals = UserGoals()
+
+    init() {
+        let isTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        let config = ModelConfiguration(
+            isStoredInMemoryOnly: isTest,
+            cloudKitDatabase: isTest ? .none : .automatic
+        )
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(
+                for: NutritionEntry.self, DailyLog.self,
+                configurations: config
+            )
+        } catch {
+            fatalError("Failed to create ModelContainer: \(error)")
+        }
+        modelContainer = container
+        _nutritionStore = State(initialValue: NutritionStore(modelContext: container.mainContext))
+    }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                .modelContainer(modelContainer)
+                .environment(nutritionStore)
+                .environment(scanService)
+                .environment(healthKitService)
+                .environment(userGoals)
+                .task {
+                    // Request HealthKit auth on first launch if user has previously enabled it
+                    if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
+                        await healthKitService.requestAuthorization()
+                    }
+                }
         }
     }
 }
