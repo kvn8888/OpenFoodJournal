@@ -180,6 +180,23 @@ private extension GeminiNutritionResponse {
             ))
         }
 
+        // Normalize micronutrient keys: if Gemini returns a name we recognize
+        // (e.g. "Vitamin A" or "vitamin_a"), map it to the canonical ID.
+        // Unknown nutrients pass through as-is with their original key.
+        var normalizedMicros: [String: MicronutrientValue] = [:]
+        for (key, value) in (micronutrients ?? [:]) {
+            if let known = KnownMicronutrients.find(key) {
+                // Use canonical ID and ensure the unit matches our reference
+                normalizedMicros[known.id] = MicronutrientValue(
+                    value: value.value,
+                    unit: value.unit == "%" ? known.unit : value.unit
+                )
+            } else {
+                // Unknown nutrient from Gemini — keep as-is
+                normalizedMicros[key] = value
+            }
+        }
+
         return NutritionEntry(
             name: name,
             mealType: .snack, // user selects meal type before confirming
@@ -190,7 +207,7 @@ private extension GeminiNutritionResponse {
             protein: protein,
             carbs: carbs,
             fat: fat,
-            micronutrients: micronutrients ?? [:],
+            micronutrients: normalizedMicros,
             servingSize: servingSize,
             servingsPerContainer: servingsPerContainer,
             brand: brand,
