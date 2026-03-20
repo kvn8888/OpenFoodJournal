@@ -86,6 +86,13 @@ struct EditEntryView: View {
                     }
                 }
 
+                // Serving unit mappings — per-food conversions (e.g. 1 cup = 244g)
+                ServingMappingSection(
+                    mappings: $entry.servingMappings,
+                    servingQuantity: $entry.servingQuantity,
+                    servingUnit: $entry.servingUnit
+                )
+
                 // Save to Food Bank — copies this entry as a reusable food template
                 Section {
                     Button {

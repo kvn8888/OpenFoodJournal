@@ -30,8 +30,18 @@ final class NutritionEntry {
     var micronutrients: [String: MicronutrientValue]
 
     // Serving info
-    var servingSize: String?
+    var servingSize: String?           // Display label (e.g. "1 cup (228g)") — legacy/display
     var servingsPerContainer: Double?
+    var brand: String?                 // Product brand, separate from food name
+
+    // Structured serving — numeric quantity + unit for math/conversions
+    // e.g. servingQuantity = 1.0, servingUnit = "cup"
+    var servingQuantity: Double?
+    var servingUnit: String?
+
+    // Per-food unit mappings — e.g. [{ from: 1 cup, to: 244 g }]
+    // Lets the app convert between volume, mass, and arbitrary units
+    var servingMappings: [ServingMapping]
 
     // Inverse relationship
     var dailyLog: DailyLog?
@@ -50,7 +60,11 @@ final class NutritionEntry {
         fat: Double,
         micronutrients: [String: MicronutrientValue] = [:],
         servingSize: String? = nil,
-        servingsPerContainer: Double? = nil
+        servingsPerContainer: Double? = nil,
+        brand: String? = nil,
+        servingQuantity: Double? = nil,
+        servingUnit: String? = nil,
+        servingMappings: [ServingMapping] = []
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -66,6 +80,10 @@ final class NutritionEntry {
         self.micronutrients = micronutrients
         self.servingSize = servingSize
         self.servingsPerContainer = servingsPerContainer
+        self.brand = brand
+        self.servingQuantity = servingQuantity
+        self.servingUnit = servingUnit
+        self.servingMappings = servingMappings
     }
 }
 

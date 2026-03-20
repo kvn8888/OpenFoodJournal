@@ -21,7 +21,7 @@ struct MacrosApp: App {
         let container: ModelContainer
         do {
             container = try ModelContainer(
-                for: NutritionEntry.self, DailyLog.self, SavedFood.self,
+                for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self,
                 configurations: config
             )
         } catch {

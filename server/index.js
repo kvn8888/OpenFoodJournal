@@ -57,8 +57,12 @@ const LABEL_PROMPT = `You are a nutrition label reader. Analyze this nutrition l
 Return a JSON object with this EXACT structure:
 {
   "name": "<product name if visible, otherwise 'Unknown Product'>",
+  "brand": "<brand name if visible, otherwise null>",
   "confidence": <0.0-1.0 how confident you are in the reading>,
   "serving_size": "<serving size text, e.g. '1 cup (228g)'>",
+  "serving_quantity": <numeric serving amount, e.g. 1.0>,
+  "serving_unit": "<unit string, e.g. 'cup', 'g', 'piece', 'tbsp'>",
+  "serving_weight_grams": <weight of one serving in grams if shown, otherwise null>,
   "servings_per_container": <number or null>,
   "calories": <number>,
   "protein": <grams as number>,
@@ -73,6 +77,9 @@ Return a JSON object with this EXACT structure:
 Rules:
 - Extract EVERY nutrient shown on the label, not just the common ones
 - Use the exact values shown on the label
+- For brand: look for the brand/manufacturer name on the packaging
+- For serving_quantity and serving_unit: parse the serving size into number + unit (e.g. "2 cookies" → quantity: 2, unit: "cookies")
+- For serving_weight_grams: if the label shows weight in grams (e.g. "1 cup (228g)"), extract the gram value as a number
 - For "% Daily Value" only nutrients, convert to actual amounts if possible, otherwise use "%" as unit
 - Nutrient names should be Title Case (e.g. "Saturated Fat", "Vitamin D", "Added Sugars")
 - If a value is 0, still include it
@@ -83,8 +90,12 @@ const FOOD_PHOTO_PROMPT = `You are a nutrition estimation expert. Look at this p
 Return a JSON object with this EXACT structure:
 {
   "name": "<descriptive name of the food/meal>",
+  "brand": "<brand name if recognizable, otherwise null>",
   "confidence": <0.0-1.0 how confident you are in the estimation>,
   "serving_size": "<estimated portion description>",
+  "serving_quantity": <estimated numeric serving amount>,
+  "serving_unit": "<unit string, e.g. 'piece', 'cup', 'bowl', 'plate'>",
+  "serving_weight_grams": <estimated weight in grams>,
   "servings_per_container": 1,
   "calories": <estimated number>,
   "protein": <estimated grams>,
@@ -99,6 +110,7 @@ Return a JSON object with this EXACT structure:
 Rules:
 - Be realistic about portion sizes shown in the image
 - Estimate based on typical nutritional values for the identified food
+- For serving_weight_grams: estimate the total weight of the food portion in grams
 - confidence should be lower than label scans since these are estimates
 - Include at least fiber, sugar, and sodium in micronutrients if you can estimate them
 - Nutrient names should be Title Case`;

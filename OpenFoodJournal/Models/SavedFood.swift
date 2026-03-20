@@ -12,6 +12,7 @@ import SwiftData
 final class SavedFood {
     var id: UUID
     var name: String
+    var brand: String?             // Product brand, separate from name
     var createdAt: Date
 
     // Core macros — always required (same four as NutritionEntry)
@@ -26,8 +27,11 @@ final class SavedFood {
     var micronutrients: [String: MicronutrientValue]
 
     // Serving info
-    var servingSize: String?
+    var servingSize: String?               // Display label (backward compat)
     var servingsPerContainer: Double?
+    var servingQuantity: Double?           // Numeric serving amount (e.g. 1.0)
+    var servingUnit: String?               // Unit (e.g. "cup", "g", "piece")
+    var servingMappings: [ServingMapping]   // Per-food unit conversions
 
     // Optional photo from the original scan
     @Attribute(.externalStorage)
@@ -39,6 +43,7 @@ final class SavedFood {
     init(
         id: UUID = UUID(),
         name: String,
+        brand: String? = nil,
         createdAt: Date = .now,
         calories: Double,
         protein: Double,
@@ -47,11 +52,15 @@ final class SavedFood {
         micronutrients: [String: MicronutrientValue] = [:],
         servingSize: String? = nil,
         servingsPerContainer: Double? = nil,
+        servingQuantity: Double? = nil,
+        servingUnit: String? = nil,
+        servingMappings: [ServingMapping] = [],
         sourceImage: Data? = nil,
         originalScanMode: ScanMode = .manual
     ) {
         self.id = id
         self.name = name
+        self.brand = brand
         self.createdAt = createdAt
         self.calories = calories
         self.protein = protein
@@ -60,6 +69,9 @@ final class SavedFood {
         self.micronutrients = micronutrients
         self.servingSize = servingSize
         self.servingsPerContainer = servingsPerContainer
+        self.servingQuantity = servingQuantity
+        self.servingUnit = servingUnit
+        self.servingMappings = servingMappings
         self.sourceImage = sourceImage
         self.originalScanMode = originalScanMode
     }
@@ -69,10 +81,11 @@ final class SavedFood {
 
 extension SavedFood {
     /// Creates a SavedFood from an existing NutritionEntry (e.g. "Save to Food Bank" button).
-    /// Copies all nutrition data but strips the daily-log relationship.
+    /// Copies all nutrition data including serving mappings, but strips the daily-log relationship.
     convenience init(from entry: NutritionEntry) {
         self.init(
             name: entry.name,
+            brand: entry.brand,
             calories: entry.calories,
             protein: entry.protein,
             carbs: entry.carbs,
@@ -80,6 +93,9 @@ extension SavedFood {
             micronutrients: entry.micronutrients,
             servingSize: entry.servingSize,
             servingsPerContainer: entry.servingsPerContainer,
+            servingQuantity: entry.servingQuantity,
+            servingUnit: entry.servingUnit,
+            servingMappings: entry.servingMappings,
             sourceImage: entry.sourceImage,
             originalScanMode: entry.scanMode
         )
@@ -99,7 +115,11 @@ extension SavedFood {
             fat: fat,
             micronutrients: micronutrients,
             servingSize: servingSize,
-            servingsPerContainer: servingsPerContainer
+            servingsPerContainer: servingsPerContainer,
+            brand: brand,
+            servingQuantity: servingQuantity,
+            servingUnit: servingUnit,
+            servingMappings: servingMappings
         )
     }
 }
