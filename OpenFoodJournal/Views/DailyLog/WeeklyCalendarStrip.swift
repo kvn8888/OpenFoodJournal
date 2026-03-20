@@ -18,12 +18,48 @@ import SwiftData
 // MARK: - Day Cell State
 
 /// Represents the visual state of a single day cell in the strip.
-/// The state determines text color, circle stroke color, and stroke width.
+/// For past days, includes the calorie progress fraction (0.0–1.0+) and a
+/// color derived from how close the user got to their daily goal.
 enum DayCellState {
-    case selected       // The currently active/selected day
-    case pastDefault    // A past day where the user did NOT meet their calorie goal
-    case pastGoalMet    // A past day where the user DID meet their calorie goal
-    case future         // A day in the future (no data yet)
+    case selected(progress: Double)  // The currently active/selected day (may also show progress)
+    case past(progress: Double)      // A past day with logged data
+    case future                      // A day in the future (no data yet)
+
+    /// The progress-based ring color for past and selected days.
+    /// Thresholds:
+    ///   < 50%  → red (significantly under)
+    ///   50–80% → yellow (under target)
+    ///   80–95% → light green (getting close)
+    ///   95–105% → green (goal matched ±5%)
+    ///   105–120% → orange (slightly over)
+    ///   > 120% → purple (significantly over)
+    var ringColor: Color {
+        let pct: Double
+        switch self {
+        case .selected(let p): pct = p
+        case .past(let p):     pct = p
+        case .future:          return .clear
+        }
+
+        switch pct {
+        case ..<0.50:          return .red
+        case 0.50..<0.80:     return .yellow
+        case 0.80..<0.95:     return Color.green.opacity(0.6)
+        case 0.95..<1.05:     return .green
+        case 1.05..<1.20:     return .orange
+        default:              return .purple
+        }
+    }
+
+    /// The fraction (0.0–1.0) of the ring that should be filled.
+    /// Capped at 1.0 so the ring never overflows visually.
+    var progressFraction: Double {
+        switch self {
+        case .selected(let p): return min(p, 1.0)
+        case .past(let p):     return min(p, 1.0)
+        case .future:          return 0
+        }
+    }
 }
 
 // MARK: - WeeklyCalendarStrip
@@ -122,38 +158,38 @@ struct WeeklyCalendarStrip: View {
     }
 
     /// Determines the visual state for a given date in the strip.
-    /// Checks: is it the selected day? Is it in the future? Did the user meet their goal?
+    /// Computes calorie progress as a fraction of the daily goal.
     private func cellState(for date: Date) -> DayCellState {
         let startOfDate = calendar.startOfDay(for: date)
-        let startOfSelected = calendar.startOfDay(for: selectedDate)
-
-        // Selected day always gets the "selected" state
-        if startOfDate == startOfSelected {
-            return .selected
-        }
+        let today = calendar.startOfDay(for: .now)
 
         // Future days (after today) get the dimmed "future" state
-        if startOfDate > calendar.startOfDay(for: .now) {
+        if startOfDate > today {
             return .future
         }
 
-        // Past day — check if the user met their calorie goal
-        if let log = nutritionStore.fetchLog(for: date) {
+        // Calculate calorie progress for this day
+        let progress: Double
+        if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
             let totalCalories = log.entries.reduce(0.0) { $0 + $1.calories }
-            // "Goal met" = logged at least 80% of daily calorie target
-            // (a reasonable threshold so users don't need to hit exactly 100%)
-            if totalCalories >= goals.dailyCalories * 0.8 {
-                return .pastGoalMet
-            }
+            progress = totalCalories / goals.dailyCalories
+        } else {
+            progress = 0
         }
 
-        return .pastDefault
+        let startOfSelected = calendar.startOfDay(for: selectedDate)
+        if startOfDate == startOfSelected {
+            return .selected(progress: progress)
+        }
+
+        return .past(progress: progress)
     }
 }
 
 // MARK: - DayCellView
 
 /// A single day cell in the strip: day abbreviation on top, circled date below.
+/// The circle is a progress ring that fills based on calorie intake vs. goal.
 private struct DayCellView: View {
     let date: Date
     let state: DayCellState
@@ -168,6 +204,12 @@ private struct DayCellView: View {
         date.formatted(.dateTime.day())
     }
 
+    /// Whether this is the selected day (affects text weight and background)
+    private var isSelected: Bool {
+        if case .selected = state { return true }
+        return false
+    }
+
     var body: some View {
         VStack(spacing: 4) {
             // Day abbreviation (top)
@@ -176,14 +218,39 @@ private struct DayCellView: View {
                 .fontWeight(.medium)
                 .foregroundStyle(dayTextColor)
 
-            // Date number inside a circle (bottom)
-            Text(dayNumber)
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundStyle(dateTextColor)
-                .frame(width: 32, height: 32)
-                .background(dateBackground)
-                .overlay(dateCircleOverlay)
+            // Date number inside a progress ring (bottom)
+            ZStack {
+                // Background track — thin gray circle (hidden for future days)
+                if case .future = state {
+                    // No ring for future days
+                } else {
+                    Circle()
+                        .stroke(.secondary.opacity(0.15), lineWidth: 2.5)
+                }
+
+                // Progress ring — fills clockwise from the top based on calorie progress
+                Circle()
+                    .trim(from: 0, to: state.progressFraction)
+                    .stroke(
+                        state.ringColor,
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(-90))  // Start from top (12 o'clock)
+
+                // Filled background for selected day only
+                if isSelected {
+                    Circle()
+                        .fill(.regularMaterial)
+                        .padding(2)
+                }
+
+                // The date number text
+                Text(dayNumber)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .bold : .semibold)
+                    .foregroundStyle(dateTextColor)
+            }
+            .frame(width: 34, height: 34)
         }
         .padding(.vertical, 4)
     }
@@ -194,8 +261,7 @@ private struct DayCellView: View {
     private var dayTextColor: Color {
         switch state {
         case .selected:     return .primary
-        case .pastDefault:  return .secondary
-        case .pastGoalMet:  return .secondary
+        case .past:         return .secondary
         case .future:       return .secondary.opacity(0.4)
         }
     }
@@ -204,36 +270,8 @@ private struct DayCellView: View {
     private var dateTextColor: Color {
         switch state {
         case .selected:     return .primary
-        case .pastDefault:  return .secondary
-        case .pastGoalMet:  return .secondary
+        case .past:         return .secondary
         case .future:       return .secondary.opacity(0.4)
-        }
-    }
-
-    /// Background shape — only the selected day gets a filled white circle
-    @ViewBuilder
-    private var dateBackground: some View {
-        if state == .selected {
-            Circle()
-                .fill(.regularMaterial)
-        }
-    }
-
-    /// Circle overlay — stroke color and width depend on state
-    @ViewBuilder
-    private var dateCircleOverlay: some View {
-        switch state {
-        case .selected:
-            Circle()
-                .stroke(.primary, lineWidth: 2.5)
-        case .pastDefault:
-            Circle()
-                .stroke(.secondary.opacity(0.4), lineWidth: 1)
-        case .pastGoalMet:
-            Circle()
-                .stroke(.green, lineWidth: 1.5)
-        case .future:
-            EmptyView()  // No circle for future days
         }
     }
 }
