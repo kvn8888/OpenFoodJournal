@@ -99,6 +99,8 @@ struct EditEntryView: View {
                         let saved = SavedFood(from: entry)
                         nutritionStore.modelContext.insert(saved)
                         try? nutritionStore.modelContext.save()
+                        let sync = nutritionStore.syncService
+                        Task { try? await sync?.createFood(saved) }
                         withAnimation { savedToBank = true }
                     } label: {
                         Label(
@@ -126,7 +128,7 @@ struct EditEntryView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        nutritionStore.saveChanges()
+                        nutritionStore.saveAndSyncEntry(entry)
                         Task { await healthKit.write(entry) }
                         dismiss()
                     }
