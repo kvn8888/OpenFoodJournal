@@ -1,0 +1,16 @@
+# Dependencies
+server/node_modules/
+
+# Environment files (contain secrets)
+server/.env
+
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+
+# Node
+server/*.log

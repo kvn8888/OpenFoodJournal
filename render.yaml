@@ -1,0 +1,21 @@
+# render.yaml — Render Blueprint (Infrastructure as Code)
+# Deploy with: Dashboard > New > Blueprint > Connect this repo
+# Render reads this file to auto-configure the service.
+
+services:
+  - type: web
+    name: openfoodjournal-proxy
+    runtime: node
+    # Tell Render to deploy from the server/ subdirectory
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    plan: free
+    # Auto-deploy when main branch is pushed
+    autoDeploy: true
+    envVars:
+      # Set this in the Render dashboard (never commit real keys)
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production
