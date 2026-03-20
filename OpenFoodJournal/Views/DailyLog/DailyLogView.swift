@@ -22,8 +22,8 @@ struct DailyLogView: View {
             ZStack(alignment: .bottom) {
                 ScrollView {
                     VStack(spacing: 16) {
-                        // Date selector
-                        DateSelectorView(selectedDate: $selectedDate)
+                        // Weekly calendar strip — shows 7 days with state-driven styling
+                        WeeklyCalendarStrip(selectedDate: $selectedDate)
                             .padding(.horizontal)
 
                         // Macro summary card
@@ -104,72 +104,6 @@ enum DailyLogSheet: Identifiable {
         case .manualEntry: "manualEntry"
         case .editEntry(let e): "edit-\(e.id)"
         }
-    }
-}
-
-// MARK: - Date Selector
-
-private struct DateSelectorView: View {
-    @Binding var selectedDate: Date
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    selectedDate = Calendar.current.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
-                }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 44, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.glass)
-
-            Spacer()
-
-            VStack(spacing: 1) {
-                Text(selectedDate, style: .date)
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                if Calendar.current.isDateInToday(selectedDate) {
-                    Text("Today")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                } else if Calendar.current.isDateInYesterday(selectedDate) {
-                    Text("Yesterday")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .onTapGesture {
-                withAnimation(.spring(duration: 0.3)) {
-                    selectedDate = .now
-                }
-            }
-
-            Spacer()
-
-            Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    let next = Calendar.current.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate
-                    if next <= .now {
-                        selectedDate = next
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 44, height: 36)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.glass)
-            .opacity(Calendar.current.isDateInToday(selectedDate) ? 0.3 : 1)
-            .disabled(Calendar.current.isDateInToday(selectedDate))
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .glassEffect(in: .rect(cornerRadius: 14))
     }
 }
 
