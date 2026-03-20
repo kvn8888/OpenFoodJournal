@@ -77,7 +77,7 @@ final class ScanService {
     /// Base URL of the Render proxy. Override with environment variable in development.
     private let proxyBaseURL: URL = {
         let urlString = Bundle.main.object(forInfoDictionaryKey: "RENDER_PROXY_URL") as? String
-            ?? "https://macros-proxy.onrender.com"
+            ?? "https://openfoodjournal.onrender.com"
         return URL(string: urlString)!
     }()
 
