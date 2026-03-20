@@ -65,6 +65,8 @@ struct DailyLogView: View {
                     presentedSheet = .scan
                 } onManual: {
                     presentedSheet = .manualEntry
+                } onFoodBank: {
+                    presentedSheet = .foodBank
                 }
                 .padding(.bottom, 16)
             }
@@ -86,6 +88,8 @@ struct DailyLogView: View {
                 ManualEntryView(defaultDate: selectedDate)
             case .editEntry(let entry):
                 EditEntryView(entry: entry)
+            case .foodBank:
+                FoodBankView()
             }
         }
     }
@@ -97,12 +101,14 @@ enum DailyLogSheet: Identifiable {
     case scan
     case manualEntry
     case editEntry(NutritionEntry)
+    case foodBank
 
     var id: String {
         switch self {
         case .scan: "scan"
         case .manualEntry: "manualEntry"
         case .editEntry(let e): "edit-\(e.id)"
+        case .foodBank: "foodBank"
         }
     }
 }
@@ -133,6 +139,7 @@ private struct FloatingScanButton: View {
     var namespace: Namespace.ID
     let onScan: () -> Void
     let onManual: () -> Void
+    let onFoodBank: () -> Void
 
     @State private var isExpanded = false
 
@@ -140,6 +147,18 @@ private struct FloatingScanButton: View {
         GlassEffectContainer(spacing: 12) {
             HStack(spacing: 12) {
                 if isExpanded {
+                    Button {
+                        isExpanded = false
+                        onFoodBank()
+                    } label: {
+                        Label("Food Bank", systemImage: "refrigerator")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                    }
+                    .buttonStyle(.glass)
+                    .glassEffectID("foodbank", in: namespace)
+                    .transition(.scale.combined(with: .opacity))
+
                     Button {
                         isExpanded = false
                         onManual()

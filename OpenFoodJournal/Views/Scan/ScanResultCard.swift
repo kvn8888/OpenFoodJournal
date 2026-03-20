@@ -2,14 +2,17 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import SwiftData
 
 /// Slide-up card showing Gemini's parsed nutrition result. All fields are editable before confirming.
 struct ScanResultCard: View {
+    @Environment(NutritionStore.self) private var nutritionStore
     @Bindable var entry: NutritionEntry
     let onConfirm: () -> Void
     let onRetake: () -> Void
 
     @State private var showExtended = false
+    @State private var savedToBank = false  // Tracks whether this scan was saved to food bank
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,14 +95,34 @@ struct ScanResultCard: View {
 
             // Actions
             GlassEffectContainer(spacing: 12) {
-                HStack(spacing: 12) {
-                    Button("Retake", action: onRetake)
-                        .buttonStyle(.glass)
-                        .frame(maxWidth: .infinity)
+                VStack(spacing: 8) {
+                    HStack(spacing: 12) {
+                        Button("Retake", action: onRetake)
+                            .buttonStyle(.glass)
+                            .frame(maxWidth: .infinity)
 
-                    Button("Add to Log", action: onConfirm)
-                        .buttonStyle(.glassProminent)
+                        Button("Add to Log", action: onConfirm)
+                            .buttonStyle(.glassProminent)
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    // Save to Food Bank — saves a copy as a reusable template
+                    Button {
+                        let saved = SavedFood(from: entry)
+                        nutritionStore.modelContext.insert(saved)
+                        try? nutritionStore.modelContext.save()
+                        withAnimation { savedToBank = true }
+                    } label: {
+                        Label(
+                            savedToBank ? "Saved to Food Bank" : "Save to Food Bank",
+                            systemImage: savedToBank ? "checkmark.circle.fill" : "refrigerator"
+                        )
+                        .font(.subheadline)
                         .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(savedToBank)
+                    .tint(savedToBank ? .green : nil)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
