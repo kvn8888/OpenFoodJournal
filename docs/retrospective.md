@@ -694,3 +694,161 @@ The `syncError` property is `@Observable`, so any view observing `syncService.sy
 - **The API type layer is boilerplate but invaluable**. Writing `CodingKeys` for every field is tedious, but it means the compiler catches every API/model mismatch at build time instead of crashing at runtime.
 - **Capture values before mutating state**. The `let foodId = food.id` before `modelContext.delete(food)` pattern prevents use-after-free bugs. SwiftData objects become invalid after deletion.
 - **Local-first doesn't mean local-only**. The architecture supports adding a full sync-on-launch mechanism without changing any of the write paths. The mutation side and the read-sync side are independent.
+
+---
+
+## Adding a Radial FAB, Dual-Model Scanning, and Food Bank Editing
+
+This update tackled four user-facing features in one pass. Here's what happened and what we learned.
+
+### Gemini Model Splitting: Flash for Labels, Pro for Meals
+
+**The problem**: One model (`gemini-3.1-pro-preview`) was handling both nutrition label extraction and food photo estimation. Label scanning is a structured extraction task — it doesn't need deep reasoning. Food photo estimation is a harder problem — you're guessing portion sizes from visual cues, which benefits from extended thinking.
+
+**The solution**: Two model instances in `server/index.js`:
+
+```javascript
+// Fast structured extraction for nutrition labels
+const flashModel = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash-preview-05-20",
+  generationConfig: { responseMimeType: "application/json" },
+});
+
+// High-reasoning model for food photo estimation
+const proModel = genAI.getGenerativeModel({
+  model: "gemini-2.5-pro-preview-06-05",
+  generationConfig: {
+    responseMimeType: "application/json",
+    thinkingConfig: { thinkingBudget: 8192 },
+  },
+});
+```
+
+The `/scan` endpoint picks the model based on the `mode` parameter:
+
+```javascript
+const activeModel = mode === "label" ? flashModel : proModel;
+```
+
+**Why `thinkingBudget: 8192`**: Gemini 2.5 Pro supports "thinking tokens" — internal chain-of-thought reasoning that doesn't show up in the response but improves accuracy on complex tasks. 8192 tokens is enough for the model to reason about portion sizes, ingredient likelihood, and cooking methods without becoming slow. This is the equivalent of asking a nutritionist to "think carefully about this plate of food" before giving their estimate.
+
+**What we got wrong initially**: We considered Gemini 3.1 Pro but settled on 2.5 Pro Preview since it has the `thinkingConfig` support in the Generative AI SDK. The model naming in Gemini's ecosystem is confusing — "3.1" doesn't necessarily mean it's newer or better for this task.
+
+### Auto-Save Scans to Food Bank
+
+**The problem**: After scanning a nutrition label, users had to manually tap "Save to Food Bank" — a separate action from logging the food. Nobody remembered to do this.
+
+**The solution**: When the user confirms a scan result, we now create a `SavedFood` automatically:
+
+```swift
+ScanResultCard(
+    entry: entry,
+    onConfirm: {
+        nutritionStore.log(entry, to: .now)
+
+        // Auto-save to Food Bank so scanned foods are reusable
+        let saved = SavedFood(from: entry)
+        nutritionStore.modelContext.insert(saved)
+        try? nutritionStore.modelContext.save()
+        let sync = nutritionStore.syncService
+        Task { try? await sync?.createFood(saved) }
+
+        dismiss()
+    },
+```
+
+**The key insight**: `SavedFood` already had a `convenience init(from: NutritionEntry)` — the model layer was ready for this. The only code needed was three lines in the confirm callback. Sometimes the best features are the ones where the architecture was already designed for a use case nobody had wired up yet.
+
+### Food Bank Editing with EditFoodSheet
+
+**The problem**: If Gemini returned a weird name like "Mixed Greens Salad Bowl with Chicken" when the user just wanted "Chicken Salad," there was no way to rename it.
+
+**The solution**: A new `EditFoodSheet` view with `@Bindable var food: SavedFood`. The critical design choice:
+
+```swift
+// Local state for text fields (buffered until Save)
+@State private var name: String = ""
+@State private var brand: String = ""
+@State private var calories: String = ""
+```
+
+We buffer text field values in `@State` properties rather than binding directly to the `@Bindable` model. This means:
+1. Cancel actually cancels — the model isn't modified until the user taps Save
+2. Text fields can be validated before committing
+3. No partial writes to SwiftData while the user is mid-edit
+
+The edit sheet is accessed via a swipe-left gesture in the Food Bank list:
+
+```swift
+.swipeActions(edge: .leading) {
+    Button {
+        foodToEdit = food
+    } label: {
+        Label("Edit", systemImage: "pencil")
+    }
+    .tint(.blue)
+}
+```
+
+### The Radial FAB Menu (Drag-to-Action)
+
+This was the biggest UI change. The old design was a glass-styled "Scan" button that expanded horizontally to show "Manual" and "Food Bank" options. The new design is a centered "+" button that reveals four options in an upper semicircle when tapped or dragged.
+
+**The geometry**: Options fan out along an arc from 210° to 330° (with 270° being straight up). This places them naturally above the plus button in a semicircle:
+
+```swift
+private func angleForIndex(_ index: Int, total: Int) -> Double {
+    guard total > 1 else { return 270.0 }
+    let startAngle = 210.0   // Lower-left of arc
+    let endAngle = 330.0     // Lower-right of arc
+    let step = (endAngle - startAngle) / Double(total - 1)
+    return startAngle + step * Double(index)
+}
+
+private func positionForAngle(_ degrees: Double) -> CGPoint {
+    let radians = CGFloat(degrees * .pi / 180)
+    return CGPoint(
+        x: arcRadius * CoreGraphics.cos(radians),
+        y: arcRadius * CoreGraphics.sin(radians)
+    )
+}
+```
+
+**The drag interaction**: Users can either tap to toggle the menu, or drag toward an option. The drag gesture tracks which option is closest to the finger position and highlights it:
+
+```swift
+private func closestItem(to translation: CGSize) -> RadialMenuItem? {
+    for (index, item) in items.enumerated() {
+        let angle = angleForIndex(index, total: items.count)
+        let pos = positionForAngle(angle)
+        let dx = translation.width - pos.x
+        let dy = translation.height - pos.y
+        let dist = sqrt(dx * dx + dy * dy)
+        if dist < activationRadius { /* track closest */ }
+    }
+}
+```
+
+**Build error we hit**: `cos()` and `sin()` are ambiguous in SwiftUI because both `CoreGraphics` (`CGFloat -> CGFloat`) and `_DarwinFoundation1` (`Double -> Double`) provide them. The fix: explicitly call `CoreGraphics.cos(radians)` with a `CGFloat` parameter.
+
+**The plus button follows the drag subtly** (15% of translation) to give physical feedback without leaving its position:
+
+```swift
+dragOffset = CGSize(
+    width: value.translation.width * 0.15,
+    height: value.translation.height * 0.15
+)
+```
+
+### Moving Containers from Tab Bar to Journal
+
+**The change**: Removed the "Containers" tab from `ContentView`'s `TabView` (5 tabs → 4) and added it as an option in the radial menu. `DailyLogSheet` gained a `.containers` case, and the sheet presents `ContainerListView()`.
+
+**Why this works**: Containers are a food-logging action, not a top-level navigation destination. They belong in the same "add food" flow as scanning, manual entry, and the food bank. Reducing tab count from 5 to 4 also keeps the tab bar cleaner.
+
+### Lessons Learned
+
+- **Model the interaction before the UI**: The `RadialMenuItem` struct with `id`, `label`, `icon`, `color`, and `action` made the radial menu composable. Adding a 5th option would be one line of code.
+- **Buffer edits in @State**: Never bind a text field directly to a SwiftData model unless you want every keystroke to trigger a save. Buffer in `@State`, commit on Save.
+- **One model doesn't fit all**: Using a heavyweight reasoning model for structured extraction is wasteful. Match the model to the task — Flash for parsing, Pro for reasoning.
+- **Fix ambiguous math with module qualification**: When `cos()` is ambiguous, `CoreGraphics.cos()` is the answer. This is a recurring issue in SwiftUI projects that import both Foundation and CoreGraphics.
