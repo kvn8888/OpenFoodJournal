@@ -9,6 +9,7 @@ import Observation
 @MainActor
 final class NutritionStore {
     let modelContext: ModelContext
+    var syncService: SyncService?
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -22,6 +23,10 @@ final class NutritionStore {
         entry.dailyLog = log
         log.entries.append(entry)
         save()
+
+        // Fire-and-forget sync to server
+        let sync = syncService
+        Task { try? await sync?.createEntry(entry, date: date) }
     }
 
     // MARK: - Fetch
@@ -55,13 +60,27 @@ final class NutritionStore {
     // MARK: - Delete
 
     func delete(_ entry: NutritionEntry) {
+        let entryId = entry.id
         modelContext.delete(entry)
         save()
+
+        // Fire-and-forget sync to server
+        let sync = syncService
+        Task { try? await sync?.deleteEntry(id: entryId) }
     }
 
     func delete(_ log: DailyLog) {
+        // Delete all entries in this log from the server first
+        let entryIds = log.entries.map(\.id)
         modelContext.delete(log)
         save()
+
+        let sync = syncService
+        Task {
+            for id in entryIds {
+                try? await sync?.deleteEntry(id: id)
+            }
+        }
     }
 
     // MARK: - Export
@@ -122,6 +141,13 @@ final class NutritionStore {
 
     func saveChanges() {
         save()
+    }
+
+    /// Save an entry's edits locally and sync the update to the server
+    func saveAndSyncEntry(_ entry: NutritionEntry) {
+        save()
+        let sync = syncService
+        Task { try? await sync?.updateEntry(entry) }
     }
 
     // MARK: - Micronutrient Aggregation

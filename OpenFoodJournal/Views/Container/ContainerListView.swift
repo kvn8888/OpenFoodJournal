@@ -28,6 +28,7 @@ struct ContainerListView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(SyncService.self) private var syncService
 
     // ── State ─────────────────────────────────────────────────────
     @State private var containerToComplete: TrackedContainer?  // Sheet for entering final weight
@@ -75,7 +76,9 @@ struct ContainerListView: View {
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
+                            let id = activeContainers[index].id
                             modelContext.delete(activeContainers[index])
+                            Task { try? await syncService.deleteContainer(id: id) }
                         }
                         try? modelContext.save()
                     }
@@ -90,7 +93,9 @@ struct ContainerListView: View {
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
+                            let id = completedContainers[index].id
                             modelContext.delete(completedContainers[index])
+                            Task { try? await syncService.deleteContainer(id: id) }
                         }
                         try? modelContext.save()
                     }

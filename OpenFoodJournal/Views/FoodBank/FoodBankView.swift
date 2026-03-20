@@ -11,6 +11,7 @@ struct FoodBankView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(SyncService.self) private var syncService
 
     // ── SwiftData Query: fetches all SavedFood sorted by most recently created ──
     @Query(sort: \SavedFood.createdAt, order: .reverse)
@@ -90,8 +91,10 @@ struct FoodBankView: View {
                 .tint(.primary)  // Keep text colors normal (not blue link style)
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
+                        let foodId = food.id
                         modelContext.delete(food)
                         try? modelContext.save()
+                        Task { try? await syncService.deleteFood(id: foodId) }
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }

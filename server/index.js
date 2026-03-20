@@ -1,6 +1,6 @@
-// OpenFoodJournal — Gemini Proxy Server
-// Accepts food images, sends to Google Gemini for nutrition analysis,
-// and returns structured JSON matching the iOS app's expected format.
+// OpenFoodJournal — Server
+// 1. Gemini proxy: accepts food images → Gemini → structured nutrition JSON
+// 2. REST API: CRUD operations for all entities backed by Turso (libSQL)
 // AGPL-3.0 License
 
 // ── Dependencies ──────────────────────────────────────────────────────
@@ -9,6 +9,9 @@ const multer = require("multer"); // Parses multipart/form-data (image uploads)
 const cors = require("cors"); // Allows cross-origin requests from any client
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require("dotenv").config(); // Loads .env file for local development
+
+const { runMigrations } = require("./db");
+const apiRoutes = require("./routes");
 
 // ── Configuration ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
@@ -214,8 +217,20 @@ app.post("/scan", upload.single("image"), async (req, res) => {
   }
 });
 
+// ── Mount REST API routes ─────────────────────────────────────────────
+app.use("/api", apiRoutes);
+
 // ── Start Server ──────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`OpenFoodJournal proxy listening on port ${PORT}`);
-  console.log(`Gemini model: gemini-3.1-pro-preview`);
-});
+// Run database migrations before accepting requests
+runMigrations()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`OpenFoodJournal server listening on port ${PORT}`);
+      console.log(`Gemini model: gemini-3.1-pro-preview`);
+      console.log(`API routes mounted at /api/*`);
+    });
+  })
+  .catch((err) => {
+    console.error("Failed to run migrations:", err);
+    process.exit(1);
+  });

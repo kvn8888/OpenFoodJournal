@@ -111,6 +111,8 @@ struct ScanResultCard: View {
                         let saved = SavedFood(from: entry)
                         nutritionStore.modelContext.insert(saved)
                         try? nutritionStore.modelContext.save()
+                        let sync = nutritionStore.syncService
+                        Task { try? await sync?.createFood(saved) }
                         withAnimation { savedToBank = true }
                     } label: {
                         Label(
