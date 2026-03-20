@@ -1,9 +1,10 @@
 {
   "images" : [
     {
+      "filename" : "OFJ.png",
       "idiom" : "universal",
       "platform" : "ios",
-      "size" : "1024x1024"
+      "size" : "500x500"
     },
     {
       "appearances" : [
@@ -14,7 +15,7 @@
       ],
       "idiom" : "universal",
       "platform" : "ios",
-      "size" : "1024x1024"
+      "size" : "500x500"
     },
     {
       "appearances" : [
@@ -25,7 +26,7 @@
       ],
       "idiom" : "universal",
       "platform" : "ios",
-      "size" : "1024x1024"
+      "size" : "500x500"
     }
   ],
   "info" : {

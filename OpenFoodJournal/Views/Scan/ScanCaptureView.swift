@@ -121,6 +121,14 @@ struct ScanCaptureView: View {
                         entry: entry,
                         onConfirm: {
                             nutritionStore.log(entry, to: .now)
+
+                            // Auto-save to Food Bank so scanned foods are reusable
+                            let saved = SavedFood(from: entry)
+                            nutritionStore.modelContext.insert(saved)
+                            try? nutritionStore.modelContext.save()
+                            let sync = nutritionStore.syncService
+                            Task { try? await sync?.createFood(saved) }
+
                             dismiss()
                         },
                         onRetake: {
