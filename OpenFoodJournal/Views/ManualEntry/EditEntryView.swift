@@ -14,6 +14,9 @@ struct EditEntryView: View {
 
     @State private var showDeleteConfirm = false
     @State private var showExtended = false
+    @State private var showAddMicro = false
+    @State private var newMicroName = ""
+    @State private var newMicroUnit = "g"
 
     var body: some View {
         NavigationStack {
@@ -51,12 +54,24 @@ struct EditEntryView: View {
 
                 Section {
                     DisclosureGroup("Additional Details", isExpanded: $showExtended) {
-                        OptionalBoundMacroRow(label: "Fiber", unit: "g", value: $entry.fiber)
-                        OptionalBoundMacroRow(label: "Sugar", unit: "g", value: $entry.sugar)
-                        OptionalBoundMacroRow(label: "Sodium", unit: "mg", value: $entry.sodium)
-                        OptionalBoundMacroRow(label: "Cholesterol", unit: "mg", value: $entry.cholesterol)
-                        OptionalBoundMacroRow(label: "Saturated Fat", unit: "g", value: $entry.saturatedFat)
-                        OptionalBoundMacroRow(label: "Trans Fat", unit: "g", value: $entry.transFat)
+                        // Dynamic micronutrient rows — shows whatever the entry has
+                        ForEach(entry.sortedMicronutrientNames, id: \.self) { nutrientName in
+                            if let micro = entry.micronutrients[nutrientName] {
+                                MicronutrientBoundRow(
+                                    label: nutrientName,
+                                    unit: micro.unit,
+                                    entry: entry,
+                                    nutrientName: nutrientName
+                                )
+                            }
+                        }
+
+                        // "Add Micronutrient" button for adding new ones during editing
+                        Button {
+                            showAddMicro = true
+                        } label: {
+                            Label("Add Micronutrient", systemImage: "plus.circle")
+                        }
 
                         HStack {
                             Text("Serving Size")
@@ -106,6 +121,22 @@ struct EditEntryView: View {
             } message: {
                 Text("This cannot be undone.")
             }
+            .alert("Add Micronutrient", isPresented: $showAddMicro) {
+                TextField("Name (e.g. Vitamin A)", text: $newMicroName)
+                TextField("Unit (e.g. mg, mcg)", text: $newMicroUnit)
+                Button("Add") {
+                    let trimmed = newMicroName.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        entry.micronutrients[trimmed] = MicronutrientValue(value: 0, unit: newMicroUnit)
+                    }
+                    newMicroName = ""
+                    newMicroUnit = "g"
+                }
+                Button("Cancel", role: .cancel) {
+                    newMicroName = ""
+                    newMicroUnit = "g"
+                }
+            }
         }
     }
 }
@@ -143,10 +174,13 @@ private struct BoundMacroRow: View {
     }
 }
 
-private struct OptionalBoundMacroRow: View {
+/// Row for editing a micronutrient value on an existing entry.
+/// Reads/writes directly to the entry's micronutrients dictionary.
+private struct MicronutrientBoundRow: View {
     let label: String
     let unit: String
-    @Binding var value: Double?
+    let entry: NutritionEntry
+    let nutrientName: String
 
     @State private var text: String = ""
     @FocusState private var isFocused: Bool
@@ -155,21 +189,29 @@ private struct OptionalBoundMacroRow: View {
         HStack {
             Text(label)
             Spacer()
-            TextField("—", text: $text)
+            TextField("0", text: $text)
                 .keyboardType(.decimalPad)
                 .multilineTextAlignment(.trailing)
                 .focused($isFocused)
                 .frame(width: 80)
-                .onChange(of: text) { _, newVal in value = Double(newVal) }
+                .onChange(of: text) { _, newVal in
+                    if let d = Double(newVal) {
+                        entry.micronutrients[nutrientName] = MicronutrientValue(value: d, unit: unit)
+                    }
+                }
                 .onChange(of: isFocused) { _, focused in
-                    if !focused, let v = value { text = String(format: "%.1f", v) }
+                    if !focused, let micro = entry.micronutrients[nutrientName] {
+                        text = String(format: "%.1f", micro.value)
+                    }
                 }
             Text(unit)
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .leading)
         }
         .onAppear {
-            if let v = value { text = String(format: "%.1f", v) }
+            if let micro = entry.micronutrients[nutrientName] {
+                text = String(format: "%.1f", micro.value)
+            }
         }
     }
 }

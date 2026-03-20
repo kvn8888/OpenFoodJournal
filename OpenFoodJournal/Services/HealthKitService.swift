@@ -76,10 +76,27 @@ final class HealthKitService {
         addSample(.dietaryCarbohydrates, value: entry.carbs, unit: .gram())
         addSample(.dietaryFatTotal, value: entry.fat, unit: .gram())
 
-        if let fiber = entry.fiber { addSample(.dietaryFiber, value: fiber, unit: .gram()) }
-        if let sugar = entry.sugar { addSample(.dietarySugar, value: sugar, unit: .gram()) }
-        if let sodium = entry.sodium { addSample(.dietarySodium, value: sodium, unit: .gramUnit(with: .milli)) }
-        if let cholesterol = entry.cholesterol { addSample(.dietaryCholesterol, value: cholesterol, unit: .gramUnit(with: .milli)) }
+        // Map known micronutrient names to HealthKit identifiers.
+        // Only nutrients with a known HK mapping get written; the rest are stored
+        // in SwiftData only. This mapping grows as we add more HealthKit support.
+        let hkMicroMap: [String: (id: HKQuantityTypeIdentifier, unit: HKUnit)] = [
+            "Fiber":         (.dietaryFiber,       .gram()),
+            "Sugar":         (.dietarySugar,       .gram()),
+            "Sodium":        (.dietarySodium,      .gramUnit(with: .milli)),
+            "Cholesterol":   (.dietaryCholesterol, .gramUnit(with: .milli)),
+            "Saturated Fat": (.dietaryFatSaturated, .gram()),
+            "Vitamin A":     (.dietaryVitaminA,    .gramUnit(with: .micro)),
+            "Vitamin C":     (.dietaryVitaminC,    .gramUnit(with: .milli)),
+            "Calcium":       (.dietaryCalcium,     .gramUnit(with: .milli)),
+            "Iron":          (.dietaryIron,        .gramUnit(with: .milli)),
+            "Potassium":     (.dietaryPotassium,   .gramUnit(with: .milli)),
+        ]
+
+        for (name, micro) in entry.micronutrients {
+            if let mapping = hkMicroMap[name] {
+                addSample(mapping.id, value: micro.value, unit: mapping.unit)
+            }
+        }
 
         do {
             try await store.save(samples)

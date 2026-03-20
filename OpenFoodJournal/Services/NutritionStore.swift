@@ -66,11 +66,25 @@ final class NutritionStore {
 
     // MARK: - Export
 
+    /// Exports all logged entries as CSV. Core macros are always columns;
+    /// micronutrients are collected across all entries and added as dynamic columns.
     func exportCSV() -> String {
         let logs = fetchAllLogs()
-        var rows: [String] = [
-            "Date,Meal,Name,Scan Mode,Confidence,Calories,Protein (g),Carbs (g),Fat (g),Fiber (g),Sugar (g),Sodium (mg)"
-        ]
+
+        // Collect all unique micronutrient names across every entry
+        var allMicroNames = Set<String>()
+        for log in logs {
+            for entry in log.entries {
+                allMicroNames.formUnion(entry.micronutrients.keys)
+            }
+        }
+        let sortedMicroNames = allMicroNames.sorted()
+
+        // Build header: fixed columns + dynamic micro columns
+        var header = ["Date", "Meal", "Name", "Scan Mode", "Confidence",
+                      "Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]
+        header.append(contentsOf: sortedMicroNames)
+        var rows: [String] = [header.map { "\"\($0)\"" }.joined(separator: ",")]
 
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .short
@@ -78,7 +92,7 @@ final class NutritionStore {
         for log in logs {
             for entry in log.entries.sorted(by: { $0.timestamp < $1.timestamp }) {
                 let confidence = entry.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? ""
-                let row = [
+                var fields = [
                     dateFormatter.string(from: log.date),
                     entry.mealType.rawValue,
                     entry.name,
@@ -88,11 +102,16 @@ final class NutritionStore {
                     String(format: "%.1f", entry.protein),
                     String(format: "%.1f", entry.carbs),
                     String(format: "%.1f", entry.fat),
-                    entry.fiber.map { String(format: "%.1f", $0) } ?? "",
-                    entry.sugar.map { String(format: "%.1f", $0) } ?? "",
-                    entry.sodium.map { String(format: "%.1f", $0) } ?? "",
-                ].map { "\"\($0)\"" }.joined(separator: ",")
-                rows.append(row)
+                ]
+                // Append each micronutrient value (or empty if entry doesn't have it)
+                for microName in sortedMicroNames {
+                    if let micro = entry.micronutrients[microName] {
+                        fields.append(String(format: "%.1f %@", micro.value, micro.unit))
+                    } else {
+                        fields.append("")
+                    }
+                }
+                rows.append(fields.map { "\"\($0)\"" }.joined(separator: ","))
             }
         }
 

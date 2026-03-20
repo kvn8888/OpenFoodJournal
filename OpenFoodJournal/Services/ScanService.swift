@@ -27,30 +27,33 @@ enum ScanError: LocalizedError {
 
 // MARK: - API Response Shape
 
+/// Response from the Gemini 3.1 Pro proxy.
+/// Core macros are required fields; micronutrients is a flexible dictionary
+/// that can contain any nutrient Gemini detects (fiber, sodium, Vitamin A, etc.).
+/// Each micronutrient has a value and unit, both filled by Gemini.
 private struct GeminiNutritionResponse: Codable {
     let name: String
     let confidence: Double?
     let servingSize: String?
     let servingsPerContainer: Double?
+
+    // Core macros — always present
     let calories: Double
     let protein: Double
     let carbs: Double
     let fat: Double
-    let fiber: Double?
-    let sugar: Double?
-    let sodium: Double?
-    let cholesterol: Double?
-    let saturatedFat: Double?
-    let transFat: Double?
+
+    // Dynamic micronutrients — Gemini returns whatever it finds on the label/food.
+    // e.g. { "Fiber": { "value": 3.0, "unit": "g" }, "Vitamin A": { "value": 300, "unit": "mcg" } }
+    let micronutrients: [String: MicronutrientValue]?
+
     let scanMode: String?
 
     enum CodingKeys: String, CodingKey {
         case name, confidence, calories, protein, carbs, fat
-        case fiber, sugar, sodium, cholesterol
+        case micronutrients
         case servingSize = "serving_size"
         case servingsPerContainer = "servings_per_container"
-        case saturatedFat = "saturated_fat"
-        case transFat = "trans_fat"
         case scanMode = "scan_mode"
     }
 }
@@ -167,12 +170,7 @@ private extension GeminiNutritionResponse {
             protein: protein,
             carbs: carbs,
             fat: fat,
-            fiber: fiber,
-            sugar: sugar,
-            sodium: sodium,
-            cholesterol: cholesterol,
-            saturatedFat: saturatedFat,
-            transFat: transFat,
+            micronutrients: micronutrients ?? [:],
             servingSize: servingSize,
             servingsPerContainer: servingsPerContainer
         )
