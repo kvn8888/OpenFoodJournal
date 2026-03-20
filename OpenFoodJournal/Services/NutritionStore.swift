@@ -124,6 +124,73 @@ final class NutritionStore {
         save()
     }
 
+    // MARK: - Micronutrient Aggregation
+
+    /// The time period for aggregating micronutrient data
+    enum TimePeriod: String, CaseIterable {
+        case daily = "Today"
+        case weekly = "This Week"
+        case monthly = "This Month"
+    }
+
+    /// Aggregates all micronutrient values across entries in the given time period.
+    /// Returns a dictionary of nutrient ID → total MicronutrientValue.
+    /// For weekly/monthly, the values are per-day averages (total ÷ number of days in period).
+    func aggregateMicronutrients(period: TimePeriod, referenceDate: Date = .now) -> [String: MicronutrientValue] {
+        let calendar = Calendar.current
+        let logs: [DailyLog]
+        let dayCount: Double
+
+        switch period {
+        case .daily:
+            // Just today's log
+            if let log = fetchLog(for: referenceDate) {
+                logs = [log]
+            } else {
+                logs = []
+            }
+            dayCount = 1
+
+        case .weekly:
+            // Last 7 days
+            let start = calendar.date(byAdding: .day, value: -6, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+            dayCount = 7
+
+        case .monthly:
+            // Last 30 days
+            let start = calendar.date(byAdding: .day, value: -29, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+            dayCount = 30
+        }
+
+        // Sum all micronutrient values across all entries in the fetched logs
+        var totals: [String: (value: Double, unit: String)] = [:]
+        for log in logs {
+            for entry in log.entries {
+                for (key, micro) in entry.micronutrients {
+                    if let existing = totals[key] {
+                        totals[key] = (existing.value + micro.value, micro.unit)
+                    } else {
+                        totals[key] = (micro.value, micro.unit)
+                    }
+                }
+            }
+        }
+
+        // For daily view, return raw totals. For weekly/monthly, return daily average.
+        let divisor = period == .daily ? 1.0 : dayCount
+        var result: [String: MicronutrientValue] = [:]
+        for (key, total) in totals {
+            result[key] = MicronutrientValue(
+                value: total.value / divisor,
+                unit: total.unit
+            )
+        }
+
+        return result
+    }
+
     // MARK: - Private
 
     private func fetchOrCreateLog(for date: Date) -> DailyLog {

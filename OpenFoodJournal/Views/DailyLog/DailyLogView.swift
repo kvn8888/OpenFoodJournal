@@ -73,6 +73,13 @@ struct DailyLogView: View {
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        MicronutrientSummaryView()
+                    } label: {
+                        Image(systemName: "list.bullet.clipboard")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Text(selectedDate, style: .date)
                         .font(.caption)

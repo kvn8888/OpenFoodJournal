@@ -69,10 +69,17 @@ Return a JSON object with this EXACT structure:
   "carbs": <grams as number>,
   "fat": <grams as number>,
   "micronutrients": {
-    "<Nutrient Name>": {"value": <number>, "unit": "<g|mg|mcg|IU|%>"},
-    ...include ALL nutrients visible on the label (fiber, sugar, sodium, cholesterol, saturated fat, trans fat, vitamins, minerals, etc.)
+    "<nutrient_id>": {"value": <number>, "unit": "<g|mg|mcg|IU|%>"},
+    ...include ALL nutrients visible on the label
   }
 }
+
+IMPORTANT — Use these canonical nutrient IDs as JSON keys:
+Vitamins: vitamin_a, vitamin_c, vitamin_d, vitamin_e, vitamin_k, thiamin, riboflavin, niacin, pantothenic_acid, vitamin_b6, biotin, folate, vitamin_b12
+Minerals: calcium, iron, magnesium, phosphorus, potassium, sodium, zinc, copper, manganese, selenium, chromium, molybdenum, iodine, chloride
+Other: fiber, added_sugars, cholesterol, saturated_fat, trans_fat
+
+If a nutrient not in this list appears on the label, use a lowercase_snake_case ID for it.
 
 Rules:
 - Extract EVERY nutrient shown on the label, not just the common ones
@@ -81,7 +88,7 @@ Rules:
 - For serving_quantity and serving_unit: parse the serving size into number + unit (e.g. "2 cookies" → quantity: 2, unit: "cookies")
 - For serving_weight_grams: if the label shows weight in grams (e.g. "1 cup (228g)"), extract the gram value as a number
 - For "% Daily Value" only nutrients, convert to actual amounts if possible, otherwise use "%" as unit
-- Nutrient names should be Title Case (e.g. "Saturated Fat", "Vitamin D", "Added Sugars")
+- Use the canonical nutrient IDs listed above as micronutrient keys
 - If a value is 0, still include it
 - confidence should reflect image clarity and how readable the label is`;
 
@@ -102,18 +109,25 @@ Return a JSON object with this EXACT structure:
   "carbs": <estimated grams>,
   "fat": <estimated grams>,
   "micronutrients": {
-    "<Nutrient Name>": {"value": <number>, "unit": "<g|mg|mcg|IU>"},
-    ...include common nutrients you can reasonably estimate (fiber, sugar, sodium, etc.)
+    "<nutrient_id>": {"value": <number>, "unit": "<g|mg|mcg|IU>"},
+    ...include common nutrients you can reasonably estimate
   }
 }
+
+IMPORTANT — Use these canonical nutrient IDs as JSON keys:
+Vitamins: vitamin_a, vitamin_c, vitamin_d, vitamin_e, vitamin_k, thiamin, riboflavin, niacin, pantothenic_acid, vitamin_b6, biotin, folate, vitamin_b12
+Minerals: calcium, iron, magnesium, phosphorus, potassium, sodium, zinc, copper, manganese, selenium, chromium, molybdenum, iodine, chloride
+Other: fiber, added_sugars, cholesterol, saturated_fat, trans_fat
+
+If a nutrient not in this list is relevant, use a lowercase_snake_case ID for it.
 
 Rules:
 - Be realistic about portion sizes shown in the image
 - Estimate based on typical nutritional values for the identified food
 - For serving_weight_grams: estimate the total weight of the food portion in grams
 - confidence should be lower than label scans since these are estimates
-- Include at least fiber, sugar, and sodium in micronutrients if you can estimate them
-- Nutrient names should be Title Case`;
+- Include at least fiber, sodium, cholesterol, saturated_fat in micronutrients if estimable
+- Use the canonical nutrient IDs listed above as micronutrient keys`;
 
 // ── Routes ────────────────────────────────────────────────────────────
 
