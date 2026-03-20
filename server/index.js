@@ -41,7 +41,7 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Use Gemini Pro — fast, multimodal, good at structured extraction
 const model = genAI.getGenerativeModel({
-  model: "gemini-pro-latest",
+  model: "gemini-3.1-pro-preview",
   generationConfig: {
     // Tell Gemini to return valid JSON matching our schema
     responseMimeType: "application/json",
@@ -191,5 +191,5 @@ app.post("/scan", upload.single("image"), async (req, res) => {
 // ── Start Server ──────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`OpenFoodJournal proxy listening on port ${PORT}`);
-  console.log(`Gemini model: gemini-pro-latest`);
+  console.log(`Gemini model: gemini-3.1-pro-preview`);
 });
