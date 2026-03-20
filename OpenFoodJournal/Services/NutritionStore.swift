@@ -8,7 +8,7 @@ import Observation
 @Observable
 @MainActor
 final class NutritionStore {
-    private let modelContext: ModelContext
+    let modelContext: ModelContext
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext

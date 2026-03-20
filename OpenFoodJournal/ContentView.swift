@@ -10,6 +10,9 @@ struct ContentView: View {
             Tab("Journal", systemImage: "book.pages") {
                 DailyLogView()
             }
+            Tab("Food Bank", systemImage: "refrigerator") {
+                FoodBankView()
+            }
             Tab("History", systemImage: "chart.xyaxis.line") {
                 HistoryView()
             }

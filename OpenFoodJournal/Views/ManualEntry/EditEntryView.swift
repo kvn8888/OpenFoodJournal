@@ -17,6 +17,7 @@ struct EditEntryView: View {
     @State private var showAddMicro = false
     @State private var newMicroName = ""
     @State private var newMicroUnit = "g"
+    @State private var savedToBank = false  // Shows checkmark after saving to food bank
 
     var body: some View {
         NavigationStack {
@@ -83,6 +84,23 @@ struct EditEntryView: View {
                             .multilineTextAlignment(.trailing)
                         }
                     }
+                }
+
+                // Save to Food Bank — copies this entry as a reusable food template
+                Section {
+                    Button {
+                        let saved = SavedFood(from: entry)
+                        nutritionStore.modelContext.insert(saved)
+                        try? nutritionStore.modelContext.save()
+                        withAnimation { savedToBank = true }
+                    } label: {
+                        Label(
+                            savedToBank ? "Saved to Food Bank" : "Save to Food Bank",
+                            systemImage: savedToBank ? "checkmark.circle.fill" : "refrigerator"
+                        )
+                    }
+                    .disabled(savedToBank)
+                    .tint(savedToBank ? .green : .accentColor)
                 }
 
                 Section {
