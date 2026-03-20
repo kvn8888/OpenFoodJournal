@@ -11,7 +11,6 @@ struct DailyLogView: View {
     @State private var selectedDate: Date = .now
     @State private var presentedSheet: DailyLogSheet?
     @State private var selectedEntry: NutritionEntry?
-    @Namespace private var namespace
 
     private var log: DailyLog? {
         nutritionStore.fetchLog(for: selectedDate)
@@ -60,15 +59,37 @@ struct DailyLogView: View {
                 }
                 .scrollContentBackground(.hidden)
 
-                // Floating scan button
-                FloatingScanButton(namespace: namespace) {
-                    presentedSheet = .scan
-                } onManual: {
-                    presentedSheet = .manualEntry
-                } onFoodBank: {
-                    presentedSheet = .foodBank
-                }
-                .padding(.bottom, 16)
+                // Radial floating action menu — plus button with drag-to-action options
+                RadialMenuButton(items: [
+                    RadialMenuItem(
+                        id: "foodbank",
+                        label: "Food Bank",
+                        icon: "refrigerator",
+                        color: .purple,
+                        action: { presentedSheet = .foodBank }
+                    ),
+                    RadialMenuItem(
+                        id: "containers",
+                        label: "Containers",
+                        icon: "scalemass",
+                        color: .orange,
+                        action: { presentedSheet = .containers }
+                    ),
+                    RadialMenuItem(
+                        id: "manual",
+                        label: "Manual",
+                        icon: "pencil",
+                        color: .green,
+                        action: { presentedSheet = .manualEntry }
+                    ),
+                    RadialMenuItem(
+                        id: "scan",
+                        label: "Scan",
+                        icon: "camera.fill",
+                        color: .blue,
+                        action: { presentedSheet = .scan }
+                    ),
+                ])
             }
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
@@ -97,6 +118,8 @@ struct DailyLogView: View {
                 EditEntryView(entry: entry)
             case .foodBank:
                 FoodBankView()
+            case .containers:
+                ContainerListView()
             }
         }
     }
@@ -109,6 +132,7 @@ enum DailyLogSheet: Identifiable {
     case manualEntry
     case editEntry(NutritionEntry)
     case foodBank
+    case containers
 
     var id: String {
         switch self {
@@ -116,6 +140,7 @@ enum DailyLogSheet: Identifiable {
         case .manualEntry: "manualEntry"
         case .editEntry(let e): "edit-\(e.id)"
         case .foodBank: "foodBank"
+        case .containers: "containers"
         }
     }
 }
@@ -131,86 +156,12 @@ private struct EmptyLogView: View {
             Text("No meals logged")
                 .font(.title3)
                 .fontWeight(.semibold)
-            Text("Tap the scan button below to log your first meal.")
+            Text("Tap + below to log your first meal.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
         }
-    }
-}
-
-// MARK: - Floating Scan Button
-
-private struct FloatingScanButton: View {
-    var namespace: Namespace.ID
-    let onScan: () -> Void
-    let onManual: () -> Void
-    let onFoodBank: () -> Void
-
-    @State private var isExpanded = false
-
-    var body: some View {
-        GlassEffectContainer(spacing: 12) {
-            HStack(spacing: 12) {
-                if isExpanded {
-                    Button {
-                        isExpanded = false
-                        onFoodBank()
-                    } label: {
-                        Label("Food Bank", systemImage: "refrigerator")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                    .buttonStyle(.glass)
-                    .glassEffectID("foodbank", in: namespace)
-                    .transition(.scale.combined(with: .opacity))
-
-                    Button {
-                        isExpanded = false
-                        onManual()
-                    } label: {
-                        Label("Manual", systemImage: "pencil")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                    }
-                    .buttonStyle(.glass)
-                    .glassEffectID("manual", in: namespace)
-                    .transition(.scale.combined(with: .opacity))
-                }
-
-                // Primary scan button
-                Button {
-                    if isExpanded {
-                        isExpanded = false
-                        onScan()
-                    } else {
-                        withAnimation(.spring(duration: 0.4)) {
-                            isExpanded = true
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: isExpanded ? "camera.fill" : "camera.viewfinder")
-                            .font(.system(size: 20, weight: .semibold))
-                            .contentTransition(.symbolEffect(.replace))
-                        if !isExpanded {
-                            Text("Scan")
-                                .font(.headline)
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .padding(.horizontal, isExpanded ? 16 : 24)
-                    .padding(.vertical, 14)
-                }
-                .buttonStyle(.glassProminent)
-                .glassEffectID("scan", in: namespace)
-            }
-        }
-        .padding(.horizontal, 24)
-        .onTapGesture {} // Absorb taps outside
-        .contentShape(Rectangle())
-        // Collapse on tap elsewhere — handled by background tap
     }
 }
 

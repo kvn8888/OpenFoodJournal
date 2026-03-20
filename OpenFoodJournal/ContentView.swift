@@ -13,9 +13,6 @@ struct ContentView: View {
             Tab("Food Bank", systemImage: "refrigerator") {
                 FoodBankView()
             }
-            Tab("Containers", systemImage: "scalemass") {
-                ContainerListView()
-            }
             Tab("History", systemImage: "chart.xyaxis.line") {
                 HistoryView()
             }

@@ -21,6 +21,7 @@ struct FoodBankView: View {
     @State private var searchText = ""
     @State private var sortOrder: SortOrder = .newest
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
+    @State private var foodToEdit: SavedFood?          // For the edit sheet
     @State private var showDeleteConfirm = false
     @State private var foodToDelete: SavedFood?
 
@@ -64,6 +65,10 @@ struct FoodBankView: View {
             .sheet(item: $selectedFood) { food in
                 LogFoodSheet(food: food)
             }
+            // Sheet to edit a food's name, brand, macros
+            .sheet(item: $foodToEdit) { food in
+                EditFoodSheet(food: food)
+            }
         }
     }
 
@@ -98,6 +103,14 @@ struct FoodBankView: View {
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
+                }
+                .swipeActions(edge: .leading) {
+                    Button {
+                        foodToEdit = food
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .tint(.blue)
                 }
             }
         }

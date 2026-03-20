@@ -42,12 +42,23 @@ const upload = multer({
 // ── Initialize Gemini Client ──────────────────────────────────────────
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// Use Gemini Pro — fast, multimodal, good at structured extraction
-const model = genAI.getGenerativeModel({
-  model: "gemini-3.1-pro-preview",
+// Gemini Flash — fast, good at structured extraction from nutrition labels
+const flashModel = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash-preview-05-20",
   generationConfig: {
-    // Tell Gemini to return valid JSON matching our schema
     responseMimeType: "application/json",
+  },
+});
+
+// Gemini Pro — high-reasoning model for food photo estimation
+// Uses thinking/reasoning for more accurate portion size and nutrient estimates
+const proModel = genAI.getGenerativeModel({
+  model: "gemini-2.5-pro-preview-06-05",
+  generationConfig: {
+    responseMimeType: "application/json",
+    thinkingConfig: {
+      thinkingBudget: 8192,
+    },
   },
 });
 
@@ -156,8 +167,11 @@ app.post("/scan", upload.single("image"), async (req, res) => {
 
     console.log(`[scan] mode=${mode}, size=${req.file.size} bytes, mime=${req.file.mimetype}`);
 
-    // ── Pick the right prompt based on scan mode ──────────────────
+    // ── Pick the right prompt and model based on scan mode ──────
     const prompt = mode === "label" ? LABEL_PROMPT : FOOD_PHOTO_PROMPT;
+    const activeModel = mode === "label" ? flashModel : proModel;
+
+    console.log(`[scan] Using model: ${mode === "label" ? "gemini-flash" : "gemini-pro (thinking)"}`);
 
     // ── Convert uploaded image to the format Gemini expects ───────
     // Gemini needs base64-encoded image data with a MIME type
@@ -169,7 +183,7 @@ app.post("/scan", upload.single("image"), async (req, res) => {
     };
 
     // ── Call Gemini API ───────────────────────────────────────────
-    const result = await model.generateContent([prompt, imagePart]);
+    const result = await activeModel.generateContent([prompt, imagePart]);
     const responseText = result.response.text();
 
     console.log(`[scan] Gemini responded with ${responseText.length} chars`);
@@ -226,7 +240,7 @@ runMigrations()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OpenFoodJournal server listening on port ${PORT}`);
-      console.log(`Gemini model: gemini-3.1-pro-preview`);
+      console.log(`Gemini models: Flash (labels), Pro w/ thinking (food photos)`);
       console.log(`API routes mounted at /api/*`);
     });
   })
