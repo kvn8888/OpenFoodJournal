@@ -7,26 +7,6 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		0EFF12162F6CEA0100CAD003 /* animation-advanced.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12012F6CEA0000CAD003 /* animation-advanced.md */; };
-		0EFF12172F6CEA0100CAD003 /* view-structure.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12122F6CEA0000CAD003 /* view-structure.md */; };
-		0EFF12182F6CEA0100CAD003 /* accessibility-patterns.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12002F6CEA0000CAD003 /* accessibility-patterns.md */; };
-		0EFF12192F6CEA0100CAD003 /* animation-basics.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12022F6CEA0000CAD003 /* animation-basics.md */; };
-		0EFF121A2F6CEA0100CAD003 /* charts-accessibility.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12052F6CEA0000CAD003 /* charts-accessibility.md */; };
-		0EFF121B2F6CEA0100CAD003 /* animation-transitions.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12032F6CEA0000CAD003 /* animation-transitions.md */; };
-		0EFF121C2F6CEA0100CAD003 /* macos-scenes.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120B2F6CEA0000CAD003 /* macos-scenes.md */; };
-		0EFF121D2F6CEA0100CAD003 /* image-optimization.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12062F6CEA0000CAD003 /* image-optimization.md */; };
-		0EFF121E2F6CEA0100CAD003 /* latest-apis.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12072F6CEA0000CAD003 /* latest-apis.md */; };
-		0EFF121F2F6CEA0100CAD003 /* macos-views.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120C2F6CEA0000CAD003 /* macos-views.md */; };
-		0EFF12202F6CEA0100CAD003 /* SKILL.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12142F6CEA0000CAD003 /* SKILL.md */; };
-		0EFF12212F6CEA0100CAD003 /* macos-window-styling.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120D2F6CEA0000CAD003 /* macos-window-styling.md */; };
-		0EFF12222F6CEA0100CAD003 /* charts.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12042F6CEA0000CAD003 /* charts.md */; };
-		0EFF12232F6CEA0100CAD003 /* scroll-patterns.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120F2F6CEA0000CAD003 /* scroll-patterns.md */; };
-		0EFF12242F6CEA0100CAD003 /* liquid-glass.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12092F6CEA0000CAD003 /* liquid-glass.md */; };
-		0EFF12252F6CEA0100CAD003 /* sheet-navigation-patterns.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12102F6CEA0000CAD003 /* sheet-navigation-patterns.md */; };
-		0EFF12262F6CEA0100CAD003 /* performance-patterns.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120E2F6CEA0000CAD003 /* performance-patterns.md */; };
-		0EFF12272F6CEA0100CAD003 /* state-management.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12112F6CEA0000CAD003 /* state-management.md */; };
-		0EFF12282F6CEA0100CAD003 /* layout-best-practices.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF12082F6CEA0000CAD003 /* layout-best-practices.md */; };
-		0EFF12292F6CEA0100CAD003 /* list-patterns.md in Resources */ = {isa = PBXBuildFile; fileRef = 0EFF120A2F6CEA0000CAD003 /* list-patterns.md */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,26 +30,6 @@
 		0EC7C2C72F6CD5D30012BC87 /* OpenFoodJournal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenFoodJournal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0EC7C2D92F6CD5D40012BC87 /* OpenFoodJournalTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenFoodJournalTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0EC7C2E32F6CD5D40012BC87 /* OpenFoodJournalUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenFoodJournalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		0EFF12002F6CEA0000CAD003 /* accessibility-patterns.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "accessibility-patterns.md"; sourceTree = "<group>"; };
-		0EFF12012F6CEA0000CAD003 /* animation-advanced.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "animation-advanced.md"; sourceTree = "<group>"; };
-		0EFF12022F6CEA0000CAD003 /* animation-basics.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "animation-basics.md"; sourceTree = "<group>"; };
-		0EFF12032F6CEA0000CAD003 /* animation-transitions.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "animation-transitions.md"; sourceTree = "<group>"; };
-		0EFF12042F6CEA0000CAD003 /* charts.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = charts.md; sourceTree = "<group>"; };
-		0EFF12052F6CEA0000CAD003 /* charts-accessibility.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "charts-accessibility.md"; sourceTree = "<group>"; };
-		0EFF12062F6CEA0000CAD003 /* image-optimization.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "image-optimization.md"; sourceTree = "<group>"; };
-		0EFF12072F6CEA0000CAD003 /* latest-apis.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "latest-apis.md"; sourceTree = "<group>"; };
-		0EFF12082F6CEA0000CAD003 /* layout-best-practices.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "layout-best-practices.md"; sourceTree = "<group>"; };
-		0EFF12092F6CEA0000CAD003 /* liquid-glass.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "liquid-glass.md"; sourceTree = "<group>"; };
-		0EFF120A2F6CEA0000CAD003 /* list-patterns.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "list-patterns.md"; sourceTree = "<group>"; };
-		0EFF120B2F6CEA0000CAD003 /* macos-scenes.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "macos-scenes.md"; sourceTree = "<group>"; };
-		0EFF120C2F6CEA0000CAD003 /* macos-views.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "macos-views.md"; sourceTree = "<group>"; };
-		0EFF120D2F6CEA0000CAD003 /* macos-window-styling.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "macos-window-styling.md"; sourceTree = "<group>"; };
-		0EFF120E2F6CEA0000CAD003 /* performance-patterns.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "performance-patterns.md"; sourceTree = "<group>"; };
-		0EFF120F2F6CEA0000CAD003 /* scroll-patterns.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "scroll-patterns.md"; sourceTree = "<group>"; };
-		0EFF12102F6CEA0000CAD003 /* sheet-navigation-patterns.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "sheet-navigation-patterns.md"; sourceTree = "<group>"; };
-		0EFF12112F6CEA0000CAD003 /* state-management.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "state-management.md"; sourceTree = "<group>"; };
-		0EFF12122F6CEA0000CAD003 /* view-structure.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = "view-structure.md"; sourceTree = "<group>"; };
-		0EFF12142F6CEA0000CAD003 /* SKILL.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = SKILL.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -122,7 +82,6 @@
 				0EC7C2DC2F6CD5D40012BC87 /* OpenFoodJournalTests */,
 				0EC7C2E62F6CD5D40012BC87 /* OpenFoodJournalUITests */,
 				0EC7C2C82F6CD5D30012BC87 /* Products */,
-				0EFF12152F6CEA0000CAD003 /* swiftui-expert-skill */,
 			);
 			sourceTree = "<group>";
 		};
@@ -134,41 +93,6 @@
 				0EC7C2E32F6CD5D40012BC87 /* OpenFoodJournalUITests.xctest */,
 			);
 			name = Products;
-			sourceTree = "<group>";
-		};
-		0EFF12132F6CEA0000CAD003 /* references */ = {
-			isa = PBXGroup;
-			children = (
-				0EFF12002F6CEA0000CAD003 /* accessibility-patterns.md */,
-				0EFF12012F6CEA0000CAD003 /* animation-advanced.md */,
-				0EFF12022F6CEA0000CAD003 /* animation-basics.md */,
-				0EFF12032F6CEA0000CAD003 /* animation-transitions.md */,
-				0EFF12042F6CEA0000CAD003 /* charts.md */,
-				0EFF12052F6CEA0000CAD003 /* charts-accessibility.md */,
-				0EFF12062F6CEA0000CAD003 /* image-optimization.md */,
-				0EFF12072F6CEA0000CAD003 /* latest-apis.md */,
-				0EFF12082F6CEA0000CAD003 /* layout-best-practices.md */,
-				0EFF12092F6CEA0000CAD003 /* liquid-glass.md */,
-				0EFF120A2F6CEA0000CAD003 /* list-patterns.md */,
-				0EFF120B2F6CEA0000CAD003 /* macos-scenes.md */,
-				0EFF120C2F6CEA0000CAD003 /* macos-views.md */,
-				0EFF120D2F6CEA0000CAD003 /* macos-window-styling.md */,
-				0EFF120E2F6CEA0000CAD003 /* performance-patterns.md */,
-				0EFF120F2F6CEA0000CAD003 /* scroll-patterns.md */,
-				0EFF12102F6CEA0000CAD003 /* sheet-navigation-patterns.md */,
-				0EFF12112F6CEA0000CAD003 /* state-management.md */,
-				0EFF12122F6CEA0000CAD003 /* view-structure.md */,
-			);
-			path = references;
-			sourceTree = "<group>";
-		};
-		0EFF12152F6CEA0000CAD003 /* swiftui-expert-skill */ = {
-			isa = PBXGroup;
-			children = (
-				0EFF12132F6CEA0000CAD003 /* references */,
-				0EFF12142F6CEA0000CAD003 /* SKILL.md */,
-			);
-			path = "swiftui-expert-skill";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -291,26 +215,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				0EFF12162F6CEA0100CAD003 /* animation-advanced.md in Resources */,
-				0EFF12172F6CEA0100CAD003 /* view-structure.md in Resources */,
-				0EFF12182F6CEA0100CAD003 /* accessibility-patterns.md in Resources */,
-				0EFF12192F6CEA0100CAD003 /* animation-basics.md in Resources */,
-				0EFF121A2F6CEA0100CAD003 /* charts-accessibility.md in Resources */,
-				0EFF121B2F6CEA0100CAD003 /* animation-transitions.md in Resources */,
-				0EFF121C2F6CEA0100CAD003 /* macos-scenes.md in Resources */,
-				0EFF121D2F6CEA0100CAD003 /* image-optimization.md in Resources */,
-				0EFF121E2F6CEA0100CAD003 /* latest-apis.md in Resources */,
-				0EFF121F2F6CEA0100CAD003 /* macos-views.md in Resources */,
-				0EFF12202F6CEA0100CAD003 /* SKILL.md in Resources */,
-				0EFF12212F6CEA0100CAD003 /* macos-window-styling.md in Resources */,
-				0EFF12222F6CEA0100CAD003 /* charts.md in Resources */,
-				0EFF12232F6CEA0100CAD003 /* scroll-patterns.md in Resources */,
-				0EFF12242F6CEA0100CAD003 /* liquid-glass.md in Resources */,
-				0EFF12252F6CEA0100CAD003 /* sheet-navigation-patterns.md in Resources */,
-				0EFF12262F6CEA0100CAD003 /* performance-patterns.md in Resources */,
-				0EFF12272F6CEA0100CAD003 /* state-management.md in Resources */,
-				0EFF12282F6CEA0100CAD003 /* layout-best-practices.md in Resources */,
-				0EFF12292F6CEA0100CAD003 /* list-patterns.md in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -497,6 +401,9 @@
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "OpenFoodJournal reads your nutrition data to display your daily intake.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "OpenFoodJournal writes nutrition data to help you track your food intake.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -529,6 +436,9 @@
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "OpenFoodJournal reads your nutrition data to display your daily intake.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "OpenFoodJournal writes nutrition data to help you track your food intake.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

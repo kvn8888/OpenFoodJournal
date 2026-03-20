@@ -11,7 +11,7 @@ extension ModelContainer {
     static var preview: ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try! ModelContainer(
-            for: NutritionEntry.self, DailyLog.self,
+            for: NutritionEntry.self, DailyLog.self, SavedFood.self,
             configurations: config
         )
 
@@ -23,6 +23,11 @@ extension ModelContainer {
         for entry in NutritionEntry.samples {
             context.insert(entry)
             log.entries.append(entry)
+        }
+
+        // Seed food bank with one saved food
+        for food in SavedFood.samples {
+            context.insert(food)
         }
 
         try? context.save()
@@ -43,9 +48,12 @@ extension NutritionEntry {
             protein: 17,
             carbs: 6,
             fat: 0.7,
-            fiber: 0,
-            sugar: 4,
-            sodium: 65,
+            micronutrients: [
+                "Fiber": MicronutrientValue(value: 0, unit: "g"),
+                "Sugar": MicronutrientValue(value: 4, unit: "g"),
+                "Sodium": MicronutrientValue(value: 65, unit: "mg"),
+                "Calcium": MicronutrientValue(value: 200, unit: "mg"),
+            ],
             servingSize: "170g",
             servingsPerContainer: 1
         ),
@@ -58,8 +66,12 @@ extension NutritionEntry {
             protein: 1.1,
             carbs: 21.4,
             fat: 0.5,
-            fiber: 3.6,
-            sugar: 14.7
+            micronutrients: [
+                "Fiber": MicronutrientValue(value: 3.6, unit: "g"),
+                "Sugar": MicronutrientValue(value: 14.7, unit: "g"),
+                "Vitamin C": MicronutrientValue(value: 14.4, unit: "mg"),
+                "Vitamin K": MicronutrientValue(value: 28.6, unit: "mcg"),
+            ]
         ),
         NutritionEntry(
             name: "Chicken Rice Bowl",
@@ -70,7 +82,9 @@ extension NutritionEntry {
             protein: 45,
             carbs: 72,
             fat: 14,
-            sodium: 890
+            micronutrients: [
+                "Sodium": MicronutrientValue(value: 890, unit: "mg"),
+            ]
         ),
         NutritionEntry(
             name: "Protein Bar",
@@ -81,10 +95,13 @@ extension NutritionEntry {
             protein: 20,
             carbs: 22,
             fat: 6,
-            fiber: 5,
-            sugar: 8,
-            sodium: 140,
-            saturatedFat: 2,
+            micronutrients: [
+                "Fiber": MicronutrientValue(value: 5, unit: "g"),
+                "Sugar": MicronutrientValue(value: 8, unit: "g"),
+                "Sodium": MicronutrientValue(value: 140, unit: "mg"),
+                "Saturated Fat": MicronutrientValue(value: 2, unit: "g"),
+                "Iron": MicronutrientValue(value: 4, unit: "mg"),
+            ],
             servingSize: "60g",
             servingsPerContainer: 1
         ),
@@ -100,6 +117,44 @@ extension NutritionEntry {
     ]
 
     static let preview: NutritionEntry = samples[0]
+}
+
+// MARK: - SavedFood Mock Data
+
+extension SavedFood {
+    static let samples: [SavedFood] = [
+        SavedFood(
+            name: "Greek Yogurt (Fage 0%)",
+            calories: 100,
+            protein: 17,
+            carbs: 6,
+            fat: 0.7,
+            micronutrients: [
+                "Calcium": MicronutrientValue(value: 200, unit: "mg"),
+                "Sugar": MicronutrientValue(value: 4, unit: "g"),
+            ],
+            servingSize: "170g",
+            servingsPerContainer: 1,
+            originalScanMode: .label
+        ),
+        SavedFood(
+            name: "Protein Bar (Kirkland)",
+            calories: 200,
+            protein: 20,
+            carbs: 22,
+            fat: 6,
+            micronutrients: [
+                "Fiber": MicronutrientValue(value: 5, unit: "g"),
+                "Sugar": MicronutrientValue(value: 8, unit: "g"),
+                "Iron": MicronutrientValue(value: 4, unit: "mg"),
+            ],
+            servingSize: "60g",
+            servingsPerContainer: 1,
+            originalScanMode: .label
+        ),
+    ]
+
+    static let preview: SavedFood = samples[0]
 }
 
 // MARK: - DailyLog Mock Data

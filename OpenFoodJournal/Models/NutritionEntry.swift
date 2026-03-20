@@ -16,19 +16,20 @@ final class NutritionEntry {
     @Attribute(.externalStorage)
     var sourceImage: Data?
 
-    // Core macros
+    // Core macros — always required
     var calories: Double
     var protein: Double
     var carbs: Double
     var fat: Double
 
-    // Extended macros (populated primarily from label scans)
-    var fiber: Double?
-    var sugar: Double?
-    var sodium: Double?
-    var cholesterol: Double?
-    var saturatedFat: Double?
-    var transFat: Double?
+    // Dynamic micronutrients — flexible key-value store.
+    // Keys are nutrient names (e.g. "Fiber", "Vitamin A", "Sodium").
+    // Values are MicronutrientValue (amount + unit).
+    // SwiftData serializes this as a JSON blob, so new nutrients from Gemini
+    // are added automatically without any schema migration.
+    var micronutrients: [String: MicronutrientValue]
+
+    // Serving info
     var servingSize: String?
     var servingsPerContainer: Double?
 
@@ -47,12 +48,7 @@ final class NutritionEntry {
         protein: Double,
         carbs: Double,
         fat: Double,
-        fiber: Double? = nil,
-        sugar: Double? = nil,
-        sodium: Double? = nil,
-        cholesterol: Double? = nil,
-        saturatedFat: Double? = nil,
-        transFat: Double? = nil,
+        micronutrients: [String: MicronutrientValue] = [:],
         servingSize: String? = nil,
         servingsPerContainer: Double? = nil
     ) {
@@ -67,12 +63,7 @@ final class NutritionEntry {
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
-        self.fiber = fiber
-        self.sugar = sugar
-        self.sodium = sodium
-        self.cholesterol = cholesterol
-        self.saturatedFat = saturatedFat
-        self.transFat = transFat
+        self.micronutrients = micronutrients
         self.servingSize = servingSize
         self.servingsPerContainer = servingsPerContainer
     }
@@ -81,8 +72,24 @@ final class NutritionEntry {
 // MARK: - Convenience
 
 extension NutritionEntry {
+    /// AI confidence as an integer percentage (e.g. 0.97 → 97)
     var confidencePercent: Int? {
         guard let c = confidence else { return nil }
         return Int(c * 100)
+    }
+
+    /// Helper to get a micronutrient value by name, returns nil if not present
+    func micronutrient(_ name: String) -> MicronutrientValue? {
+        micronutrients[name]
+    }
+
+    /// Helper to set a micronutrient value by name
+    func setMicronutrient(_ name: String, value: Double, unit: String) {
+        micronutrients[name] = MicronutrientValue(value: value, unit: unit)
+    }
+
+    /// Sorted micronutrient keys for consistent display order
+    var sortedMicronutrientNames: [String] {
+        micronutrients.keys.sorted()
     }
 }

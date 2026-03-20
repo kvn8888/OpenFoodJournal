@@ -4,9 +4,12 @@
 import SwiftUI
 import SwiftData
 
-// Shared focus field enum — fileprivate so MacroInputRow can access it
+// Shared focus field enum — fileprivate so MacroInputRow can access it.
+// Uses .micronutrient(String) to handle any dynamic nutrient name.
 fileprivate enum ManualEntryField: Hashable {
-    case name, calories, protein, carbs, fat, fiber, sugar, sodium, servingSize
+    case name, calories, protein, carbs, fat
+    case micronutrient(String)  // dynamic: "Fiber", "Sugar", "Sodium", etc.
+    case servingSize
 }
 
 struct ManualEntryView: View {
@@ -24,11 +27,20 @@ struct ManualEntryView: View {
     @State private var fat = ""
     @State private var showExtended = false
 
-    // Extended
-    @State private var fiber = ""
-    @State private var sugar = ""
-    @State private var sodium = ""
+    // Dynamic micronutrient text fields — keyed by nutrient name.
+    // Starts with common ones; user can add more.
+    @State private var micronutrientTexts: [(name: String, unit: String, text: String)] = [
+        ("Fiber", "g", ""),
+        ("Sugar", "g", ""),
+        ("Sodium", "mg", ""),
+    ]
+
     @State private var servingSize = ""
+
+    // State for adding a new micronutrient
+    @State private var showAddMicro = false
+    @State private var newMicroName = ""
+    @State private var newMicroUnit = "g"
 
     @FocusState private var focusedField: ManualEntryField?
 
@@ -66,9 +78,26 @@ struct ManualEntryView: View {
 
                 Section {
                     DisclosureGroup("Additional Details", isExpanded: $showExtended) {
-                        MacroInputRow(label: "Fiber", unit: "g", text: $fiber, field: .fiber, focusedField: $focusedField, nextField: .sugar)
-                        MacroInputRow(label: "Sugar", unit: "g", text: $sugar, field: .sugar, focusedField: $focusedField, nextField: .sodium)
-                        MacroInputRow(label: "Sodium", unit: "mg", text: $sodium, field: .sodium, focusedField: $focusedField, nextField: .servingSize)
+                        // Dynamic micronutrient rows — each one is a text field
+                        ForEach(micronutrientTexts.indices, id: \.self) { index in
+                            MacroInputRow(
+                                label: micronutrientTexts[index].name,
+                                unit: micronutrientTexts[index].unit,
+                                text: $micronutrientTexts[index].text,
+                                field: .micronutrient(micronutrientTexts[index].name),
+                                focusedField: $focusedField,
+                                nextField: index + 1 < micronutrientTexts.count
+                                    ? .micronutrient(micronutrientTexts[index + 1].name)
+                                    : .servingSize
+                            )
+                        }
+
+                        // "Add Micronutrient" button — lets user add any nutrient
+                        Button {
+                            showAddMicro = true
+                        } label: {
+                            Label("Add Micronutrient", systemImage: "plus.circle")
+                        }
 
                         HStack {
                             Text("Serving Size")
@@ -101,6 +130,22 @@ struct ManualEntryView: View {
             .onAppear {
                 focusedField = .name
             }
+            .alert("Add Micronutrient", isPresented: $showAddMicro) {
+                TextField("Name (e.g. Vitamin A)", text: $newMicroName)
+                TextField("Unit (e.g. mg, mcg)", text: $newMicroUnit)
+                Button("Add") {
+                    let trimmed = newMicroName.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        micronutrientTexts.append((name: trimmed, unit: newMicroUnit, text: ""))
+                    }
+                    newMicroName = ""
+                    newMicroUnit = "g"
+                }
+                Button("Cancel", role: .cancel) {
+                    newMicroName = ""
+                    newMicroUnit = "g"
+                }
+            }
         }
     }
 
@@ -111,6 +156,15 @@ struct ManualEntryView: View {
               let fatVal = Double(fat)
         else { return }
 
+        // Build the micronutrients dictionary from the dynamic text fields.
+        // Only includes nutrients the user actually filled in.
+        var micronutrients: [String: MicronutrientValue] = [:]
+        for micro in micronutrientTexts {
+            if let val = Double(micro.text) {
+                micronutrients[micro.name] = MicronutrientValue(value: val, unit: micro.unit)
+            }
+        }
+
         let entry = NutritionEntry(
             name: name.trimmingCharacters(in: .whitespaces),
             mealType: mealType,
@@ -119,9 +173,7 @@ struct ManualEntryView: View {
             protein: proteinVal,
             carbs: carbsVal,
             fat: fatVal,
-            fiber: Double(fiber),
-            sugar: Double(sugar),
-            sodium: Double(sodium),
+            micronutrients: micronutrients,
             servingSize: servingSize.isEmpty ? nil : servingSize
         )
         nutritionStore.log(entry, to: defaultDate)

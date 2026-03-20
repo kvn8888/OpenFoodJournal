@@ -156,18 +156,23 @@ private struct MacroField: View {
 
 // MARK: - ExtendedMacroFields
 
+/// Dynamically renders all micronutrients the entry has.
+/// Since Gemini can return any nutrient, this view iterates the dictionary
+/// rather than hardcoding specific fields.
 private struct ExtendedMacroFields: View {
     @Bindable var entry: NutritionEntry
 
     var body: some View {
         VStack(spacing: 12) {
-            OptionalDoubleField(label: "Fiber", unit: "g", value: $entry.fiber)
-            OptionalDoubleField(label: "Sugar", unit: "g", value: $entry.sugar)
-            OptionalDoubleField(label: "Sodium", unit: "mg", value: $entry.sodium)
-            OptionalDoubleField(label: "Cholesterol", unit: "mg", value: $entry.cholesterol)
-            OptionalDoubleField(label: "Saturated Fat", unit: "g", value: $entry.saturatedFat)
-            OptionalDoubleField(label: "Trans Fat", unit: "g", value: $entry.transFat)
+            // Render each micronutrient as an editable field
+            ForEach(entry.sortedMicronutrientNames, id: \.self) { name in
+                MicronutrientField(
+                    entry: entry,
+                    nutrientName: name
+                )
+            }
 
+            // Serving size (always shown)
             HStack {
                 VStack(alignment: .leading) {
                     Text("Serving Size")
@@ -187,17 +192,22 @@ private struct ExtendedMacroFields: View {
     }
 }
 
-private struct OptionalDoubleField: View {
-    let label: String
-    let unit: String
-    @Binding var value: Double?
+/// Editable field for a single micronutrient in the scan result card.
+/// Reads/writes directly to the entry's micronutrients dictionary.
+private struct MicronutrientField: View {
+    let entry: NutritionEntry
+    let nutrientName: String
 
     @State private var text: String = ""
     @FocusState private var isFocused: Bool
 
+    private var unit: String {
+        entry.micronutrients[nutrientName]?.unit ?? "g"
+    }
+
     var body: some View {
         HStack {
-            Text(label)
+            Text(nutrientName)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -209,11 +219,13 @@ private struct OptionalDoubleField: View {
                     .frame(width: 60)
                     .focused($isFocused)
                     .onChange(of: text) { _, newVal in
-                        value = Double(newVal)
+                        if let d = Double(newVal) {
+                            entry.micronutrients[nutrientName] = MicronutrientValue(value: d, unit: unit)
+                        }
                     }
                     .onChange(of: isFocused) { _, focused in
-                        if !focused, let v = value {
-                            text = String(format: "%.1f", v)
+                        if !focused, let micro = entry.micronutrients[nutrientName] {
+                            text = String(format: "%.1f", micro.value)
                         }
                     }
                 Text(unit)
@@ -222,7 +234,9 @@ private struct OptionalDoubleField: View {
             }
         }
         .onAppear {
-            if let v = value { text = String(format: "%.1f", v) }
+            if let micro = entry.micronutrients[nutrientName] {
+                text = String(format: "%.1f", micro.value)
+            }
         }
     }
 }
