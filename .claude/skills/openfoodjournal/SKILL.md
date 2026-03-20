@@ -24,13 +24,14 @@ This is the single source of truth for any LLM agent working on this project. Re
 
 ```
 MacrosApp (creates ModelContainer + 5 @Observable services)
-  └─ ContentView (5-tab TabView)
-       ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, FAB)
-       ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list)
-       ├─ Containers tab → ContainerListView (active/completed container tracking)
+  └─ ContentView (4-tab TabView)
+       ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
+       ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit)
        ├─ History tab → HistoryView (date picker, MacroChartView, day detail)
        └─ Settings tab → SettingsView (goals, health, data export)
 ```
+
+**Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.
 
 **Service injection**: All services (`NutritionStore`, `ScanService`, `SyncService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`.
 
@@ -69,10 +70,12 @@ See [references/views.md](references/views.md) for detailed view hierarchy and n
 ```
 User taps Scan → CameraController (AVCaptureSession) → JPEG
   → ScanService.scan(image, mode) → multipart POST to /scan
-  → Gemini 2.5 Flash → GeminiNutritionResponse
-  → NutritionEntry (NOT inserted yet)
+  → Label mode: Gemini 2.5 Flash (fast structured extraction)
+  → Food photo mode: Gemini 2.5 Pro w/ thinkingBudget:8192 (high reasoning)
+  → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
   → ScanResultCard (editable) → User taps "Add to Log"
   → NutritionStore.log(entry, to: date) → SwiftData insert
+  → Auto-creates SavedFood in Food Bank + syncs to Turso
   → HealthKitService.write(entry) if enabled
 ```
 
