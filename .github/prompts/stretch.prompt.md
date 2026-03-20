@@ -14,4 +14,4 @@ Session defaults:
 - When you discover durable repo facts or workflow changes, update the project skill and relevant docs during the same session.
 - If a code or config change would leave `.claude/skills/openfoodjournal/SKILL.md`, `.claude/skills/`, `.github/agents/`, `.github/prompts/`, or relevant `docs/` retrospectives inconsistent, update them in the same change set.
 - When the work is substantial, create a retrospective with the retrospective skill, and revise that retrospective later if subsequent fixes change the story.
-- End every response with the available question/check-in tool unless the user explicitly ends the session.
+- End every response with `vscode_askQuestions` unless the user explicitly ends the session.
