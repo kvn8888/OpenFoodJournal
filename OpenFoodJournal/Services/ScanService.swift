@@ -33,8 +33,12 @@ enum ScanError: LocalizedError {
 /// Each micronutrient has a value and unit, both filled by Gemini.
 private struct GeminiNutritionResponse: Codable {
     let name: String
+    let brand: String?
     let confidence: Double?
     let servingSize: String?
+    let servingQuantity: Double?
+    let servingUnit: String?
+    let servingWeightGrams: Double?
     let servingsPerContainer: Double?
 
     // Core macros — always present
@@ -44,15 +48,17 @@ private struct GeminiNutritionResponse: Codable {
     let fat: Double
 
     // Dynamic micronutrients — Gemini returns whatever it finds on the label/food.
-    // e.g. { "Fiber": { "value": 3.0, "unit": "g" }, "Vitamin A": { "value": 300, "unit": "mcg" } }
     let micronutrients: [String: MicronutrientValue]?
 
     let scanMode: String?
 
     enum CodingKeys: String, CodingKey {
-        case name, confidence, calories, protein, carbs, fat
+        case name, brand, confidence, calories, protein, carbs, fat
         case micronutrients
         case servingSize = "serving_size"
+        case servingQuantity = "serving_quantity"
+        case servingUnit = "serving_unit"
+        case servingWeightGrams = "serving_weight_grams"
         case servingsPerContainer = "servings_per_container"
         case scanMode = "scan_mode"
     }
@@ -160,7 +166,21 @@ final class ScanService {
 
 private extension GeminiNutritionResponse {
     func toNutritionEntry(mode: ScanMode, imageData: Data) -> NutritionEntry {
-        NutritionEntry(
+        // Build serving mappings if Gemini returned both a unit and gram weight
+        // e.g. serving_unit = "cup", serving_weight_grams = 228
+        // → mapping: { 1 cup = 228 g }
+        var mappings: [ServingMapping] = []
+        if let qty = servingQuantity,
+           let unit = servingUnit,
+           let grams = servingWeightGrams,
+           unit.lowercased() != "g" {
+            mappings.append(ServingMapping(
+                from: ServingAmount(value: qty, unit: unit),
+                to: ServingAmount(value: grams, unit: "g")
+            ))
+        }
+
+        return NutritionEntry(
             name: name,
             mealType: .snack, // user selects meal type before confirming
             scanMode: mode,
@@ -172,7 +192,11 @@ private extension GeminiNutritionResponse {
             fat: fat,
             micronutrients: micronutrients ?? [:],
             servingSize: servingSize,
-            servingsPerContainer: servingsPerContainer
+            servingsPerContainer: servingsPerContainer,
+            brand: brand,
+            servingQuantity: servingQuantity,
+            servingUnit: servingUnit,
+            servingMappings: mappings
         )
     }
 }
