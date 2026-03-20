@@ -13,11 +13,11 @@ This is the single source of truth for any LLM agent working on this project. Re
 |-----|-------|
 | Platform | iOS 26.2+ (iPhone) |
 | UI Framework | SwiftUI + Liquid Glass (no `#available` gating needed) |
-| Data Layer | SwiftData (`@Model`), CloudKit sync via `.automatic` |
+| Data Layer | SwiftData (`@Model`) local cache, Turso (libSQL) cloud primary |
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle ID | `k3vnc.OpenFoodJournal` |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
-| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini 2.5 Flash) |
+| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini proxy + Turso REST API) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
 ## Architecture Overview
@@ -32,7 +32,7 @@ MacrosApp (creates ModelContainer + 5 @Observable services)
        └─ Settings tab → SettingsView (goals, health, data export)
 ```
 
-**Service injection**: All four services (`NutritionStore`, `ScanService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`.
+**Service injection**: All services (`NutritionStore`, `ScanService`, `SyncService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`.
 
 **Sheet management**: `DailyLogView` uses a single `DailyLogSheet` enum with `.sheet(item:)` — never multiple booleans.
 
@@ -54,7 +54,8 @@ See [references/models.md](references/models.md) for full property lists.
 
 See [references/services.md](references/services.md) for full API contracts.
 
-- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`.
+- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations.
+- **`SyncService`** — `@Observable @MainActor`. Handles all HTTP communication with the Turso-backed REST API at `/api/*`. Typed API models (`APIEntry`, `APIFood`, `APIContainer`, `APIGoals`, `SyncResponse`). Fire-and-forget pattern: local SwiftData write first, then async sync to server. Injected into views via `@Environment(SyncService.self)`.
 - **`ScanService`** — Multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
 - **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
@@ -74,6 +75,35 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
   → NutritionStore.log(entry, to: date) → SwiftData insert
   → HealthKitService.write(entry) if enabled
 ```
+
+## Turso Sync Architecture
+
+```
+iOS App (SwiftData local cache)
+  ←→ SyncService (URLSession, fire-and-forget)
+  ←→ Express Proxy (server/index.js, server/routes.js)
+  ←→ Turso (libSQL, server/db.js)
+```
+
+**Strategy**: Local-first, server sync. SwiftData writes happen immediately for UI responsiveness. SyncService fires async tasks to push changes to the server. Failures are silently caught (`try?`) — the local state is always authoritative for the current session.
+
+**Server tables**: `daily_logs`, `nutrition_entries`, `saved_foods`, `tracked_containers`, `user_goals` — schema in `server/db.js`.
+
+**API endpoints** (mounted at `/api`):
+- `GET /api/sync?since=ISO_TIMESTAMP` — Full or incremental data pull
+- `POST/GET/PUT/DELETE /api/entries`, `/api/foods`, `/api/containers`
+- `GET/PUT /api/goals`
+- Entries auto-create their parent `daily_log` on POST
+
+**Sync integration points** — every view that creates/updates/deletes data has a corresponding `syncService` call:
+- `NutritionStore`: entry log/delete/edit
+- `EditEntryView`, `ScanResultCard`: SavedFood creation
+- `FoodBankView`: SavedFood deletion
+- `ContainerListView`: container deletion
+- `NewContainerSheet`: container creation + food mapping update
+- `CompleteContainerSheet`: container completion
+
+**Environment vars** (Render): `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (falls back to `file:local.db` for dev)
 
 ## Known Gotchas
 
@@ -104,10 +134,13 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
 - App structure complete: all models, services, and views implemented
 - 5-tab layout: Journal, Food Bank, Containers, History, Settings
 - Builds successfully with `xcodebuild` (generic/platform=iOS)
-- Render proxy deployed at `openfoodjournal.onrender.com` (Gemini 2.5 Flash proxy in `server/` subdirectory)
+- Render proxy deployed at `openfoodjournal.onrender.com` (Gemini proxy + Turso REST API)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight → derived nutrition logged
 - Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
 - WeeklyCalendarStrip with progress rings on DailyLogView
+- Comprehensive micronutrient tracking: 30 FDA nutrients with daily values, summary view with progress bars
+- Turso DB integration: server-side schema + REST API complete, iOS SyncService with fire-and-forget mutations
 - Entitlements configured: Camera, HealthKit privacy descriptions in Info.plist
 - No unit tests beyond Xcode template stubs
+- **TODO**: Deploy server with Turso env vars on Render, implement full sync-on-launch to populate local cache from server
