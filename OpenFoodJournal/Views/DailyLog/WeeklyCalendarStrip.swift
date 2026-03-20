@@ -278,10 +278,19 @@ private struct DayCellView: View {
 
 // MARK: - Preview
 
+/// A simple wrapper view that provides the required environment objects for previewing.
+private struct CalendarStripPreview: View {
+    @State private var date = Date.now
+
+    var body: some View {
+        WeeklyCalendarStrip(selectedDate: $date)
+            .padding()
+            .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
+            .environment(UserGoals())
+    }
+}
+
 #Preview {
-    @Previewable @State var date = Date.now
-    WeeklyCalendarStrip(selectedDate: $date)
-        .padding()
-        .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
-        .environment(UserGoals())
+    CalendarStripPreview()
+        .modelContainer(.preview)
 }
