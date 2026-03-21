@@ -7,6 +7,7 @@ import SwiftData
 struct SettingsView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(SyncService.self) private var syncService
     @Environment(UserGoals.self) private var goals
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
@@ -57,17 +58,29 @@ struct SettingsView: View {
                     }
 
                     HStack {
-                        Label("iCloud Sync", systemImage: "icloud")
+                        Label("Server Sync", systemImage: "arrow.triangle.2.circlepath")
                         Spacer()
-                        Text("Automatic")
-                            .foregroundStyle(.secondary)
+                        if let lastSync = syncService.lastSyncDate {
+                            Text(lastSync, style: .relative)
+                                .foregroundStyle(.secondary)
+                            + Text(" ago")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("Never")
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
                 // MARK: Data
                 Section("Data") {
-                    Toggle(isOn: $retainSourceImages) {
-                        Label("Save scan photos", systemImage: "photo.on.rectangle")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle(isOn: $retainSourceImages) {
+                            Label("Keep original scan photos", systemImage: "photo.on.rectangle")
+                        }
+                        Text("Stores the camera image on each scanned entry. Disabling saves storage but you won't be able to review the original label.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     Button {
@@ -115,5 +128,6 @@ struct SettingsView: View {
     SettingsView()
         .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
         .environment(HealthKitService())
+        .environment(SyncService())
         .environment(UserGoals())
 }

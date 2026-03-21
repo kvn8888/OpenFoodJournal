@@ -25,16 +25,12 @@ struct FoodBankView: View {
     @State private var sortOrder: SortOrder = .newest
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
     @State private var foodToEdit: SavedFood?          // For the edit sheet
-    @State private var showDeleteConfirm = false
-    @State private var foodToDelete: SavedFood?
 
-    // Cached, stable array for the ForEach — updated only when allFoods, searchText,
-    // or sortOrder actually change. Avoids new-array-identity on every body evaluation,
-    // which would force a full ForEach re-diff and can stutter mid-swipe if a background
-    // @Query update fires during gesture tracking.
-    @State private var displayedFoods: [SavedFood] = []
-
-    private func applyFilter() -> [SavedFood] {
+    // ── Computed: filter + sort the foods based on search text ────
+    // Filters by name (case-insensitive) so users can quickly find a food.
+    // Safe to compute here because the result is never held in @State — SwiftData
+    // @Model objects must stay owned by the ModelContext, not captured in @State.
+    private var filteredFoods: [SavedFood] {
         let filtered = searchText.isEmpty
             ? allFoods
             : allFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
@@ -62,12 +58,6 @@ struct FoodBankView: View {
             }
             .navigationTitle("Food Bank")
             .searchable(text: $searchText, prompt: "Search saved foods")
-            // Recompute only when the underlying data or user inputs actually change,
-            // not on every body evaluation — keeps the ForEach identity stable during swipes.
-            .onAppear { displayedFoods = applyFilter() }
-            .onChange(of: allFoods) { displayedFoods = applyFilter() }
-            .onChange(of: searchText) { displayedFoods = applyFilter() }
-            .onChange(of: sortOrder) { displayedFoods = applyFilter() }
             .toolbar {
                 // Sort picker in the toolbar
                 ToolbarItem(placement: .topBarTrailing) {
@@ -93,13 +83,13 @@ struct FoodBankView: View {
         List {
             // Show result count when searching
             if !searchText.isEmpty {
-                Text("\(displayedFoods.count) result\(displayedFoods.count == 1 ? "" : "s")")
+                Text("\(filteredFoods.count) result\(filteredFoods.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)
             }
 
-            ForEach(displayedFoods) { food in
+            ForEach(filteredFoods) { food in
                 // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
                 // makes DailyLogView swipes silky smooth.
                 //
@@ -116,24 +106,14 @@ struct FoodBankView: View {
                     SavedFoodRowView(food: food)
                 }
                 .buttonStyle(.plain)
-                // Trailing swipe (left) — Edit is the first/light action, Delete requires more swipe
-                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                    // Edit: opens the name/brand/macro editor
+                // Trailing swipe (left) — Edit only; delete lives inside EditFoodSheet
+                .swipeActions(edge: .trailing) {
                     Button {
                         foodToEdit = food
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
                     .tint(.blue)
-                    // Delete: destructive second action (deeper swipe required)
-                    Button(role: .destructive) {
-                        let foodId = food.id
-                        modelContext.delete(food)
-                        try? modelContext.save()
-                        Task { try? await syncService.deleteFood(id: foodId) }
-                    } label: {
-                        Label("Delete", systemImage: "trash")
-                    }
                 }
                 // Leading swipe (right) — quick-add shortcut opens the same LogFoodSheet as tapping
                 .swipeActions(edge: .leading) {

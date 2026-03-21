@@ -24,6 +24,7 @@ struct EditFoodSheet: View {
     @State private var carbs: String = ""
     @State private var fat: String = ""
     @State private var servingSize: String = ""
+    @State private var showDeleteConfirm = false
 
     var body: some View {
         NavigationStack {
@@ -46,6 +47,31 @@ struct EditFoodSheet: View {
                 Section("Serving") {
                     TextField("Serving size (e.g. 1 cup, 170g)", text: $servingSize)
                 }
+
+                // Danger zone — delete is intentionally buried here, not on the swipe action
+                Section {
+                    Button(role: .destructive) {
+                        showDeleteConfirm = true
+                    } label: {
+                        Label("Delete from Food Bank", systemImage: "trash")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+            }
+            .confirmationDialog(
+                "Delete \(food.name)?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) {
+                    let foodId = food.id
+                    modelContext.delete(food)
+                    try? modelContext.save()
+                    Task { try? await syncService.deleteFood(id: foodId) }
+                    dismiss()
+                }
+            } message: {
+                Text("This food will be removed from your Food Bank. Journal entries that used it won't be affected.")
             }
             .navigationTitle("Edit Food")
             .navigationBarTitleDisplayMode(.inline)

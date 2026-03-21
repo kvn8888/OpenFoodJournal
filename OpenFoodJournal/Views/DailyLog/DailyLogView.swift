@@ -33,10 +33,10 @@ struct DailyLogView: View {
                         .listRowSeparator(.hidden)
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
 
-                    // Macro summary card — tap to view micronutrient details
+                    // Macro summary card — tap to view full nutrition details
                     MacroSummaryBar(log: log, goals: goals)
                         .background {
-                            NavigationLink("", destination: MicronutrientSummaryView())
+                            NavigationLink("", destination: NutritionDetailView())
                                 .opacity(0)
                         }
                         .listRowBackground(Color.clear)

@@ -1,69 +1,116 @@
-// OpenFoodJournal — MicronutrientSummaryView
-// A glanceable list of all micronutrients with progress bars showing
-// consumed vs. FDA daily value. Supports daily, weekly, and monthly views.
+// OpenFoodJournal — NutritionDetailView
+// Unified nutrition view showing macros summary + micronutrient progress bars.
+// Supports daily, weekly, and monthly averaging.
 //
-// Design: Each nutrient row shows:
-//   [Name] ───────[progress bar]─────── [consumed / daily value]
+// Layout:
+//   [Period picker: Daily | Weekly | Monthly]
+//   [Macro summary cards: Cal / Protein / Carbs / Fat]
+//   [Micronutrient sections with progress bars vs FDA daily value]
 //
-// Common nutrients (sodium, fiber, calcium, iron, etc.) are always visible.
-// Uncommon nutrients are collapsed under a "Show More" toggle.
-// Unknown nutrients from Gemini appear in a separate "Other" section.
 // AGPL-3.0 License
 
 import SwiftUI
 
-struct MicronutrientSummaryView: View {
+struct NutritionDetailView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(UserGoals.self) private var goals
 
     // ── State ─────────────────────────────────────────────────────
     @State private var selectedPeriod: NutritionStore.TimePeriod = .daily
     @State private var showUncommon = false     // Toggle for less-common nutrients
     @State private var aggregated: [String: MicronutrientValue] = [:]
+    @State private var macroTotals: (cal: Double, protein: Double, carbs: Double, fat: Double) = (0, 0, 0, 0)
+    @State private var selectedMacro: NutrientKind.MacroType?
 
     var body: some View {
-        NavigationStack {
-            List {
-                // Time period picker at the top
+        List {
+            // Time period picker at the top
+            Section {
+                Picker("Period", selection: $selectedPeriod) {
+                    ForEach(NutritionStore.TimePeriod.allCases, id: \.self) { period in
+                        Text(period.rawValue).tag(period)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets())
+            }
+
+            // Subtitle explaining the view for weekly/monthly
+            if selectedPeriod != .daily {
                 Section {
-                    Picker("Period", selection: $selectedPeriod) {
-                        ForEach(NutritionStore.TimePeriod.allCases, id: \.self) { period in
-                            Text(period.rawValue).tag(period)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                    Text("Showing daily average over \(selectedPeriod == .weekly ? "7" : "30") days")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
                 }
-
-                // Subtitle explaining the view for weekly/monthly
-                if selectedPeriod != .daily {
-                    Section {
-                        Text("Showing daily average over \(selectedPeriod == .weekly ? "7" : "30") days")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .listRowBackground(Color.clear)
-                    }
-                }
-
-                // Common nutrients — always visible
-                commonNutrientsSections
-
-                // Uncommon nutrients — expandable
-                uncommonNutrientsSection
-
-                // Unknown nutrients from Gemini not in our known list
-                unknownNutrientsSection
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Micronutrients")
-            .onChange(of: selectedPeriod) { _, _ in
-                refreshData()
-            }
-            .onAppear {
-                refreshData()
-            }
+
+            // Macro summary cards
+            macroSummarySection
+
+            // Common nutrients — always visible
+            commonNutrientsSections
+
+            // Uncommon nutrients — expandable
+            uncommonNutrientsSection
+
+            // Unknown nutrients from Gemini not in our known list
+            unknownNutrientsSection
         }
+        .listStyle(.insetGrouped)
+        .navigationTitle("Nutrition")
+        .navigationDestination(item: $selectedMacro) { macro in
+            NutrientBreakdownView(macro: macro, period: selectedPeriod)
+        }
+        .onChange(of: selectedPeriod) { _, _ in
+            refreshData()
+        }
+        .onAppear {
+            refreshData()
+        }
+    }
+
+    // MARK: - Macro Summary
+
+    private var macroSummarySection: some View {
+        Section("Macros") {
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                macroCard(.calories, value: macroTotals.cal, goal: Double(goals.dailyCalories), color: .orange)
+                macroCard(.protein, value: macroTotals.protein, goal: Double(goals.dailyProtein), color: .blue)
+                macroCard(.carbs, value: macroTotals.carbs, goal: Double(goals.dailyCarbs), color: .green)
+                macroCard(.fat, value: macroTotals.fat, goal: Double(goals.dailyFat), color: .yellow)
+            }
+            .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+            .listRowBackground(Color.clear)
+        }
+    }
+
+    private func macroCard(_ macro: NutrientKind.MacroType, value: Double, goal: Double, color: Color) -> some View {
+        Button {
+            selectedMacro = macro
+        } label: {
+            VStack(spacing: 4) {
+                Text("\(Int(value))")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundStyle(color)
+                Text(macro.unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(macro.rawValue)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if goal > 0 {
+                    ProgressView(value: min(value / goal, 1.0))
+                        .tint(color)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Common Nutrients (grouped by category)
@@ -76,10 +123,14 @@ struct MicronutrientSummaryView: View {
             if !nutrients.isEmpty {
                 Section(category.rawValue) {
                     ForEach(nutrients) { nutrient in
-                        NutrientProgressRow(
-                            nutrient: nutrient,
-                            consumed: aggregated[nutrient.id]
-                        )
+                        NavigationLink {
+                            NutrientBreakdownView(nutrient: nutrient, period: selectedPeriod)
+                        } label: {
+                            NutrientProgressRow(
+                                nutrient: nutrient,
+                                consumed: aggregated[nutrient.id]
+                            )
+                        }
                     }
                 }
             }
@@ -103,10 +154,14 @@ struct MicronutrientSummaryView: View {
                             .padding(.top, 4)
 
                         ForEach(nutrients) { nutrient in
-                            NutrientProgressRow(
-                                nutrient: nutrient,
-                                consumed: aggregated[nutrient.id]
-                            )
+                            NavigationLink {
+                                NutrientBreakdownView(nutrient: nutrient, period: selectedPeriod)
+                            } label: {
+                                NutrientProgressRow(
+                                    nutrient: nutrient,
+                                    consumed: aggregated[nutrient.id]
+                                )
+                            }
                         }
                     }
                 }
@@ -145,6 +200,7 @@ struct MicronutrientSummaryView: View {
 
     private func refreshData() {
         aggregated = nutritionStore.aggregateMicronutrients(period: selectedPeriod)
+        macroTotals = nutritionStore.aggregateMacros(period: selectedPeriod)
     }
 }
 

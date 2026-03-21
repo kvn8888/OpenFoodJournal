@@ -430,6 +430,68 @@ final class NutritionStore {
         return result
     }
 
+    /// Aggregates macro totals across entries in the given time period.
+    /// For weekly/monthly returns daily averages.
+    func aggregateMacros(period: TimePeriod, referenceDate: Date = .now) -> (cal: Double, protein: Double, carbs: Double, fat: Double) {
+        let calendar = Calendar.current
+        let logs: [DailyLog]
+        let dayCount: Double
+
+        switch period {
+        case .daily:
+            if let log = fetchLog(for: referenceDate) {
+                logs = [log]
+            } else {
+                logs = []
+            }
+            dayCount = 1
+        case .weekly:
+            let start = calendar.date(byAdding: .day, value: -6, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+            dayCount = 7
+        case .monthly:
+            let start = calendar.date(byAdding: .day, value: -29, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+            dayCount = 30
+        }
+
+        var cal = 0.0, protein = 0.0, carbs = 0.0, fat = 0.0
+        for log in logs {
+            for entry in log.entries {
+                cal += entry.calories
+                protein += entry.protein
+                carbs += entry.carbs
+                fat += entry.fat
+            }
+        }
+
+        let divisor = period == .daily ? 1.0 : dayCount
+        return (cal / divisor, protein / divisor, carbs / divisor, fat / divisor)
+    }
+
+    /// Returns all entries within the given time period, for per-food breakdowns.
+    func entriesForPeriod(_ period: TimePeriod, referenceDate: Date = .now) -> [NutritionEntry] {
+        let calendar = Calendar.current
+        let logs: [DailyLog]
+
+        switch period {
+        case .daily:
+            if let log = fetchLog(for: referenceDate) {
+                logs = [log]
+            } else {
+                logs = []
+            }
+        case .weekly:
+            let start = calendar.date(byAdding: .day, value: -6, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+        case .monthly:
+            let start = calendar.date(byAdding: .day, value: -29, to: referenceDate) ?? referenceDate
+            logs = fetchLogs(from: start, to: referenceDate)
+        }
+
+        return logs.flatMap(\.entries)
+    }
+
     // MARK: - Private
 
     private func fetchOrCreateLog(for date: Date) -> DailyLog {
