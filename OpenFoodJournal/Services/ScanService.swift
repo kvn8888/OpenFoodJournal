@@ -77,6 +77,8 @@ final class ScanService {
 
     var isScanning = false
     var error: ScanError?
+    /// Holds the result of a background scan until the user confirms/dismisses it
+    var pendingResult: NutritionEntry?
 
     // MARK: Configuration
 
@@ -95,6 +97,19 @@ final class ScanService {
     }()
 
     // MARK: - Scan
+
+    /// Kicks off a scan in the background. The caller can dismiss immediately.
+    /// Result lands in `pendingResult`; errors land in `error`.
+    func scanInBackground(image: UIImage, mode: ScanMode) {
+        Task { @MainActor in
+            do {
+                let entry = try await scan(image: image, mode: mode)
+                pendingResult = entry
+            } catch {
+                // error is already set via the scan() method
+            }
+        }
+    }
 
     /// Sends a captured image to the Render proxy and returns a NutritionEntry.
     /// The entry is NOT inserted into SwiftData — caller should review and confirm.

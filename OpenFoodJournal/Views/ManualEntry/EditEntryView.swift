@@ -89,6 +89,35 @@ struct EditEntryView: View {
                             ))
                             .multilineTextAlignment(.trailing)
                         }
+
+                        // Serving quantity — numeric amount (e.g. 1.0, 0.5)
+                        HStack {
+                            Text("Quantity")
+                            Spacer()
+                            TextField("1", text: Binding(
+                                get: {
+                                    if let q = entry.servingQuantity {
+                                        return String(format: q.truncatingRemainder(dividingBy: 1) == 0 ? "%.0f" : "%.1f", q)
+                                    }
+                                    return ""
+                                },
+                                set: { entry.servingQuantity = Double($0) }
+                            ))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        }
+
+                        // Serving unit — e.g. cup, g, oz
+                        HStack {
+                            Text("Unit")
+                            Spacer()
+                            TextField("e.g. cup, g, oz", text: Binding(
+                                get: { entry.servingUnit ?? "" },
+                                set: { entry.servingUnit = $0.isEmpty ? nil : $0 }
+                            ))
+                            .multilineTextAlignment(.trailing)
+                        }
                     }
                 }
 

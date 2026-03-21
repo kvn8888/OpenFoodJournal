@@ -24,6 +24,29 @@ struct MealSectionView: View {
                         EntryRowView(entry: entry, onDelete: { onDelete(entry) })
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        // Edit — opens the full edit sheet
+                        Button {
+                            onSelect(entry)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+
+                        // Quick info — shows macros inline
+                        Button {} label: {
+                            Label("\(Int(entry.calories)) kcal • P\(Int(entry.protein))g C\(Int(entry.carbs))g F\(Int(entry.fat))g", systemImage: "info.circle")
+                        }
+                        .disabled(true)
+
+                        Divider()
+
+                        // Delete
+                        Button(role: .destructive) {
+                            onDelete(entry)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                 }
             } header: {
                 HStack {
