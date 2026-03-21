@@ -60,30 +60,33 @@ struct RadialMenuButton: View {
                     .transition(.opacity)
             }
 
-            // The menu items, positioned along the arc
-            ZStack {
-                // Each item gets an angle along the upper semicircle
-                ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                    let angle = angleForIndex(index, total: items.count)
-                    let position = positionForAngle(angle)
-                    let isHighlighted = highlightedID == item.id
+            // GlassEffectContainer merges all glass circles when closed (offset 0,0),
+            // and splits them apart as they animate to their arc positions on open.
+            GlassEffectContainer(spacing: 16) {
+                ZStack {
+                    // Each item gets an angle along the upper semicircle
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        let angle = angleForIndex(index, total: items.count)
+                        let position = positionForAngle(angle)
+                        let isHighlighted = highlightedID == item.id
 
-                    optionBubble(item: item, isHighlighted: isHighlighted)
-                        .offset(x: isOpen ? position.x : 0,
-                                y: isOpen ? position.y : 0)
-                        .scaleEffect(isOpen ? (isHighlighted ? 1.15 : 1.0) : 0.3)
-                        .opacity(isOpen ? 1.0 : 0.0)
-                        .animation(
-                            .spring(duration: 0.4, bounce: 0.3)
-                            .delay(isOpen ? Double(index) * 0.04 : 0),
-                            value: isOpen
-                        )
-                        .animation(.spring(duration: 0.2), value: isHighlighted)
+                        optionBubble(item: item, isHighlighted: isHighlighted)
+                            .offset(x: isOpen ? position.x : 0,
+                                    y: isOpen ? position.y : 0)
+                            .scaleEffect(isOpen ? (isHighlighted ? 1.15 : 1.0) : 1.0)
+                            .opacity(isOpen ? 1.0 : 0.0)
+                            .animation(
+                                .spring(duration: 0.4, bounce: 0.3)
+                                .delay(isOpen ? Double(index) * 0.04 : 0),
+                                value: isOpen
+                            )
+                            .animation(.spring(duration: 0.2), value: isHighlighted)
+                    }
+
+                    // The central plus button
+                    plusButton
                 }
             }
-
-            // The central plus button
-            plusButton
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 24)
@@ -93,16 +96,13 @@ struct RadialMenuButton: View {
 
     /// The main circular plus button. Tap to toggle, or drag to interact with options.
     private var plusButton: some View {
-        Circle()
-            .fill(.ultraThinMaterial)
-            .overlay {
-                Image(systemName: "plus")
-                    .font(.system(size: 28, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .rotationEffect(.degrees(isOpen ? 45 : 0))
-            }
+        Image(systemName: "plus")
+            .font(.system(size: 28, weight: .bold))
+            .foregroundStyle(.primary)
+            .rotationEffect(.degrees(isOpen ? 45 : 0))
+            .animation(.spring(duration: 0.3), value: isOpen)
             .frame(width: plusSize, height: plusSize)
-            .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+            .glassEffect(in: .circle)
             .offset(dragOffset)
             .gesture(dragGesture)
             .simultaneousGesture(tapGesture)
@@ -115,23 +115,23 @@ struct RadialMenuButton: View {
     /// A single option circle with icon and label.
     private func optionBubble(item: RadialMenuItem, isHighlighted: Bool) -> some View {
         VStack(spacing: 6) {
-            // Icon circle
-            Circle()
-                .fill(isHighlighted ? item.color : Color(.systemGray5))
-                .overlay {
-                    Image(systemName: item.icon)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isHighlighted ? .white : .primary)
-                }
+            // Icon circle — glass tints to item color when highlighted
+            Image(systemName: item.icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(isHighlighted ? item.color : .primary)
                 .frame(width: optionSize, height: optionSize)
-                .shadow(color: isHighlighted ? item.color.opacity(0.4) : .clear,
-                        radius: 12, y: 2)
+                .glassEffect(
+                    isHighlighted ? .regular.tint(item.color.opacity(0.35)) : .regular,
+                    in: .circle
+                )
 
-            // Label (only visible when menu is open)
+            // Label fades in after the glass split animation completes
             Text(item.label)
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
+                .opacity(isOpen ? 1.0 : 0.0)
+                .animation(.easeIn(duration: 0.2).delay(isOpen ? 0.25 : 0), value: isOpen)
         }
     }
 

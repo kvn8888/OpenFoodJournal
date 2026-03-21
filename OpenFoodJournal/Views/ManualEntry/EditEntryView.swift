@@ -4,7 +4,9 @@
 import SwiftUI
 import SwiftData
 
-/// Edit an existing log entry.
+/// Edit a logged entry — adjust serving quantity, unit, and meal type.
+/// Core macros are read-only here; edit the food itself in Food Bank.
+/// Macros scale proportionally when the user changes quantity or unit.
 struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
@@ -13,147 +15,84 @@ struct EditEntryView: View {
     @Bindable var entry: NutritionEntry
 
     @State private var showDeleteConfirm = false
-    @State private var showExtended = false
-    @State private var showAddMicro = false
-    @State private var newMicroName = ""
-    @State private var newMicroUnit = "g"
-    @State private var savedToBank = false  // Shows checkmark after saving to food bank
+
+    // Editable serving quantity — initialized from the entry's current value
+    @State private var quantity: Double
+
+    // Text backing for the quantity field (avoids cursor-jump issues with Double binding)
+    @State private var quantityText: String
+
+    // Editable unit — picker populated from the entry's serving mappings
+    @State private var selectedUnit: String
+
+    // Snapshot of the entry's macros/quantity/unit at the time the view opens.
+    // These never change during editing — they're the baseline for scaling.
+    private let baseCalories: Double
+    private let baseProtein: Double
+    private let baseCarbs: Double
+    private let baseFat: Double
+    private let baseQuantity: Double
+    private let baseUnit: String
+
+    init(entry: NutritionEntry) {
+        self.entry = entry
+        let qty = entry.servingQuantity ?? 1.0
+        let unit = entry.servingUnit ?? "serving"
+        _quantity = State(initialValue: qty)
+        _quantityText = State(initialValue: qty.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
+        _selectedUnit = State(initialValue: unit)
+        self.baseCalories = entry.calories
+        self.baseProtein = entry.protein
+        self.baseCarbs = entry.carbs
+        self.baseFat = entry.fat
+        self.baseQuantity = max(qty, 0.01) // avoid division by zero
+        self.baseUnit = unit
+    }
+
+    // MARK: - Computed helpers
+
+    /// All unique units the user can pick from (current unit + all mapping endpoints)
+    private var availableUnits: [String] {
+        var units = Set<String>()
+        units.insert(baseUnit) // always include the original unit
+        for mapping in entry.servingMappings {
+            units.insert(mapping.from.unit)
+            units.insert(mapping.to.unit)
+        }
+        return units.sorted()
+    }
+
+    /// Conversion factor: how many selectedUnit equal 1 baseUnit.
+    /// e.g. if baseUnit is "cup" and selectedUnit is "g", and mapping says 1 cup = 244 g,
+    /// then unitFactor = 244.0. Falls back to 1.0 if no mapping exists.
+    private var unitFactor: Double {
+        if selectedUnit == baseUnit { return 1.0 }
+        return conversionFactor(from: baseUnit, to: selectedUnit) ?? 1.0
+    }
+
+    /// Macros per 1 base-unit (e.g. calories per 1 cup)
+    private var calPerBaseUnit: Double { baseCalories / baseQuantity }
+    private var proPerBaseUnit: Double { baseProtein / baseQuantity }
+    private var carbPerBaseUnit: Double { baseCarbs / baseQuantity }
+    private var fatPerBaseUnit: Double { baseFat / baseQuantity }
+
+    /// Scaled macros for the current quantity and unit selection.
+    /// Formula: (macros per base-unit) / unitFactor * quantity
+    /// This correctly handles both quantity changes and unit conversions.
+    private var displayCalories: Double { calPerBaseUnit / unitFactor * quantity }
+    private var displayProtein: Double { proPerBaseUnit / unitFactor * quantity }
+    private var displayCarbs: Double { carbPerBaseUnit / unitFactor * quantity }
+    private var displayFat: Double { fatPerBaseUnit / unitFactor * quantity }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Food Info") {
-                    TextField("Food name", text: $entry.name)
-
-                    // Brand field — editable, shows placeholder if not set
-                    TextField("Brand (optional)", text: Binding(
-                        get: { entry.brand ?? "" },
-                        set: { entry.brand = $0.isEmpty ? nil : $0 }
-                    ))
-
-                    Picker("Meal", selection: $entry.mealType) {
-                        ForEach(MealType.allCases) { type in
-                            Label(type.rawValue, systemImage: type.systemImage)
-                                .tag(type)
-                        }
-                    }
-
-                    if let pct = entry.confidencePercent {
-                        HStack {
-                            Label(
-                                entry.scanMode == .label ? "Scanned from label" : "Estimated from photo",
-                                systemImage: entry.scanMode == .label ? "barcode.viewfinder" : "camera.viewfinder"
-                            )
-                            Spacer()
-                            Text("\(pct)%")
-                                .foregroundStyle(.secondary)
-                        }
-                        .foregroundStyle(entry.scanMode == .label ? .teal : .orange)
-                    }
-                }
-
-                Section("Core Macros") {
-                    BoundMacroRow(label: "Calories", unit: "kcal", value: $entry.calories)
-                    BoundMacroRow(label: "Protein", unit: "g", value: $entry.protein)
-                    BoundMacroRow(label: "Carbs", unit: "g", value: $entry.carbs)
-                    BoundMacroRow(label: "Fat", unit: "g", value: $entry.fat)
-                }
-
-                Section {
-                    DisclosureGroup("Additional Details", isExpanded: $showExtended) {
-                        // Dynamic micronutrient rows — shows whatever the entry has
-                        ForEach(entry.sortedMicronutrientNames, id: \.self) { nutrientName in
-                            if let micro = entry.micronutrients[nutrientName] {
-                                MicronutrientBoundRow(
-                                    label: nutrientName,
-                                    unit: micro.unit,
-                                    entry: entry,
-                                    nutrientName: nutrientName
-                                )
-                            }
-                        }
-
-                        // "Add Micronutrient" button for adding new ones during editing
-                        Button {
-                            showAddMicro = true
-                        } label: {
-                            Label("Add Micronutrient", systemImage: "plus.circle")
-                        }
-
-                        HStack {
-                            Text("Serving Size")
-                            Spacer()
-                            TextField("e.g. 170g", text: Binding(
-                                get: { entry.servingSize ?? "" },
-                                set: { entry.servingSize = $0.isEmpty ? nil : $0 }
-                            ))
-                            .multilineTextAlignment(.trailing)
-                        }
-
-                        // Serving quantity — numeric amount (e.g. 1.0, 0.5)
-                        HStack {
-                            Text("Quantity")
-                            Spacer()
-                            TextField("1", text: Binding(
-                                get: {
-                                    if let q = entry.servingQuantity {
-                                        return String(format: q.truncatingRemainder(dividingBy: 1) == 0 ? "%.0f" : "%.1f", q)
-                                    }
-                                    return ""
-                                },
-                                set: { entry.servingQuantity = Double($0) }
-                            ))
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 80)
-                        }
-
-                        // Serving unit — e.g. cup, g, oz
-                        HStack {
-                            Text("Unit")
-                            Spacer()
-                            TextField("e.g. cup, g, oz", text: Binding(
-                                get: { entry.servingUnit ?? "" },
-                                set: { entry.servingUnit = $0.isEmpty ? nil : $0 }
-                            ))
-                            .multilineTextAlignment(.trailing)
-                        }
-                    }
-                }
-
-                // Serving unit mappings — per-food conversions (e.g. 1 cup = 244g)
-                ServingMappingSection(
-                    mappings: $entry.servingMappings,
-                    servingQuantity: $entry.servingQuantity,
-                    servingUnit: $entry.servingUnit
-                )
-
-                // Save to Food Bank — copies this entry as a reusable food template
-                Section {
-                    Button {
-                        let saved = SavedFood(from: entry)
-                        nutritionStore.modelContext.insert(saved)
-                        try? nutritionStore.modelContext.save()
-                        let sync = nutritionStore.syncService
-                        Task { try? await sync?.createFood(saved) }
-                        withAnimation { savedToBank = true }
-                    } label: {
-                        Label(
-                            savedToBank ? "Saved to Food Bank" : "Save to Food Bank",
-                            systemImage: savedToBank ? "checkmark.circle.fill" : "refrigerator"
-                        )
-                    }
-                    .disabled(savedToBank)
-                    .tint(savedToBank ? .green : .accentColor)
-                }
-
-                Section {
-                    Button(role: .destructive) {
-                        showDeleteConfirm = true
-                    } label: {
-                        Label("Delete Entry", systemImage: "trash")
-                    }
-                }
+                foodInfoSection
+                mealSection
+                servingSection
+                nutritionSection
+                deleteSection
             }
             .navigationTitle("Edit Entry")
             .navigationBarTitleDisplayMode(.inline)
@@ -163,6 +102,14 @@ struct EditEntryView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        // Write the scaled macros back to the entry
+                        entry.calories = displayCalories
+                        entry.protein = displayProtein
+                        entry.carbs = displayCarbs
+                        entry.fat = displayFat
+                        entry.servingQuantity = quantity
+                        entry.servingUnit = selectedUnit
+
                         nutritionStore.saveAndSyncEntry(entry)
                         Task { await healthKit.write(entry) }
                         dismiss()
@@ -183,97 +130,150 @@ struct EditEntryView: View {
             } message: {
                 Text("This cannot be undone.")
             }
-            .alert("Add Micronutrient", isPresented: $showAddMicro) {
-                TextField("Name (e.g. Vitamin A)", text: $newMicroName)
-                TextField("Unit (e.g. mg, mcg)", text: $newMicroUnit)
-                Button("Add") {
-                    let trimmed = newMicroName.trimmingCharacters(in: .whitespaces)
-                    if !trimmed.isEmpty {
-                        entry.micronutrients[trimmed] = MicronutrientValue(value: 0, unit: newMicroUnit)
-                    }
-                    newMicroName = ""
-                    newMicroUnit = "g"
-                }
-                Button("Cancel", role: .cancel) {
-                    newMicroName = ""
-                    newMicroUnit = "g"
+            // When the user picks a different unit, auto-convert the quantity
+            // so the total food amount stays the same (e.g. 2 cups → 488 g)
+            .onChange(of: selectedUnit) { oldUnit, newUnit in
+                if let factor = conversionFactor(from: oldUnit, to: newUnit) {
+                    quantity *= factor
                 }
             }
         }
     }
+
+    // MARK: - Form sections (extracted to help the Swift type checker)
+
+    /// Food name, brand, and scan confidence — all read-only
+    private var foodInfoSection: some View {
+        Section {
+            if let brand = entry.brand, !brand.isEmpty {
+                Text(brand)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Text(entry.name)
+                .font(.headline)
+
+            if let pct = entry.confidencePercent {
+                HStack {
+                    Label(
+                        entry.scanMode == .label ? "Scanned from label" : "Estimated from photo",
+                        systemImage: entry.scanMode == .label ? "barcode.viewfinder" : "camera.viewfinder"
+                    )
+                    Spacer()
+                    Text("\(pct)%")
+                        .foregroundStyle(.secondary)
+                }
+                .foregroundStyle(entry.scanMode == .label ? .teal : .orange)
+            }
+        }
+    }
+
+    /// Meal type picker
+    private var mealSection: some View {
+        Section {
+            Picker("Meal", selection: $entry.mealType) {
+                ForEach(MealType.allCases) { type in
+                    Label(type.rawValue, systemImage: type.systemImage)
+                        .tag(type)
+                }
+            }
+        }
+    }
+
+    /// Quantity text field and unit picker
+    private var servingSection: some View {
+        Section("Serving") {
+            HStack {
+                Text("Quantity")
+                Spacer()
+                TextField("1", text: $quantityText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                    .onChange(of: quantityText) { _, newVal in
+                        if let val = Double(newVal), val > 0 {
+                            quantity = val
+                        }
+                    }
+            }
+
+            if availableUnits.count > 1 {
+                Picker("Unit", selection: $selectedUnit) {
+                    ForEach(availableUnits, id: \.self) { unit in
+                        Text(unit).tag(unit)
+                    }
+                }
+            } else {
+                HStack {
+                    Text("Unit")
+                    Spacer()
+                    Text(selectedUnit)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    /// Read-only macros scaled by the current serving selection
+    private var nutritionSection: some View {
+        Section("Nutrition") {
+            MacroDisplayRow(label: "Calories", value: displayCalories, unit: "kcal")
+            MacroDisplayRow(label: "Protein", value: displayProtein, unit: "g")
+            MacroDisplayRow(label: "Carbs", value: displayCarbs, unit: "g")
+            MacroDisplayRow(label: "Fat", value: displayFat, unit: "g")
+        }
+    }
+
+    /// Delete entry button
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                showDeleteConfirm = true
+            } label: {
+                Label("Delete Entry", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: - Unit conversion
+
+    /// Returns how many `toUnit` equal 1 `fromUnit` using the entry's serving mappings.
+    /// e.g. if mapping says 1 cup = 244 g, then conversionFactor(from: "cup", to: "g") = 244.
+    /// Checks both directions (from→to and to→from) of each mapping.
+    private func conversionFactor(from fromUnit: String, to toUnit: String) -> Double? {
+        if fromUnit == toUnit { return 1.0 }
+        for mapping in entry.servingMappings {
+            // Direct match: mapping.from → mapping.to
+            if mapping.from.unit == fromUnit && mapping.to.unit == toUnit {
+                return mapping.to.value / mapping.from.value
+            }
+            // Reverse match: mapping.to → mapping.from
+            if mapping.to.unit == fromUnit && mapping.from.unit == toUnit {
+                return mapping.from.value / mapping.to.value
+            }
+        }
+        return nil
+    }
 }
 
-// MARK: - BoundMacroRow
+// MARK: - MacroDisplayRow
 
-private struct BoundMacroRow: View {
+/// A read-only row showing a macro label, numeric value, and unit.
+/// Used in EditEntryView where macros are display-only (scaled by serving).
+private struct MacroDisplayRow: View {
     let label: String
+    let value: Double
     let unit: String
-    @Binding var value: Double
-
-    @State private var text: String = ""
-    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack {
             Text(label)
             Spacer()
-            TextField("0", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($isFocused)
-                .frame(width: 80)
-                .onChange(of: text) { _, newVal in
-                    if let d = Double(newVal) { value = d }
-                }
-                .onChange(of: isFocused) { _, focused in
-                    if !focused { text = String(format: "%.1f", value) }
-                }
-            Text(unit)
+            Text(String(format: "%.1f", value))
                 .foregroundStyle(.secondary)
-                .frame(width: 34, alignment: .leading)
-        }
-        .onAppear { text = String(format: "%.1f", value) }
-    }
-}
-
-/// Row for editing a micronutrient value on an existing entry.
-/// Reads/writes directly to the entry's micronutrients dictionary.
-private struct MicronutrientBoundRow: View {
-    let label: String
-    let unit: String
-    let entry: NutritionEntry
-    let nutrientName: String
-
-    @State private var text: String = ""
-    @FocusState private var isFocused: Bool
-
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($isFocused)
-                .frame(width: 80)
-                .onChange(of: text) { _, newVal in
-                    if let d = Double(newVal) {
-                        entry.micronutrients[nutrientName] = MicronutrientValue(value: d, unit: unit)
-                    }
-                }
-                .onChange(of: isFocused) { _, focused in
-                    if !focused, let micro = entry.micronutrients[nutrientName] {
-                        text = String(format: "%.1f", micro.value)
-                    }
-                }
             Text(unit)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
                 .frame(width: 34, alignment: .leading)
-        }
-        .onAppear {
-            if let micro = entry.micronutrients[nutrientName] {
-                text = String(format: "%.1f", micro.value)
-            }
         }
     }
 }
