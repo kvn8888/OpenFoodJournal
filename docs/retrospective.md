@@ -1000,3 +1000,262 @@ This is one of those errors where you need to look at the init declaration, not 
 - **Give LLMs constants, not instructions**: Telling Gemini "1 cup = 240 mL, 1 tbsp = 15 mL" in the prompt is more reliable than "convert volume units to mL". Exact constants reduce hallucination surface area.
 - **Swift parameter order is positional, not semantic**: Even with named parameters, Swift enforces declaration order. When you add new properties to an `init`, always check call sites for order violations — the compiler will catch it, but only at build time.
 - **`fallthrough` in Swift switch is explicit and useful**: Unlike C, Swift doesn't fallthrough by default. Using it deliberately (as in the `ServingSize` decoding switch) communicates intent: "if this condition isn't met, try the next case."
+
+---
+
+## Chapter 8: Sync-on-Launch and the Turso Migration — Closing the First-Install Gap
+
+Two gaps remained after the ServingSize enum work: existing production rows in Turso were missing the three new columns (`serving_type`, `serving_grams`, `serving_ml`), and the app showed an empty journal on first install because `fetchAll()` existed but nothing called it.
+
+Both were simple fixes. They're documented here because the patterns are reusable and the decisions are not obvious without context.
+
+---
+
+### Part 1: The Turso Migration
+
+#### The Problem
+
+Turso uses libSQL, a fork of SQLite. SQLite's `CREATE TABLE IF NOT EXISTS` is idempotent — safe to run every server startup. But it only creates new tables; it doesn't add columns to existing ones. When we added `serving_type`, `serving_grams`, and `serving_ml` to the schema in commit `6aa1486`, we updated the `CREATE TABLE` statement, which protects new databases. Existing production databases — the actual data store for real users — never received the new columns.
+
+Any time the app tried to `INSERT INTO nutrition_entries (...serving_type...) VALUES (...)`, the server would silently fail or error because the column didn't exist in older tables. (In practice, the server was returning 500 errors for any entry created after the ServingSize update.)
+
+#### Why Not Treat/Catch the ALTER TABLE Error?
+
+SQLite supports `ALTER TABLE foo ADD COLUMN bar TEXT`, but it doesn't support `ALTER TABLE foo ADD COLUMN IF NOT EXISTS bar TEXT`. The `IF NOT EXISTS` clause is only valid on `CREATE TABLE`.
+
+Three options:
+1. **Try/catch the ALTER TABLE** — catch the "duplicate column" SQLite error. Brittle: couples the logic to a specific error message string.
+2. **Track schema version in a table** — a `schema_versions` table with an applied migrations list. Correct but overkill for a personal app.
+3. **Query `PRAGMA table_info()` first** — check if the column exists before running the ALTER. Explicit, readable, requires no new tables.
+
+We chose option 3:
+
+```javascript
+// Check which columns exist in nutrition_entries
+const entryInfo = await db.execute("PRAGMA table_info(nutrition_entries)");
+const entryColumns = entryInfo.rows.map((r) => r.name);
+
+if (!entryColumns.includes("serving_type")) {
+  await db.execute(
+    "ALTER TABLE nutrition_entries ADD COLUMN serving_type TEXT"
+  );
+  await db.execute(
+    "ALTER TABLE nutrition_entries ADD COLUMN serving_grams REAL"
+  );
+  await db.execute(
+    "ALTER TABLE nutrition_entries ADD COLUMN serving_ml REAL"
+  );
+  console.log(
+    "[db] Migrated nutrition_entries: added serving_type, serving_grams, serving_ml"
+  );
+}
+```
+
+`PRAGMA table_info(table_name)` returns one row per column with fields: `cid`, `name`, `type`, `notnull`, `dflt_value`, `pk`. We only care about `name`. If `serving_type` isn't in the list, we add all three columns. Checking one column as the sentinel for the whole group is safe because we always add them together.
+
+#### Key Properties of This Pattern
+
+- **Idempotent on re-deploy**: Once the columns exist, `PRAGMA table_info()` returns them, the `if` block is skipped, and the startup is clean.
+- **No coupling to error text**: We don't rely on SQLite's error string for duplicate-column detection.
+- **Runs sequentially at startup**: The `runMigrations()` function is `async` and already `await`ed before Express starts handling requests, so no request can arrive before the schema is ready.
+- **Self-documenting**: Each `if` block has a comment explaining what change it represents and when it was added.
+
+The same pattern applies to both `nutrition_entries` and `saved_foods`. Each table gets its own `PRAGMA table_info()` check.
+
+---
+
+### Part 2: Sync-on-Launch
+
+#### The Problem
+
+`SyncService.fetchAll()` makes a `GET /api/sync` request and returns a `SyncResponse` with arrays of `APILog`, `APIEntry`, `APIFood`, etc. It was never called anywhere in the app.
+
+On first install, a user would see an empty journal even if they had a week of data in Turso. The server was the authoritative store, but the client only fed data *to* the server, never back.
+
+#### Where to Put the Logic
+
+The merge logic belongs in `NutritionStore` because:
+1. `NutritionStore` already owns the `ModelContext` — all SwiftData writes go through it
+2. The existing `fetchOrCreateLog(for:)`, `save()`, and `fetchLog(for:)` methods are directly reusable
+3. `NutritionStore` is `@MainActor @Observable`, so any view can observe sync state
+
+The call site in `ContentView` uses a `.task` modifier — SwiftUI's structured concurrency hook for async work that should begin when the view appears:
+
+```swift
+.task {
+    let logs = nutritionStore.fetchAllLogs()
+    guard logs.isEmpty else { return }   // already seeded — skip
+
+    if let response = try? await syncService.fetchAll() {
+        nutritionStore.applySync(response)
+    }
+}
+```
+
+The `guard logs.isEmpty` check is the key design decision: **we only sync from the server on first launch**. If local data exists, we trust it. This avoids the hard problem of conflict resolution — what happens when local and server have different values for the same entry?
+
+For a personal journal app with fire-and-forget push sync, the only time SwiftData is empty is when:
+1. The app is brand new on this device
+2. The user cleared the app's storage
+
+Both are "first install" semantics. If the user has data locally, it got there by their own actions and is correct.
+
+#### Rebuilding ServingSize from Three Columns
+
+The `applySync` implementation needs to reverse the mapping from three flat columns back into the enum. The same fallback chain used in `ScanService.toNutritionEntry()` is extracted into a private static helper:
+
+```swift
+private static func buildServingSize(type: String?, grams: Double?, ml: Double?) -> ServingSize? {
+    switch type {
+    case "both":
+        if let g = grams, let m = ml { return .both(grams: g, ml: m) }
+        fallthrough  // degrade gracefully if one value is missing
+    case "mass":
+        if let g = grams { return .mass(grams: g) }
+    case "volume":
+        if let m = ml { return .volume(ml: m) }
+    default:
+        // Legacy rows have NULL for serving_type — derive from gram weight if available
+        if let g = grams { return .mass(grams: g) }
+    }
+    return nil
+}
+```
+
+Making it `static` means it's pure (no `self` dependency) and testable in isolation.
+
+#### The Full applySync Implementation
+
+```swift
+func applySync(_ response: SyncResponse) {
+    // 1. Collect existing UUIDs to avoid inserting duplicates
+    let existingEntryIds = Set(
+        (try? modelContext.fetch(FetchDescriptor<NutritionEntry>()))?.map(\.id) ?? []
+    )
+    let existingFoodIds = Set(
+        (try? modelContext.fetch(FetchDescriptor<SavedFood>()))?.map(\.id) ?? []
+    )
+
+    // 2. Upsert DailyLogs — find or create by date
+    //    Build a map from API ID string → DailyLog for use in step 3
+    var logByDate: [String: DailyLog] = [:]
+    for apiLog in response.dailyLogs {
+        let date = Self.parseDate(apiLog.date) ?? .now
+        let log = fetchOrCreateLog(for: date)
+        logByDate[apiLog.id] = log
+    }
+
+    // 3. Insert missing NutritionEntry records
+    for apiEntry in response.nutritionEntries {
+        guard let entryUUID = UUID(uuidString: apiEntry.id),
+              !existingEntryIds.contains(entryUUID),
+              let log = logByDate[apiEntry.dailyLogId] else { continue }
+
+        let serving = Self.buildServingSize(
+            type: apiEntry.servingType, grams: apiEntry.servingGrams, ml: apiEntry.servingMl
+        )
+        let entry = NutritionEntry(
+            id: entryUUID,
+            timestamp: ISO8601DateFormatter().date(from: apiEntry.timestamp ?? "") ?? .now,
+            name: apiEntry.name,
+            mealType: MealType(rawValue: apiEntry.mealType) ?? .snack,
+            scanMode: ScanMode(rawValue: apiEntry.scanMode ?? "manual") ?? .manual,
+            confidence: apiEntry.confidence,
+            calories: apiEntry.calories,
+            protein: apiEntry.protein,
+            carbs: apiEntry.carbs,
+            fat: apiEntry.fat,
+            micronutrients: apiEntry.micronutrients ?? [:],
+            servingSize: apiEntry.servingSize,
+            servingsPerContainer: apiEntry.servingsPerContainer,
+            brand: apiEntry.brand,
+            serving: serving,
+            servingQuantity: apiEntry.servingQuantity,
+            servingUnit: apiEntry.servingUnit,
+            servingMappings: apiEntry.servingMappings ?? []
+        )
+        modelContext.insert(entry)
+        entry.dailyLog = log
+        log.entries.append(entry)
+    }
+
+    // 4. Insert missing SavedFood records
+    for apiFood in response.savedFoods {
+        guard let foodUUID = UUID(uuidString: apiFood.id),
+              !existingFoodIds.contains(foodUUID) else { continue }
+
+        let serving = Self.buildServingSize(
+            type: apiFood.servingType, grams: apiFood.servingGrams, ml: apiFood.servingMl
+        )
+        let food = SavedFood(
+            id: foodUUID,
+            name: apiFood.name,
+            brand: apiFood.brand,
+            calories: apiFood.calories,
+            protein: apiFood.protein,
+            carbs: apiFood.carbs,
+            fat: apiFood.fat,
+            micronutrients: apiFood.micronutrients ?? [:],
+            servingSize: apiFood.servingSize,
+            servingsPerContainer: apiFood.servingsPerContainer,
+            serving: serving,
+            servingQuantity: apiFood.servingQuantity,
+            servingUnit: apiFood.servingUnit,
+            servingMappings: apiFood.servingMappings ?? [],
+            originalScanMode: ScanMode(rawValue: apiFood.scanMode ?? "manual") ?? .manual
+        )
+        modelContext.insert(food)
+    }
+
+    save()
+}
+```
+
+The structure mirrors a database upsert pattern — check for existence, skip if present, insert if absent. The three-step operation (logs → entries → foods) respects the foreign key relationship: `DailyLog` must exist before `NutritionEntry` references it.
+
+#### Date Parsing Edge Case
+
+The server stores dates as `"YYYY-MM-DD"` strings. `ISO8601DateFormatter` doesn't handle plain date strings (no time component) without explicit configuration. A custom `parseDate()` helper handles both:
+
+```swift
+private static func parseDate(_ string: String) -> Date? {
+    // Try plain YYYY-MM-DD first
+    let formatter = DateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd"
+    formatter.timeZone = .current
+    if let date = formatter.date(from: string) {
+        return Calendar.current.startOfDay(for: date)
+    }
+    // Fall back to full ISO 8601 (timestamps from server logs)
+    return ISO8601DateFormatter().date(from: string).map {
+        Calendar.current.startOfDay(for: $0)
+    }
+}
+```
+
+`.startOfDay(for:)` normalizes any date to midnight in the user's time zone — matching how `NutritionStore.fetchLog(for:)` queries the SwiftData store.
+
+---
+
+### What We Got Right
+
+1. **`PRAGMA table_info()` pattern** is self-documenting and reusable. Any future column addition follows the same shape.
+2. **"Skip if local data exists"** is the right conflict policy for a fire-and-forget sync system. Complex conflict resolution would be premature — the app has one user and one device at a time in practice.
+3. **`buildServingSize` as a private static** keeps the conversion logic in one place. Both `applySync` and `ScanService.toNutritionEntry()` use the same fallback chain — they just use different copies. A future refactor could unify them into a shared extension.
+4. **`logByDate[apiLog.id]`** — keying the DailyLog map by API log ID (not date string) means the lookup in step 3 doesn't need to reparse dates. Exactly one hash lookup per entry.
+5. **`guard ... else { continue }`** — using guard/continue in loops keeps the happy path un-nested. The three conditions for inserting an entry (valid UUID, not already local, parent log exists) read clearly in one line.
+
+### What We Didn't Do (and Why)
+
+1. **Goals sync**: `SyncResponse.userGoals` is decoded but `applySync` doesn't apply it. Merging goals into `UserGoals` (which uses `@AppStorage`) is a separate concern — `@AppStorage` keys need to be explicitly set, not bulk-overwritten from a JSON blob.
+2. **Containers sync**: `TrackedContainer` is in `SyncResponse` but not in `applySync`. The data model is ready but the merge logic wasn't needed for the first-install use case (containers are typically in-progress and device-specific).
+3. **Incremental sync**: `/api/sync?since=` supports a timestamp parameter for delta syncs. We always do a full sync on first launch. Adding incremental sync on subsequent launches would require storing the last sync timestamp (trivial with `@AppStorage`) and calling it more frequently.
+4. **Retry on failure**: `try? await syncService.fetchAll()` swallows errors. A real implementation would retry with exponential backoff and surface a banner if sync fails after N attempts.
+
+### Lessons Learned
+
+- **`PRAGMA table_info()` before `ALTER TABLE`** is the idiomatic SQLite migration pattern when you don't have a schema version table. One query, one check, clean logs.
+- **Design the merge function before the call site**: Writing `applySync` first meant the `ContentView` `.task` was five lines. The inverse — writing the call site first, then asking "what does this function need to do?" — leads to poorly bounded functions.
+- **`try?` on the fetchAll call is fine at the call site**: The error is already captured in `SyncService.syncError` if you need to surface it. At the `.task` level, silent skip-on-error is the right behaviour — the app should always show *something*, even if sync fails.
+- **Static helpers on MainActor classes are pure by necessity**: A `static` function can't access `self`, so it must be pure. Using `static` for conversion/parsing helpers enforces that they have no side effects and are independently testable.
+
