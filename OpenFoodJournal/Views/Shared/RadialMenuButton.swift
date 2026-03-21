@@ -51,15 +51,6 @@ struct RadialMenuButton: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // Dim overlay when menu is open (tappable to dismiss)
-            if isOpen {
-                Rectangle()
-                    .fill(.ultraThinMaterial)
-                    .ignoresSafeArea()
-                    .onTapGesture { close() }
-                    .transition(.opacity)
-            }
-
             // GlassEffectContainer merges all glass circles when closed (offset 0,0),
             // and splits them apart as they animate to their arc positions on open.
             GlassEffectContainer(spacing: 16) {
@@ -74,7 +65,6 @@ struct RadialMenuButton: View {
                             .offset(x: isOpen ? position.x : 0,
                                     y: isOpen ? position.y : 0)
                             .scaleEffect(isOpen ? (isHighlighted ? 1.15 : 1.0) : 1.0)
-                            .opacity(isOpen ? 1.0 : 0.0)
                             .animation(
                                 .spring(duration: 0.4, bounce: 0.3)
                                 .delay(isOpen ? Double(index) * 0.04 : 0),
@@ -115,23 +105,28 @@ struct RadialMenuButton: View {
     /// A single option circle with icon and label.
     private func optionBubble(item: RadialMenuItem, isHighlighted: Bool) -> some View {
         VStack(spacing: 6) {
-            // Icon circle — glass tints to item color when highlighted
-            Image(systemName: item.icon)
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(isHighlighted ? item.color : .primary)
+            // Glass circle always present for GlassEffectContainer merge/split.
+            // Icon is an overlay so it doesn't participate in the glass capture pass.
+            Circle()
+                .fill(.clear)
                 .frame(width: optionSize, height: optionSize)
                 .glassEffect(
                     isHighlighted ? .regular.tint(item.color.opacity(0.35)) : .regular,
                     in: .circle
                 )
+                .overlay {
+                    Image(systemName: item.icon)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(isHighlighted ? item.color : .primary)
+                        .opacity(isOpen ? 1.0 : 0.0)
+                }
 
-            // Label fades in after the glass split animation completes
+            // Label moves with the circle — same animation, no separate delay.
             Text(item.label)
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
                 .opacity(isOpen ? 1.0 : 0.0)
-                .animation(.easeIn(duration: 0.2).delay(isOpen ? 0.25 : 0), value: isOpen)
         }
     }
 
