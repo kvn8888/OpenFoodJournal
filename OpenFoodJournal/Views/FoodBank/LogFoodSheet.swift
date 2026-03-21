@@ -19,14 +19,102 @@ struct LogFoodSheet: View {
     @State private var selectedMealType: MealType = .snack
     // Target date — defaults to today, could be extended to pick a date
     @State private var logDate: Date = .now
-    // Serving quantity multiplier — 1.0 = one serving, 2.0 = double, etc.
-    @State private var servingCount: Double = 1.0
+    // Quantity of this food the user wants to log (in the selected unit)
+    @State private var quantity: Double
+    // Text backing for the quantity field — avoids cursor-jump with direct Double binding
+    @State private var quantityText: String
+    // The unit the user has selected for this log (may differ from the food's stored unit)
+    @State private var selectedUnit: String
 
-    /// Scaled calories based on serving count
-    private var scaledCalories: Double { food.calories * servingCount }
-    private var scaledProtein: Double { food.protein * servingCount }
-    private var scaledCarbs: Double { food.carbs * servingCount }
-    private var scaledFat: Double { food.fat * servingCount }
+    // Snapshot of the food's baseline values at the time the sheet opens.
+    // These never change; all display math is relative to these.
+    private let baseCalories: Double
+    private let baseProtein: Double
+    private let baseCarbs: Double
+    private let baseFat: Double
+    private let baseQuantity: Double  // the food's stored serving quantity
+    private let baseUnit: String      // the food's stored serving unit
+
+    init(food: SavedFood) {
+        self.food = food
+        // Use the food's own serving quantity and unit as the starting point.
+        // If not set, default to "1 serving" which maps to a 1x multiplier.
+        let qty = food.servingQuantity ?? 1.0
+        let unit = food.servingUnit ?? "serving"
+        _quantity = State(initialValue: qty)
+        // Show whole numbers without ".0", decimals up to 2 places
+        _quantityText = State(initialValue: qty.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
+        _selectedUnit = State(initialValue: unit)
+        self.baseCalories = food.calories
+        self.baseProtein = food.protein
+        self.baseCarbs = food.carbs
+        self.baseFat = food.fat
+        self.baseQuantity = max(qty, 0.01)  // avoid division by zero
+        self.baseUnit = unit
+    }
+
+    // MARK: - Serving computed helpers
+
+    /// Units the user can switch between in the picker.
+    /// Prefers the structured ServingSize enum when available, then supplements
+    /// with any custom units from legacy servingMappings.
+    private var availableUnits: [String] {
+        if let serving = food.serving {
+            var units = Set(serving.availableUnits)
+            units.insert(baseUnit)
+            for mapping in food.servingMappings {
+                units.insert(mapping.from.unit)
+                units.insert(mapping.to.unit)
+            }
+            return units.sorted()
+        }
+        // Legacy path — only the units explicitly covered by mappings
+        var units = Set<String>()
+        units.insert(baseUnit)
+        for mapping in food.servingMappings {
+            units.insert(mapping.from.unit)
+            units.insert(mapping.to.unit)
+        }
+        return units.sorted()
+    }
+
+    /// How many selectedUnit equal 1 baseUnit.
+    /// e.g. if baseUnit is "cup" and selectedUnit is "g", factor = 240 (1 cup = 240g).
+    private var unitFactor: Double {
+        if selectedUnit == baseUnit { return 1.0 }
+        // Try the structured enum first (standardised mass/volume tables)
+        if let factor = food.serving?.convert(1.0, from: baseUnit, to: selectedUnit) {
+            return factor
+        }
+        // Fall back to explicit servingMappings for custom units
+        for mapping in food.servingMappings {
+            if mapping.from.unit == baseUnit && mapping.to.unit == selectedUnit {
+                return mapping.to.value / mapping.from.value
+            }
+            if mapping.to.unit == baseUnit && mapping.from.unit == selectedUnit {
+                return mapping.from.value / mapping.to.value
+            }
+        }
+        return 1.0
+    }
+
+    // Macros expressed per single base-unit (e.g. kcal per 1 cup)
+    private var calPerBaseUnit: Double { baseCalories / baseQuantity }
+    private var proPerBaseUnit: Double { baseProtein / baseQuantity }
+    private var carbPerBaseUnit: Double { baseCarbs / baseQuantity }
+    private var fatPerBaseUnit: Double { baseFat / baseQuantity }
+
+    /// Scaling multiplier for the log button — how much to multiply food.calories etc.
+    /// Formula: (quantity in selectedUnit) / unitFactor / baseQuantity,
+    /// then multiply by baseQuantity to get back to a simple scale factor.
+    private var scaleFactor: Double { quantity / unitFactor / baseQuantity }
+
+    /// Scaled macros for the current quantity + unit combination
+    private var scaledCalories: Double { calPerBaseUnit / unitFactor * quantity }
+    private var scaledProtein: Double   { proPerBaseUnit / unitFactor * quantity }
+    private var scaledCarbs: Double     { carbPerBaseUnit / unitFactor * quantity }
+    private var scaledFat: Double       { fatPerBaseUnit / unitFactor * quantity }
 
     var body: some View {
         NavigationStack {
@@ -60,11 +148,22 @@ struct LogFoodSheet: View {
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Log Food")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+                // "Done" dismisses the decimal pad keyboard
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") {
+                        UIApplication.shared.sendAction(
+                            #selector(UIResponder.resignFirstResponder),
+                            to: nil, from: nil, for: nil
+                        )
+                    }
                 }
             }
         }
@@ -172,20 +271,23 @@ struct LogFoodSheet: View {
     // MARK: - Log Button
 
     /// The primary action button: creates a NutritionEntry from the saved food
-    /// and adds it to today's log via NutritionStore
+    /// and adds it to today's log via NutritionStore.
+    /// Macros are scaled proportionally by the quantity/unit the user selected.
     private var logButton: some View {
         Button {
-            // Convert SavedFood → NutritionEntry with the selected meal type,
-            // scaled by the serving count
+            // Create the entry from the food template
             var entry = food.toNutritionEntry(mealType: selectedMealType)
-            entry.calories *= servingCount
-            entry.protein *= servingCount
-            entry.carbs *= servingCount
-            entry.fat *= servingCount
-            // Scale micronutrients too
+            // Scale all macros by the ratio of (selected quantity / base serving size)
+            // using the same formula as EditEntryView: divide by unitFactor then by baseQuantity
+            let factor = quantity / unitFactor / baseQuantity
+            entry.calories *= factor
+            entry.protein *= factor
+            entry.carbs *= factor
+            entry.fat *= factor
+            // Scale micronutrients by the same factor
             for (key, micro) in entry.micronutrients {
                 entry.micronutrients[key] = MicronutrientValue(
-                    value: micro.value * servingCount,
+                    value: micro.value * factor,
                     unit: micro.unit
                 )
             }
@@ -200,52 +302,58 @@ struct LogFoodSheet: View {
         .buttonStyle(.borderedProminent)
     }
 
-    // MARK: - Serving Quantity
+    // MARK: - Serving Section
 
-    /// Lets the user adjust how many servings they're logging.
-    /// Shows +/- buttons and a text field for direct entry.
+    /// Lets the user type a quantity and select a unit.
+    /// The macro grid above live-updates as quantity and unit change.
+    /// Mirrors the serving editor in EditEntryView.
     private var servingSection: some View {
-        VStack(spacing: 8) {
-            Text("Servings")
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Quantity")
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 16) {
-                // Decrease button
-                Button {
-                    if servingCount > 0.25 {
-                        servingCount -= 0.25
-                    }
-                } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
-                .disabled(servingCount <= 0.25)
-
-                // Serving count display
-                Text(servingCount.truncatingRemainder(dividingBy: 1) == 0
-                     ? String(format: "%.0f", servingCount)
-                     : String(format: "%.2g", servingCount))
-                    .font(.title)
+            HStack(spacing: 12) {
+                // Quantity input — decimal keyboard, live-updates macros
+                TextField("Amount", text: $quantityText)
+                    .keyboardType(.decimalPad)
+                    .font(.title2.monospacedDigit())
                     .fontWeight(.bold)
-                    .monospacedDigit()
-                    .frame(minWidth: 60)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 90)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .background(.quaternary, in: .rect(cornerRadius: 10))
+                    .onChange(of: quantityText) { _, newValue in
+                        // Accept only valid positive numbers; ignore empty or non-numeric input
+                        if let v = Double(newValue), v > 0 {
+                            quantity = v
+                        }
+                    }
 
-                // Increase button
-                Button {
-                    servingCount += 0.25
-                } label: {
-                    Image(systemName: "plus.circle.fill")
+                // Unit picker — options come from the ServingSize enum or legacy mappings
+                if availableUnits.count > 1 {
+                    Picker("Unit", selection: $selectedUnit) {
+                        ForEach(availableUnits, id: \.self) { unit in
+                            Text(unit).tag(unit)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                } else {
+                    // Only one unit available — show it as static text
+                    Text(selectedUnit)
                         .font(.title2)
-                        .foregroundStyle(.blue)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
                 }
             }
 
-            // Show what one serving is
-            if let serving = food.servingSize {
-                Text("1 serving = \(serving)")
+            // Helper caption: what the food's canonical serving is
+            if let size = food.servingSize {
+                Text("1 serving = \(size)")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
