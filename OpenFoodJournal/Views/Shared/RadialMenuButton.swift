@@ -119,6 +119,10 @@ struct RadialMenuButton: View {
             .rotationEffect(.degrees(isOpen ? 45 : 0))
             .animation(.spring(duration: 0.3), value: isOpen)
             .frame(width: plusSize, height: plusSize)
+            // Expand the tappable/draggable area beyond the visible glass circle
+            // so near-miss touches still hit the button instead of scrolling the
+            // List behind it. 20pt padding on each side → 104×104pt hit target.
+            .contentShape(Circle().inset(by: -20))
             .glassEffect(in: .circle)
             .glassEffectID("plus", in: glassNamespace)
             .offset(dragOffset)
