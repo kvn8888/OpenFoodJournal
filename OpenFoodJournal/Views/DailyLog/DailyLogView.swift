@@ -6,6 +6,7 @@ import SwiftData
 
 struct DailyLogView: View {
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(ScanService.self) private var scanService
     @Environment(UserGoals.self) private var goals
 
     @State private var selectedDate: Date = .now
@@ -122,6 +123,36 @@ struct DailyLogView: View {
                 ContainerListView()
             }
         }
+        // Processing overlay — shown after camera dismisses while Gemini analyzes
+        .overlay {
+            if scanService.isScanning {
+                ZStack {
+                    Color.black.opacity(0.4)
+                        .ignoresSafeArea()
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .controlSize(.large)
+                            .tint(.white)
+                        Text("Analyzing…")
+                            .font(.headline)
+                            .foregroundStyle(.white)
+                    }
+                    .padding(32)
+                    .glassEffect(in: .rect(cornerRadius: 20))
+                }
+                .transition(.opacity)
+                .animation(.easeInOut(duration: 0.3), value: scanService.isScanning)
+            }
+        }
+        // When scan completes, show result card as a sheet
+        .sheet(isPresented: Binding(
+            get: { scanService.pendingResult != nil },
+            set: { if !$0 { scanService.pendingResult = nil } }
+        )) {
+            if let entry = scanService.pendingResult {
+                ScanResultSheet(entry: entry)
+            }
+        }
     }
 }
 
@@ -142,6 +173,44 @@ enum DailyLogSheet: Identifiable {
         case .foodBank: "foodBank"
         case .containers: "containers"
         }
+    }
+}
+
+// MARK: - Scan Result Sheet
+
+/// Wraps ScanResultCard in a sheet presented after background scanning completes.
+/// Handles confirm (log + auto-save to Food Bank) and retake (re-open camera).
+private struct ScanResultSheet: View {
+    @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(ScanService.self) private var scanService
+    @Environment(\.dismiss) private var dismiss
+
+    @Bindable var entry: NutritionEntry
+
+    var body: some View {
+        ScanResultCard(
+            entry: entry,
+            onConfirm: {
+                // Log entry to today's journal
+                nutritionStore.log(entry, to: .now)
+
+                // Auto-save to Food Bank
+                let saved = SavedFood(from: entry)
+                nutritionStore.modelContext.insert(saved)
+                try? nutritionStore.modelContext.save()
+                let sync = nutritionStore.syncService
+                Task { try? await sync?.createFood(saved) }
+
+                // Clear pending result and dismiss
+                scanService.pendingResult = nil
+                dismiss()
+            },
+            onRetake: {
+                // Clear result and dismiss — user can re-open camera from FAB
+                scanService.pendingResult = nil
+                dismiss()
+            }
+        )
     }
 }
 

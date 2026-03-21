@@ -50,7 +50,7 @@ struct RadialMenuButton: View {
     // MARK: - Body
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .bottom) {
             // Dim overlay when menu is open (tappable to dismiss)
             if isOpen {
                 Rectangle()

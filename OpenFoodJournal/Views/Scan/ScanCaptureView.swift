@@ -11,7 +11,6 @@ struct ScanCaptureView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var mode: ScanMode = .label
-    @State private var capturedEntry: NutritionEntry?
     @State private var cameraPermissionDenied = false
 
     // CameraController manages the AVCaptureSession lifetime
@@ -108,40 +107,6 @@ struct ScanCaptureView: View {
                         .padding(.bottom, 120)
                 }
             }
-
-            // Result card slides up from bottom
-            if let entry = capturedEntry {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .onTapGesture { /* intentionally blocks taps */ }
-
-                VStack {
-                    Spacer()
-                    ScanResultCard(
-                        entry: entry,
-                        onConfirm: {
-                            nutritionStore.log(entry, to: .now)
-
-                            // Auto-save to Food Bank so scanned foods are reusable
-                            let saved = SavedFood(from: entry)
-                            nutritionStore.modelContext.insert(saved)
-                            try? nutritionStore.modelContext.save()
-                            let sync = nutritionStore.syncService
-                            Task { try? await sync?.createFood(saved) }
-
-                            dismiss()
-                        },
-                        onRetake: {
-                            withAnimation(.spring(duration: 0.4)) {
-                                capturedEntry = nil
-                            }
-                        }
-                    )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-                .transition(.opacity)
-                .animation(.spring(duration: 0.4), value: capturedEntry != nil)
-            }
         }
         .task {
             await camera.setup()
@@ -162,14 +127,10 @@ struct ScanCaptureView: View {
         let image = await camera.capturePhoto()
         guard let image else { return }
 
-        do {
-            let entry = try await scanService.scan(image: image, mode: mode)
-            withAnimation(.spring(duration: 0.5)) {
-                capturedEntry = entry
-            }
-        } catch {
-            // Error is already stored in scanService.error
-        }
+        // Kick off scan in background and dismiss camera immediately.
+        // DailyLogView will show a processing overlay and handle the result.
+        scanService.scanInBackground(image: image, mode: mode)
+        dismiss()
     }
 }
 

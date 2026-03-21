@@ -43,17 +43,18 @@ const upload = multer({
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Gemini Flash — fast, good at structured extraction from nutrition labels
+// gemini-flash-latest resolves to gemini-3-flash-preview
 const flashModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-flash-preview-05-20",
+  model: "gemini-flash-latest",
   generationConfig: {
     responseMimeType: "application/json",
   },
 });
 
-// Gemini Pro — high-reasoning model for food photo estimation
+// Gemini 3.1 Pro — high-reasoning model for food photo estimation
 // Uses thinking/reasoning for more accurate portion size and nutrient estimates
 const proModel = genAI.getGenerativeModel({
-  model: "gemini-2.5-pro-preview-06-05",
+  model: "gemini-3.1-pro-preview",
   generationConfig: {
     responseMimeType: "application/json",
     thinkingConfig: {
@@ -240,7 +241,7 @@ runMigrations()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OpenFoodJournal server listening on port ${PORT}`);
-      console.log(`Gemini models: Flash (labels), Pro w/ thinking (food photos)`);
+      console.log(`Gemini models: Flash latest (labels), 3.1 Pro w/ thinking (food photos)`);
       console.log(`API routes mounted at /api/*`);
     });
   })
