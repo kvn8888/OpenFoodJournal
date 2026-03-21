@@ -1382,7 +1382,38 @@ Why does this work? `onTapGesture` is a higher-level modifier that doesn't creat
 
 **What you lose:** The `Button` provides a visual press highlight on touch-begin. `onTapGesture` does not. In a food bank list where rows don't have rich press states, this is acceptable — but it's a tradeoff worth knowing.
 
-**Rule of thumb:** In a `List` with `swipeActions`, prefer `onTapGesture + contentShape` over `Button` to avoid gesture lag. Use `Button` only when the press-highlight feedback is important (e.g., primary action buttons, not list navigation rows).
+**Rule of thumb (revised — see 9.2.1):** The initial fix used `onTapGesture + contentShape` which eliminated the *tap* delay but introduced a different problem — *swipe* choppiness. Read on.
+
+---
+
+### 9.2.1 The onTapGesture Swipe-Choppiness Follow-Up
+
+**The problem (round 2):** After applying the `onTapGesture` fix, taps were instant — but *swipes* became visibly choppy compared to the DailyLogView (which the user described as "silky smooth").
+
+**Root cause:** `onTapGesture` installs a `UITapGestureRecognizer` that competes with the List's built-in swipe recognizer. When the user starts a horizontal drag, iOS must determine: "Is this a tap that will end soon, or a swipe?" The `TapGesture` waits for the touch to end (or move far enough to fail), which delays the swipe from receiving continuous tracking. This shows up as a stutter at the start of every swipe.
+
+**Why DailyLogView was smooth:** DailyLogView wraps each row in `Button { } label: { }.buttonStyle(.plain)`. A `Button` with `.plain` style is special — UIKit/SwiftUI has an optimized path for `Button` + `List` + `swipeActions` coexistence. The system knows that a `Button` with a `.plain` style inside a `List` is a navigation-style row, and it can hand off to the swipe recognizer earlier because the button's highlight is minimal.
+
+**The final fix:** Match the DailyLogView pattern exactly:
+
+```swift
+// ❌ Round 1 (eliminated tap lag but caused choppy swipes):
+SavedFoodRowView(food: food)
+    .contentShape(Rectangle())
+    .onTapGesture { selectedFood = food }
+
+// ✅ Round 2 (smooth taps AND smooth swipes):
+Button {
+    selectedFood = food
+} label: {
+    SavedFoodRowView(food: food)
+}
+.buttonStyle(.plain)
+```
+
+**The key insight:** `.buttonStyle(.plain)` is not just cosmetic. It changes how the button's gesture recognizer participates in the disambiguation dance. With `.automatic` (the default Button style), the system highlights on touch-down and waits for disambiguation. With `.plain`, there's no press highlight, so the system can begin tracking the swipe immediately — effectively the same behavior as `onTapGesture` for taps, but without installing a competing `TapGesture` that blocks swipe tracking.
+
+**Lesson:** When debugging gesture performance in SwiftUI Lists, always compare against a working reference. The DailyLogView was the reference — it used `Button + .buttonStyle(.plain)` and had perfect swipes. The fix was to adopt the exact same pattern, not to invent a different approach.
 
 ---
 
@@ -1579,19 +1610,22 @@ The sheet is presented as:
 
 3. **`private struct` for a reusable component.** `AddServingMappingSheet` was designed as a standalone form and was always likely to be needed from multiple call sites. Starting `private` was natural (it was initially only used in one file), but the right next step when reusing it was to promote it to its own file, not just change access control. We chose the minimal change (remove `private`) which is fine for now.
 
+4. **Fixing gesture lag with `onTapGesture` instead of `.buttonStyle(.plain)`.** The first fix replaced `Button` with `.contentShape(Rectangle()).onTapGesture {}` — this eliminated tap lag but introduced swipe choppiness because `TapGesture` blocks the swipe recognizer's continuous tracking. The correct fix was `Button + .buttonStyle(.plain)`, which is the same pattern DailyLogView already used. Lesson: when a working reference exists in your own codebase, copy its pattern exactly before inventing alternatives.
+
 ---
 
 ### 9.8 Patterns Learned
 
 **Pattern: swipeActions needs a List.** Any time you want swipe actions, the parent must be a `List`. If your design uses a custom scroll container, the alternatives are: (a) use a `List` with custom row styling, (b) implement a `DragGesture`-based custom swipe view, or (c) put the action in a context menu instead.
 
-**Pattern: contentShape + onTapGesture for lag-free tappable list rows.** In a `List` with `swipeActions`, replace `Button{}` wrappers with:
+**Pattern: Button + .buttonStyle(.plain) for smooth tappable list rows with swipeActions.** In a `List` with `swipeActions`, wrap rows in:
 ```swift
-YourRowView()
-    .contentShape(Rectangle())
-    .onTapGesture { doSomething() }
+Button { doSomething() } label: {
+    YourRowView()
+}
+.buttonStyle(.plain)
 ```
-This avoids the gesture disambiguation delay without changing visual behavior for rows without press-state styling.
+This gives smooth swipes AND instant taps. Avoid `onTapGesture + contentShape` — it eliminates tap delay but makes swipes choppy because `TapGesture` competes with the swipe recognizer's tracking. `.buttonStyle(.plain)` is UIKit-optimized for List swipe coexistence.
 
 **Pattern: ZStack + Color.clear dismiss layer.** The canonical pattern for "tap outside to dismiss" in a custom overlay:
 ```swift
