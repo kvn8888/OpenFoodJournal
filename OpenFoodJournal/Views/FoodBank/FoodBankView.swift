@@ -28,9 +28,13 @@ struct FoodBankView: View {
     @State private var showDeleteConfirm = false
     @State private var foodToDelete: SavedFood?
 
-    // ── Computed: filter + sort the foods based on search text ────
-    // Filters by name (case-insensitive) so users can quickly find a food
-    private var filteredFoods: [SavedFood] {
+    // Cached, stable array for the ForEach — updated only when allFoods, searchText,
+    // or sortOrder actually change. Avoids new-array-identity on every body evaluation,
+    // which would force a full ForEach re-diff and can stutter mid-swipe if a background
+    // @Query update fires during gesture tracking.
+    @State private var displayedFoods: [SavedFood] = []
+
+    private func applyFilter() -> [SavedFood] {
         let filtered = searchText.isEmpty
             ? allFoods
             : allFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
@@ -58,6 +62,12 @@ struct FoodBankView: View {
             }
             .navigationTitle("Food Bank")
             .searchable(text: $searchText, prompt: "Search saved foods")
+            // Recompute only when the underlying data or user inputs actually change,
+            // not on every body evaluation — keeps the ForEach identity stable during swipes.
+            .onAppear { displayedFoods = applyFilter() }
+            .onChange(of: allFoods) { displayedFoods = applyFilter() }
+            .onChange(of: searchText) { displayedFoods = applyFilter() }
+            .onChange(of: sortOrder) { displayedFoods = applyFilter() }
             .toolbar {
                 // Sort picker in the toolbar
                 ToolbarItem(placement: .topBarTrailing) {
@@ -83,13 +93,13 @@ struct FoodBankView: View {
         List {
             // Show result count when searching
             if !searchText.isEmpty {
-                Text("\(filteredFoods.count) result\(filteredFoods.count == 1 ? "" : "s")")
+                Text("\(displayedFoods.count) result\(displayedFoods.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .listRowBackground(Color.clear)
             }
 
-            ForEach(filteredFoods) { food in
+            ForEach(displayedFoods) { food in
                 // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
                 // makes DailyLogView swipes silky smooth.
                 //
@@ -137,6 +147,7 @@ struct FoodBankView: View {
             }
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     // MARK: - Empty State
