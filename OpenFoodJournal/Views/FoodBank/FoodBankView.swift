@@ -13,6 +13,9 @@ struct FoodBankView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(SyncService.self) private var syncService
 
+    /// Date to log foods to (passed from DailyLogView when opened via radial menu)
+    var logDate: Date = .now
+
     // ── SwiftData Query: fetches all SavedFood sorted by most recently created ──
     @Query(sort: \SavedFood.createdAt, order: .reverse)
     private var allFoods: [SavedFood]
@@ -61,9 +64,9 @@ struct FoodBankView: View {
                     sortMenu
                 }
             }
-            // Sheet to log a selected food to today's journal
+            // Sheet to log a selected food to the selected day's journal
             .sheet(item: $selectedFood) { food in
-                LogFoodSheet(food: food)
+                LogFoodSheet(food: food, logDate: logDate)
             }
             // Sheet to edit a food's name, brand, macros
             .sheet(item: $foodToEdit) { food in
@@ -87,13 +90,22 @@ struct FoodBankView: View {
             }
 
             ForEach(filteredFoods) { food in
-                // Tap a row to open the "Log this food" sheet
+                // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
+                // makes DailyLogView swipes silky smooth.
+                //
+                // Previous approach used .onTapGesture + .contentShape(Rectangle()),
+                // which eliminated the initial-tap delay but made the *swipe* gesture
+                // choppy because TapGesture and the List's swipe recognizer competed.
+                //
+                // Button with .buttonStyle(.plain) is optimised by UIKit for coexistence
+                // with List swipe actions — the system knows to hand off to the swipe
+                // recognizer early without waiting for a full tap-disambiguation pass.
                 Button {
                     selectedFood = food
                 } label: {
                     SavedFoodRowView(food: food)
                 }
-                .tint(.primary)  // Keep text colors normal (not blue link style)
+                .buttonStyle(.plain)
                 // Trailing swipe (left) — Edit is the first/light action, Delete requires more swipe
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     // Edit: opens the name/brand/macro editor

@@ -13,6 +13,8 @@ struct CompleteContainerSheet: View {
 
     // ── Input ─────────────────────────────────────────────────────
     @Bindable var container: TrackedContainer
+    /// Date to log the consumed nutrition to
+    var logDate: Date = .now
 
     // ── State ─────────────────────────────────────────────────────
     @State private var finalWeightText = ""
@@ -190,7 +192,7 @@ struct CompleteContainerSheet: View {
 
                 // Create a NutritionEntry for the consumed amount and log it
                 if let entry = container.toNutritionEntry(mealType: selectedMealType) {
-                    nutritionStore.log(entry, to: .now)
+                    nutritionStore.log(entry, to: logDate)
                 }
 
                 dismiss()

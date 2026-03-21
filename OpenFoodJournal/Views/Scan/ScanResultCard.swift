@@ -8,11 +8,11 @@ import SwiftData
 struct ScanResultCard: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Bindable var entry: NutritionEntry
-    let onConfirm: () -> Void
+    let onConfirm: () -> Void            // Log only
+    let onConfirmAndSave: () -> Void     // Log + save to Food Bank
     let onRetake: () -> Void
 
     @State private var showExtended = false
-    @State private var savedToBank = false  // Tracks whether this scan was saved to food bank
 
     var body: some View {
         VStack(spacing: 0) {
@@ -96,35 +96,24 @@ struct ScanResultCard: View {
             // Actions
             GlassEffectContainer(spacing: 12) {
                 VStack(spacing: 8) {
+                    // Primary action — log and save to Food Bank
+                    Button(action: onConfirmAndSave) {
+                        Label("Add to Log & Save", systemImage: "plus.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+
                     HStack(spacing: 12) {
                         Button("Retake", action: onRetake)
                             .buttonStyle(.glass)
                             .frame(maxWidth: .infinity)
 
+                        // Log only — no Food Bank save
                         Button("Add to Log", action: onConfirm)
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.glass)
                             .frame(maxWidth: .infinity)
                     }
-
-                    // Save to Food Bank — saves a copy as a reusable template
-                    Button {
-                        let saved = SavedFood(from: entry)
-                        nutritionStore.modelContext.insert(saved)
-                        try? nutritionStore.modelContext.save()
-                        let sync = nutritionStore.syncService
-                        Task { try? await sync?.createFood(saved) }
-                        withAnimation { savedToBank = true }
-                    } label: {
-                        Label(
-                            savedToBank ? "Saved to Food Bank" : "Save to Food Bank",
-                            systemImage: savedToBank ? "checkmark.circle.fill" : "refrigerator"
-                        )
-                        .font(.subheadline)
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(savedToBank)
-                    .tint(savedToBank ? .green : nil)
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 16)
@@ -272,6 +261,7 @@ private struct MicronutrientField: View {
         ScanResultCard(
             entry: NutritionEntry.preview,
             onConfirm: {},
+            onConfirmAndSave: {},
             onRetake: {}
         )
         .frame(maxHeight: 600)

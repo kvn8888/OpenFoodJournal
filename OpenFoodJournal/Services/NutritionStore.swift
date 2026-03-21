@@ -150,81 +150,90 @@ final class NutritionStore {
         Task { try? await sync?.updateEntry(entry) }
     }
 
-    // MARK: - Server Sync (initial population)
+    // MARK: - Server Sync
 
-    /// Merges a full SyncResponse from the server into the local SwiftData store.
-    /// Only inserts records that don't exist locally (identified by UUID).
-    /// Existing local records are left untouched — local changes are always the source of truth.
-    /// Call this on first launch when SwiftData is empty to populate from the server.
-    func applySync(_ response: SyncResponse) {
-        // ── Collect existing IDs so we can skip duplicates ────────────────
-        let existingEntryIds = Set(
-            (try? modelContext.fetch(FetchDescriptor<NutritionEntry>()))?.map(\.id) ?? []
-        )
-        let existingFoodIds = Set(
-            (try? modelContext.fetch(FetchDescriptor<SavedFood>()))?.map(\.id) ?? []
-        )
+    /// Merges a SyncResponse from the server into the local SwiftData store.
+    /// Inserts records that don't exist locally and updates records that do.
+    /// Also applies user goals if present in the response.
+    func applySync(_ response: SyncResponse, userGoals: UserGoals? = nil) {
+        // ── Collect existing records for upsert ──────────────────────────
+        let existingEntries = (try? modelContext.fetch(FetchDescriptor<NutritionEntry>())) ?? []
+        let existingEntryMap = Dictionary(uniqueKeysWithValues: existingEntries.map { ($0.id, $0) })
+
+        let existingFoods = (try? modelContext.fetch(FetchDescriptor<SavedFood>())) ?? []
+        let existingFoodMap = Dictionary(uniqueKeysWithValues: existingFoods.map { ($0.id, $0) })
+
+        let existingContainers = (try? modelContext.fetch(FetchDescriptor<TrackedContainer>())) ?? []
+        let existingContainerMap = Dictionary(uniqueKeysWithValues: existingContainers.map { ($0.id, $0) })
 
         // ── 1. Ensure every APILog has a corresponding DailyLog ───────────
-        // Build a date-string → DailyLog cache for fast lookup when wiring entries.
         var logByDate: [String: DailyLog] = [:]
         for apiLog in response.dailyLogs {
-            // Normalise "2025-01-15" → midnight Date in the user's time zone
             let date = Self.parseDate(apiLog.date) ?? .now
-            // Reuse existing log or create a new one
             let log = fetchOrCreateLog(for: date)
-            // Also key by ID string for the entry-wiring step below
             logByDate[apiLog.id] = log
         }
 
-        // ── 2. Insert missing NutritionEntry records ───────────────────────
+        // ── 2. Upsert NutritionEntry records ────────────────────────────
         for apiEntry in response.nutritionEntries {
-            guard let entryUUID = UUID(uuidString: apiEntry.id),
-                  !existingEntryIds.contains(entryUUID) else { continue }
-
-            // Find the parent DailyLog using the API's daily_log_id
+            guard let entryUUID = UUID(uuidString: apiEntry.id) else { continue }
             guard let log = logByDate[apiEntry.dailyLogId] else { continue }
 
-            // Reconstruct the ServingSize enum from its three column values
             let serving = Self.buildServingSize(
                 type: apiEntry.servingType,
                 grams: apiEntry.servingGrams,
                 ml: apiEntry.servingMl
             )
-
-            // Parse timestamp string (ISO 8601) → Date; fall back to today
             let timestamp = ISO8601DateFormatter().date(from: apiEntry.timestamp ?? "") ?? .now
 
-            let entry = NutritionEntry(
-                id: entryUUID,
-                timestamp: timestamp,
-                name: apiEntry.name,
-                mealType: MealType(rawValue: apiEntry.mealType) ?? .snack,
-                scanMode: ScanMode(rawValue: apiEntry.scanMode ?? "manual") ?? .manual,
-                confidence: apiEntry.confidence,
-                calories: apiEntry.calories,
-                protein: apiEntry.protein,
-                carbs: apiEntry.carbs,
-                fat: apiEntry.fat,
-                micronutrients: apiEntry.micronutrients ?? [:],
-                servingSize: apiEntry.servingSize,
-                servingsPerContainer: apiEntry.servingsPerContainer,
-                brand: apiEntry.brand,
-                serving: serving,
-                servingQuantity: apiEntry.servingQuantity,
-                servingUnit: apiEntry.servingUnit,
-                servingMappings: apiEntry.servingMappings ?? []
-            )
-
-            modelContext.insert(entry)
-            entry.dailyLog = log
-            log.entries.append(entry)
+            if let existing = existingEntryMap[entryUUID] {
+                // Update existing entry with server values
+                existing.name = apiEntry.name
+                existing.mealType = MealType(rawValue: apiEntry.mealType) ?? .snack
+                existing.scanMode = ScanMode(rawValue: apiEntry.scanMode ?? "manual") ?? .manual
+                existing.confidence = apiEntry.confidence
+                existing.calories = apiEntry.calories
+                existing.protein = apiEntry.protein
+                existing.carbs = apiEntry.carbs
+                existing.fat = apiEntry.fat
+                existing.micronutrients = apiEntry.micronutrients ?? [:]
+                existing.servingSize = apiEntry.servingSize
+                existing.servingsPerContainer = apiEntry.servingsPerContainer
+                existing.brand = apiEntry.brand
+                existing.serving = serving
+                existing.servingQuantity = apiEntry.servingQuantity
+                existing.servingUnit = apiEntry.servingUnit
+                existing.servingMappings = apiEntry.servingMappings ?? []
+            } else {
+                let entry = NutritionEntry(
+                    id: entryUUID,
+                    timestamp: timestamp,
+                    name: apiEntry.name,
+                    mealType: MealType(rawValue: apiEntry.mealType) ?? .snack,
+                    scanMode: ScanMode(rawValue: apiEntry.scanMode ?? "manual") ?? .manual,
+                    confidence: apiEntry.confidence,
+                    calories: apiEntry.calories,
+                    protein: apiEntry.protein,
+                    carbs: apiEntry.carbs,
+                    fat: apiEntry.fat,
+                    micronutrients: apiEntry.micronutrients ?? [:],
+                    servingSize: apiEntry.servingSize,
+                    servingsPerContainer: apiEntry.servingsPerContainer,
+                    brand: apiEntry.brand,
+                    serving: serving,
+                    servingQuantity: apiEntry.servingQuantity,
+                    servingUnit: apiEntry.servingUnit,
+                    servingMappings: apiEntry.servingMappings ?? []
+                )
+                modelContext.insert(entry)
+                entry.dailyLog = log
+                log.entries.append(entry)
+            }
         }
 
-        // ── 3. Insert missing SavedFood records ────────────────────────────
+        // ── 3. Upsert SavedFood records ─────────────────────────────────
         for apiFood in response.savedFoods {
-            guard let foodUUID = UUID(uuidString: apiFood.id),
-                  !existingFoodIds.contains(foodUUID) else { continue }
+            guard let foodUUID = UUID(uuidString: apiFood.id) else { continue }
 
             let serving = Self.buildServingSize(
                 type: apiFood.servingType,
@@ -232,25 +241,88 @@ final class NutritionStore {
                 ml: apiFood.servingMl
             )
 
-            let food = SavedFood(
-                id: foodUUID,
-                name: apiFood.name,
-                brand: apiFood.brand,
-                calories: apiFood.calories,
-                protein: apiFood.protein,
-                carbs: apiFood.carbs,
-                fat: apiFood.fat,
-                micronutrients: apiFood.micronutrients ?? [:],
-                servingSize: apiFood.servingSize,
-                servingsPerContainer: apiFood.servingsPerContainer,
-                serving: serving,
-                servingQuantity: apiFood.servingQuantity,
-                servingUnit: apiFood.servingUnit,
-                servingMappings: apiFood.servingMappings ?? [],
-                originalScanMode: ScanMode(rawValue: apiFood.scanMode ?? "manual") ?? .manual
-            )
+            if let existing = existingFoodMap[foodUUID] {
+                existing.name = apiFood.name
+                existing.brand = apiFood.brand
+                existing.calories = apiFood.calories
+                existing.protein = apiFood.protein
+                existing.carbs = apiFood.carbs
+                existing.fat = apiFood.fat
+                existing.micronutrients = apiFood.micronutrients ?? [:]
+                existing.servingSize = apiFood.servingSize
+                existing.servingsPerContainer = apiFood.servingsPerContainer
+                existing.serving = serving
+                existing.servingQuantity = apiFood.servingQuantity
+                existing.servingUnit = apiFood.servingUnit
+                existing.servingMappings = apiFood.servingMappings ?? []
+            } else {
+                let food = SavedFood(
+                    id: foodUUID,
+                    name: apiFood.name,
+                    brand: apiFood.brand,
+                    calories: apiFood.calories,
+                    protein: apiFood.protein,
+                    carbs: apiFood.carbs,
+                    fat: apiFood.fat,
+                    micronutrients: apiFood.micronutrients ?? [:],
+                    servingSize: apiFood.servingSize,
+                    servingsPerContainer: apiFood.servingsPerContainer,
+                    serving: serving,
+                    servingQuantity: apiFood.servingQuantity,
+                    servingUnit: apiFood.servingUnit,
+                    servingMappings: apiFood.servingMappings ?? [],
+                    originalScanMode: ScanMode(rawValue: apiFood.scanMode ?? "manual") ?? .manual
+                )
+                modelContext.insert(food)
+            }
+        }
 
-            modelContext.insert(food)
+        // ── 4. Upsert TrackedContainer records ──────────────────────────
+        for apiContainer in response.trackedContainers {
+            guard let containerUUID = UUID(uuidString: apiContainer.id) else { continue }
+
+            if let existing = existingContainerMap[containerUUID] {
+                existing.foodName = apiContainer.foodName
+                existing.foodBrand = apiContainer.foodBrand
+                existing.caloriesPerServing = apiContainer.caloriesPerServing
+                existing.proteinPerServing = apiContainer.proteinPerServing
+                existing.carbsPerServing = apiContainer.carbsPerServing
+                existing.fatPerServing = apiContainer.fatPerServing
+                existing.micronutrientsPerServing = apiContainer.micronutrientsPerServing ?? [:]
+                existing.gramsPerServing = apiContainer.gramsPerServing
+                existing.startWeight = apiContainer.startWeight
+                existing.finalWeight = apiContainer.finalWeight
+                if let completedStr = apiContainer.completedDate {
+                    existing.completedDate = ISO8601DateFormatter().date(from: completedStr)
+                }
+            } else {
+                let startDate = ISO8601DateFormatter().date(from: apiContainer.startDate) ?? .now
+                let container = TrackedContainer(
+                    id: containerUUID,
+                    foodName: apiContainer.foodName,
+                    foodBrand: apiContainer.foodBrand,
+                    caloriesPerServing: apiContainer.caloriesPerServing,
+                    proteinPerServing: apiContainer.proteinPerServing,
+                    carbsPerServing: apiContainer.carbsPerServing,
+                    fatPerServing: apiContainer.fatPerServing,
+                    micronutrientsPerServing: apiContainer.micronutrientsPerServing ?? [:],
+                    gramsPerServing: apiContainer.gramsPerServing,
+                    startWeight: apiContainer.startWeight,
+                    startDate: startDate,
+                    savedFoodID: apiContainer.savedFoodId.flatMap { UUID(uuidString: $0) }
+                )
+                container.finalWeight = apiContainer.finalWeight
+                container.completedDate = apiContainer.completedDate.flatMap { ISO8601DateFormatter().date(from: $0) }
+                modelContext.insert(container)
+            }
+        }
+
+        // ── 5. Apply user goals if present ───────────────────────────────
+        if let goals = userGoals, let apiGoals = response.userGoals {
+            if let cal = apiGoals.calorieGoal { goals.dailyCalories = cal }
+            if let pro = apiGoals.proteinGoal { goals.dailyProtein = pro }
+            if let carb = apiGoals.carbsGoal { goals.dailyCarbs = carb }
+            if let fat = apiGoals.fatGoal { goals.dailyFat = fat }
         }
 
         save()

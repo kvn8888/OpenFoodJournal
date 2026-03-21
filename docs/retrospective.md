@@ -1259,3 +1259,365 @@ private static func parseDate(_ string: String) -> Date? {
 - **`try?` on the fetchAll call is fine at the call site**: The error is already captured in `SyncService.syncError` if you need to surface it. At the `.task` level, silent skip-on-error is the right behaviour — the app should always show *something*, even if sync fails.
 - **Static helpers on MainActor classes are pure by necessity**: A `static` function can't access `self`, so it must be pure. Using `static` for conversion/parsing helpers enforces that they have no side effects and are independently testable.
 
+---
+
+## Chapter 9 — Gesture UX: Swipe Actions, Tappable Radial Menus, and Unit Mapping in Edit View
+
+**Scope of work:** Five separate UX improvements that turned out to share a common root cause — SwiftUI gesture recognizers competing with each other in ways that produce silent bugs and invisible lag.
+
+---
+
+### 9.1 The `swipeActions` Silent-Failure Bug
+
+**The problem:** EntryRowView had `.swipeActions(edge: .trailing)` for delete since the beginning. Users couldn't trigger it. No SwiftUI warning, no runtime error — the modifier just did nothing.
+
+**Root cause:** `.swipeActions` is documented as applying to "list rows", but SwiftUI doesn't warn you when you apply it outside a `List`. It's silently ignored in `LazyVStack`, `VStack`, `ScrollView` — any container that isn't a `List`.
+
+The DailyLog was built with `ScrollView { LazyVStack(pinnedViews: .sectionHeaders) { ForEach { MealSectionView } } }` to get sticky section headers without a `List`. The trade-off was unknowingly disabling every swipe action in the entire hierarchy.
+
+**The fix:** Replace the `ScrollView + LazyVStack` with a `List`:
+
+```swift
+// Before: swipeActions silently ignored
+ScrollView {
+    LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
+        ForEach(MealType.allCases) { mealType in
+            MealSectionView(...)  // has .swipeActions inside — never fires
+        }
+    }
+}
+
+// After: swipeActions work correctly
+List {
+    // Header rows with clear background (no separator)
+    WeeklyCalendarStrip(selectedDate: $selectedDate)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+
+    MacroSummaryBar(log: log, goals: goals)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+
+    // Meal sections — Section{} inside List = proper sticky header
+    if let log, !log.entries.isEmpty {
+        ForEach(MealType.allCases) { mealType in
+            MealSectionView(...)  // .swipeActions now fired correctly
+        }
+    }
+}
+.listStyle(.plain)
+.scrollContentBackground(.hidden)
+```
+
+The key insight: `List` doesn't require all rows to be identical. The `WeeklyCalendarStrip` and `MacroSummaryBar` become plain list rows that happen to look different. The `listRowBackground(Color.clear)` + `listRowSeparator(.hidden)` + `listRowInsets(...)` trio is the pattern for "List rows that don't look like List rows".
+
+**What `Section{}` inside `List` does:** When `MealSectionView` returns `Section { ForEach { ... } } header: { ... }`, and it's inside a `List`, SwiftUI renders it as a proper sticky section header. The `LazyVStack(pinnedViews: .sectionHeaders)` was approximating this behavior — now we get the real thing.
+
+**The swipe directions added:**
+- Swipe left (`.trailing`): Delete — already existed on `EntryRowView`, now fires
+- Swipe right (`.leading`): Edit — added to the `Button` wrapper in `MealSectionView`
+
+```swift
+// MealSectionView — .swipeActions on the Button wrapper adds leading action
+Button {
+    onSelect(entry)
+} label: {
+    EntryRowView(entry: entry, onDelete: { onDelete(entry) })
+}
+.buttonStyle(.plain)
+.swipeActions(edge: .leading) {
+    Button { onSelect(entry) } label: {
+        Label("Edit", systemImage: "pencil")
+    }
+    .tint(.blue)
+}
+// Trailing delete still lives in EntryRowView — SwiftUI collects all
+// .swipeActions in the row hierarchy and merges them by edge
+```
+
+---
+
+### 9.2 The SwipeActions Lag Bug in FoodBankView
+
+**The problem:** Swiping on food rows in the Food Bank tab felt sluggish — there was a ~150ms delay before the swipe animation started.
+
+**Root cause:** The row was wrapped in a `Button {}`:
+
+```swift
+Button {
+    selectedFood = food
+} label: {
+    SavedFoodRowView(food: food)
+}
+.swipeActions(edge: .trailing, ...) { ... }
+.swipeActions(edge: .leading) { ... }
+```
+
+When you have a `Button` inside a `List` with `swipeActions`, iOS must choose between two gesture recognizers:
+1. The `Button`'s tap recognizer (which fires on release)
+2. The swipe recognizer (which needs to start tracking early)
+
+To resolve this, the system waits for the touch to move enough to definitively classify it as a swipe before committing. This disambiguation window is the lag users feel.
+
+**The fix:** Replace `Button {}` with `.contentShape(Rectangle()).onTapGesture {}`:
+
+```swift
+// Before: Button creates competing gesture recognizer
+Button {
+    selectedFood = food
+} label: {
+    SavedFoodRowView(food: food)
+}
+.tint(.primary)
+
+// After: onTapGesture resolves immediately without disambiguation
+SavedFoodRowView(food: food)
+    .contentShape(Rectangle())  // makes the entire rectangular area tappable
+    .onTapGesture { selectedFood = food }
+```
+
+Why does this work? `onTapGesture` is a higher-level modifier that doesn't create a competing `GestureRecognizer` in the same way a `Button` does. The swipe recognizer runs without needing to wait for a potential tap to resolve.
+
+**What you lose:** The `Button` provides a visual press highlight on touch-begin. `onTapGesture` does not. In a food bank list where rows don't have rich press states, this is acceptable — but it's a tradeoff worth knowing.
+
+**Rule of thumb:** In a `List` with `swipeActions`, prefer `onTapGesture + contentShape` over `Button` to avoid gesture lag. Use `Button` only when the press-highlight feedback is important (e.g., primary action buttons, not list navigation rows).
+
+---
+
+### 9.3 Making the Radial Menu Tappable and Dismissible
+
+**The problem:** The floating radial menu opened when holding and dragging to an option. But:
+1. Direct taps on option bubbles did nothing — users had to drag-and-release
+2. Tapping outside the open menu didn't close it — you had to tap the plus button again
+
+**The tappable options fix:**
+
+```swift
+optionBubble(item: item, isHighlighted: isHighlighted)
+    .offset(x: position.x, y: position.y)
+    .glassEffectID(item.id, in: glassNamespace)
+    .glassEffectTransition(.matchedGeometry)
+    .animation(.spring(duration: 0.2), value: isHighlighted)
+    // NEW — direct tap on bubble triggers its action
+    .onTapGesture {
+        close()
+        // 150ms delay: let the spring close animation start before
+        // presenting the destination sheet, prevents janky transitions
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+            item.action()
+        }
+    }
+```
+
+The 150ms delay is important. Without it, the sheet presentation and the close animation compete — the sheet appears while the bubble is still mid-animation. The delay matches what the drag-release path already used.
+
+**The dismiss-on-outside-tap fix:**
+
+```swift
+var body: some View {
+    ZStack(alignment: .bottom) {
+        // Dismiss layer — sits BEHIND the GlassEffectContainer in the ZStack
+        // so that taps on bubbles/plus-button are handled by those views first,
+        // and only "missed" taps reach this layer.
+        if isOpen {
+            Color.clear
+                .contentShape(Rectangle())  // gives hit-test area to a clear view
+                .ignoresSafeArea()          // extends into safe areas (status bar etc.)
+                .onTapGesture { close() }
+        }
+
+        GlassEffectContainer(spacing: 16) {
+            ZStack {
+                if isOpen { /* option bubbles with .onTapGesture */ }
+                plusButton  // always present — the morph anchor
+            }
+        }
+    }
+    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+    // ... animation modifier
+}
+```
+
+**Key insight: ZStack z-order determines gesture priority.** Views added later to a `ZStack` sit on top and receive gestures first. `GlassEffectContainer` comes after `Color.clear`, so:
+- Taps on the glass container → handled by GlassEffectContainer's children (bubbles, plus button)
+- Taps outside the glass container → fall through to `Color.clear` → dismiss
+
+`Color.clear` doesn't have a hit-test area by default (transparent views don't intercept touches). That's why `.contentShape(Rectangle())` is mandatory — it explicitly declares "this entire rectangle area should receive taps, even though it's clear."
+
+---
+
+### 9.4 Sharing an Internal Sheet Between Two Views
+
+**The problem:** `AddServingMappingSheet` was originally defined as `private struct` inside `LogFoodSheet.swift`. When we needed to reuse it in `EditEntryView.swift`, it was invisible.
+
+**Swift access control:**
+- `private struct Foo` in a file = file-private (`fileprivate`)  
+- The `private` keyword at top level acts like `fileprivate` — visible only within the same file
+- `internal struct Foo` (or just `struct Foo`) = visible across the entire module
+
+**The fix:** Remove `private`:
+
+```swift
+// Before — file-private, invisible to EditEntryView.swift
+private struct AddServingMappingSheet: View { ... }
+
+// After — internal, visible anywhere in the OpenFoodJournal module
+struct AddServingMappingSheet: View { ... }
+```
+
+No file reorganization needed. The sheet stays in `LogFoodSheet.swift` (it was designed there) and `EditEntryView.swift` just imports nothing extra — both are in the same module.
+
+**When to extract vs. just make internal:** If the shared type is likely to grow (more parameters, more previews, its own tests), move it to its own file. If it's a small modal that will only ever be opened from 2-3 call sites, making it internal is sufficient. `AddServingMappingSheet` is 80 lines and unlikely to grow significantly, so internal-in-LogFoodSheet is the right call.
+
+---
+
+### 9.5 The LogFood Baseline Bug
+
+**The problem:** When a user logged food with a quantity and unit (e.g., "250 g"), then opened the edit sheet for that journal entry, the quantity/unit shown was wrong — it showed the food's template values ("1 serving") rather than what was actually logged.
+
+**Root cause:** The `logButton` in `LogFoodSheet` created an entry from the food template and scaled the macros, but never updated `entry.servingQuantity` and `entry.servingUnit`:
+
+```swift
+// Before — macros scaled correctly, but baseline unset
+var entry = food.toNutritionEntry(mealType: selectedMealType)
+let factor = quantity / unitFactor / baseQuantity
+entry.calories *= factor
+entry.protein *= factor
+entry.carbs *= factor
+entry.fat *= factor
+// Missing: entry.servingQuantity = quantity
+// Missing: entry.servingUnit = selectedUnit
+nutritionStore.log(entry, to: logDate)
+```
+
+`toNutritionEntry()` copies `food.servingQuantity` and `food.servingUnit` (the template's "per serving" values), not what the user typed. So the entry stored "1 serving" with macros already scaled for 250g — inconsistent state.
+
+**The fix:** Two lines after scaling:
+
+```swift
+// After — macros scaled AND baseline matches what user typed
+entry.servingQuantity = quantity    // what the user entered (e.g. 250)
+entry.servingUnit = selectedUnit    // which unit they chose (e.g. "g")
+nutritionStore.log(entry, to: logDate)
+```
+
+**Why this matters for EditEntryView:** `EditEntryView` uses `entry.servingQuantity` as `baseQuantity` and `entry.servingUnit` as `baseUnit`. Every scaled display value and unit conversion is relative to these. With the bug, opening the edit sheet showed macros at "1 serving" instead of "250 g" — the numbers looked identical but the unit calculation was wrong, and changing the unit would produce nonsense values.
+
+---
+
+### 9.6 Adding Serving Mappings to EditEntryView
+
+**The problem:** If a food was stored as `.volume(ml: 240)` (milk, measured in mL), and the user wanted to edit a logged entry in weight (grams), they couldn't — the unit picker only showed volume units. The solution (adding a custom `"1 cup → 250 g"` mapping) was only available in `LogFoodSheet`, not in the journal edit view.
+
+**What was added to `EditEntryView`:**
+
+1. `@Environment(SyncService.self) private var syncService` — for the Turso push
+2. `@State private var showAddMapping = false` — controls the sheet
+3. `servingMappingsSection` — a `Form` section that shows existing mappings and an "Add Unit Mapping" button
+4. `addMapping(_ mapping: ServingMapping)` — called by the sheet's `onAdd` callback
+
+```swift
+private var servingMappingsSection: some View {
+    Section {
+        if entry.servingMappings.isEmpty {
+            Text("Add custom unit conversions (e.g. 1 cup = 250 g) to switch between measurement dimensions in the unit picker above.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } else {
+            ForEach(entry.servingMappings, id: \.self) { mapping in
+                HStack(spacing: 6) {
+                    Text(mapping.from.displayString)
+                        .fontWeight(.medium)
+                    Image(systemName: "arrow.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(mapping.to.displayString)
+                    Spacer()
+                }
+                .font(.subheadline)
+            }
+        }
+
+        Button { showAddMapping = true } label: {
+            Label("Add Unit Mapping", systemImage: "plus")
+        }
+    } header: {
+        Text("Unit Mappings")
+    }
+}
+
+private func addMapping(_ mapping: ServingMapping) {
+    entry.servingMappings.append(mapping)
+    nutritionStore.saveAndSyncEntry(entry)  // SwiftData + Turso
+}
+```
+
+The sheet is presented as:
+```swift
+.sheet(isPresented: $showAddMapping) {
+    AddServingMappingSheet { mapping in addMapping(mapping) }
+}
+```
+
+**How the unit conversion chain works:** Once a mapping is added (`{ from: 1 cup, to: 250 g }`):
+1. `availableUnits` recomputes and includes "g" (from the mapping's `to.unit`)
+2. User selects "g" in the picker → `selectedUnit = "g"`
+3. `unitFactor`:
+   - `entry.serving?.convert(1.0, from: "cup", to: "g")` → `nil` (`.volume` can't cross dimensions)
+   - Falls back to `conversionFactor(from: "cup", to: "g")` which searches `entry.servingMappings` → finds the mapping → returns `250/1 = 250`
+4. `displayCalories = (baseCalories / baseQuantity) / 250 * quantity` — correct cross-dimension scaling
+
+---
+
+### 9.7 What We Got Wrong
+
+1. **Building the DailyLog with LazyVStack instead of List from the start.** The decision to use a ScrollView+LazyVStack was made to get "custom scrolling behavior", but in hindsight, a List with `.listStyle(.plain)` + `.scrollContentBackground(.hidden)` gives identical visual results and doesn't silently break swipe actions.
+
+2. **Not saving `servingQuantity`/`servingUnit` in `logButton`.** This was caught weeks later when testing EditEntryView. The two-line fix was trivial — the lesson is to always verify that the data you're saving matches what the user sees.
+
+3. **`private struct` for a reusable component.** `AddServingMappingSheet` was designed as a standalone form and was always likely to be needed from multiple call sites. Starting `private` was natural (it was initially only used in one file), but the right next step when reusing it was to promote it to its own file, not just change access control. We chose the minimal change (remove `private`) which is fine for now.
+
+---
+
+### 9.8 Patterns Learned
+
+**Pattern: swipeActions needs a List.** Any time you want swipe actions, the parent must be a `List`. If your design uses a custom scroll container, the alternatives are: (a) use a `List` with custom row styling, (b) implement a `DragGesture`-based custom swipe view, or (c) put the action in a context menu instead.
+
+**Pattern: contentShape + onTapGesture for lag-free tappable list rows.** In a `List` with `swipeActions`, replace `Button{}` wrappers with:
+```swift
+YourRowView()
+    .contentShape(Rectangle())
+    .onTapGesture { doSomething() }
+```
+This avoids the gesture disambiguation delay without changing visual behavior for rows without press-state styling.
+
+**Pattern: ZStack + Color.clear dismiss layer.** The canonical pattern for "tap outside to dismiss" in a custom overlay:
+```swift
+ZStack {
+    if isOpen {
+        Color.clear
+            .contentShape(Rectangle())
+            .ignoresSafeArea()
+            .onTapGesture { dismiss() }
+    }
+    // your overlay content (sits on top, captures taps first)
+    YourOverlayContent()
+}
+```
+
+**Pattern: Sharing sub-views across files.** `private struct` = file-private. `struct` (implicit internal) = module-wide. For small reusable sheets, keeping them in the file where they were designed (without `private`) is fine. When a sheet grows complex enough to merit its own preview, move it to its own file.
+
+**Pattern: Animate-then-act for gesture-triggered sheets.** When a tap or gesture should both close an overlay and present a new screen:
+```swift
+.onTapGesture {
+    closeAnimation()  // or close()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        presentNewScreen()
+    }
+}
+```
+The 150ms let the close animation start before the new screen appears, preventing visual conflicts.
+
+

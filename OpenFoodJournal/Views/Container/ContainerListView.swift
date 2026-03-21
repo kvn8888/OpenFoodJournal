@@ -30,6 +30,9 @@ struct ContainerListView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(SyncService.self) private var syncService
 
+    /// Date to log completed container nutrition to
+    var logDate: Date = .now
+
     // ── State ─────────────────────────────────────────────────────
     @State private var containerToComplete: TrackedContainer?  // Sheet for entering final weight
     @State private var showNewContainer = false                 // Sheet for creating new container
@@ -54,7 +57,7 @@ struct ContainerListView: View {
                 }
             }
             .sheet(item: $containerToComplete) { container in
-                CompleteContainerSheet(container: container)
+                CompleteContainerSheet(container: container, logDate: logDate)
             }
             .sheet(isPresented: $showNewContainer) {
                 NewContainerSheet()

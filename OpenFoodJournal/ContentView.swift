@@ -5,9 +5,9 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
-    // Access the shared store and sync service injected by OpenFoodJournalApp
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(SyncService.self) private var syncService
+    @Environment(UserGoals.self) private var userGoals
 
     var body: some View {
         TabView {
@@ -25,15 +25,26 @@ struct ContentView: View {
             }
         }
         .tabBarMinimizeBehavior(.onScrollDown)
-        // On first launch (SwiftData is empty) pull all data from the server.
-        // Subsequent launches skip the fetch — local data is the authoritative source.
+        // Pull from server on every launch. Uses incremental sync when possible
+        // (only fetches records changed since last sync), full fetch otherwise.
         .task {
-            let logs = nutritionStore.fetchAllLogs()
-            guard logs.isEmpty else { return }   // already seeded
+            await pullFromServer()
+        }
+    }
 
-            if let response = try? await syncService.fetchAll() {
-                nutritionStore.applySync(response)
+    private func pullFromServer() async {
+        do {
+            let response: SyncResponse
+            if let lastSync = syncService.lastSyncDate {
+                // Incremental sync — only records changed since last pull
+                response = try await syncService.fetchChanges(since: lastSync)
+            } else {
+                // First launch or no prior sync — pull everything
+                response = try await syncService.fetchAll()
             }
+            nutritionStore.applySync(response, userGoals: userGoals)
+        } catch {
+            // Sync failure is non-fatal — local data still works
         }
     }
 }

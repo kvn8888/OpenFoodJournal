@@ -16,12 +16,12 @@ struct LogFoodSheet: View {
 
     // ── Input: the saved food to potentially log ──────────────────
     let food: SavedFood
+    /// The date to log this food to (passed from DailyLogView's selected date)
+    let logDate: Date
 
     // ── Local State ───────────────────────────────────────────────
     // The meal type the user selects before logging (defaults to snack)
     @State private var selectedMealType: MealType = .snack
-    // Target date — defaults to today, could be extended to pick a date
-    @State private var logDate: Date = .now
     // Quantity of this food the user wants to log (in the selected unit)
     @State private var quantity: Double
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
@@ -42,8 +42,9 @@ struct LogFoodSheet: View {
     private let baseQuantity: Double  // the food's stored serving quantity
     private let baseUnit: String      // the food's stored serving unit
 
-    init(food: SavedFood) {
+    init(food: SavedFood, logDate: Date = .now) {
         self.food = food
+        self.logDate = logDate
         // Use the food's own serving quantity and unit as the starting point.
         // If not set, default to "1 serving" which maps to a 1x multiplier.
         let qty = food.servingQuantity ?? 1.0
@@ -324,6 +325,12 @@ struct LogFoodSheet: View {
                     unit: micro.unit
                 )
             }
+            // Store what the user actually typed so EditEntryView can use it as
+            // the correct baseline.  Without this, opening the edit sheet shows the
+            // food's template quantity/unit (e.g. "1 serving") even though the macros
+            // were scaled for a different amount (e.g. "250 g").
+            entry.servingQuantity = quantity
+            entry.servingUnit = selectedUnit
             nutritionStore.log(entry, to: logDate)
             dismiss()
         } label: {
@@ -476,7 +483,8 @@ struct LogFoodSheet: View {
 /// For example: "1 cup → 244 g" means the user can later enter "1 cup"
 /// in the quantity picker and the app will scale macros accordingly.
 /// The caller receives the completed `ServingMapping` via the `onAdd` closure.
-private struct AddServingMappingSheet: View {
+/// Internal (not private) so EditEntryView can reuse the same sheet.
+struct AddServingMappingSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     // Callback — parent (LogFoodSheet) handles the actual model mutation

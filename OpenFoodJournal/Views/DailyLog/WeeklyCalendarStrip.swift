@@ -76,6 +76,9 @@ struct WeeklyCalendarStrip: View {
     /// UserGoals determines the calorie threshold for the "goal met" state.
     @Environment(UserGoals.self) private var goals
 
+    /// Horizontal drag offset for the swipe-to-navigate feel
+    @State private var dragOffset: CGFloat = 0
+
     /// Calendar used for all date math (start of week, comparisons, etc.)
     private let calendar = Calendar.current
 
@@ -94,62 +97,72 @@ struct WeeklyCalendarStrip: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Navigate to previous week
-            Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    selectedDate = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedDate) ?? selectedDate
-                }
-            } label: {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            // The 7 day cells, evenly distributed across available width
-            HStack(spacing: 0) {
-                ForEach(weekDates, id: \.self) { date in
-                    DayCellView(
-                        date: date,
-                        state: cellState(for: date)
-                    )
-                    .frame(maxWidth: .infinity)  // Even distribution
-                    .onTapGesture {
-                        // Only allow selecting today or past days
-                        if date <= Date.now || calendar.isDateInToday(date) {
-                            withAnimation(.spring(duration: 0.3)) {
-                                selectedDate = date
-                            }
+            ForEach(weekDates, id: \.self) { date in
+                DayCellView(
+                    date: date,
+                    state: cellState(for: date)
+                )
+                .frame(maxWidth: .infinity)
+                .onTapGesture {
+                    if date <= Date.now || calendar.isDateInToday(date) {
+                        withAnimation(.spring(duration: 0.3)) {
+                            selectedDate = date
                         }
                     }
                 }
             }
-
-            // Navigate to next week (disabled if it would go past today)
-            Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    let next = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedDate) ?? selectedDate
-                    // Allow navigating forward only if the week contains today or earlier
-                    if next <= Date.now {
-                        selectedDate = next
-                    }
-                }
-            } label: {
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(isCurrentWeek ? 0.3 : 1)
-            .disabled(isCurrentWeek)
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 8)
+        .offset(x: dragOffset)
         .glassEffect(in: .rect(cornerRadius: 16))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    let horizontal = value.translation.width
+                    // Rubber-band: dampen the drag and resist if at boundary
+                    let dampen: CGFloat
+                    if horizontal < 0 && isCurrentWeek {
+                        // Swiping left on current week — heavy resistance
+                        dampen = 0.1
+                    } else {
+                        dampen = 0.3
+                    }
+                    dragOffset = horizontal * dampen
+                }
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    let isHorizontal = abs(horizontal) > abs(value.translation.height)
+                    let threshold: CGFloat = 50
+
+                    if isHorizontal && abs(horizontal) > threshold {
+                        if horizontal < 0 && !isCurrentWeek {
+                            // Swipe left → next week
+                            let next = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedDate) ?? selectedDate
+                            if next <= Date.now {
+                                withAnimation(.spring(duration: 0.3)) {
+                                    selectedDate = next
+                                    dragOffset = 0
+                                }
+                                return
+                            }
+                        } else if horizontal > 0 {
+                            // Swipe right → previous week
+                            withAnimation(.spring(duration: 0.3)) {
+                                selectedDate = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedDate) ?? selectedDate
+                                dragOffset = 0
+                            }
+                            return
+                        }
+                    }
+
+                    // Snap back if swipe didn't trigger navigation
+                    withAnimation(.spring(duration: 0.3, bounce: 0.2)) {
+                        dragOffset = 0
+                    }
+                }
+        )
     }
 
     /// Whether the selected date is in the current week (disables forward nav)
