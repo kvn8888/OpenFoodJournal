@@ -852,3 +852,151 @@ dragOffset = CGSize(
 - **Buffer edits in @State**: Never bind a text field directly to a SwiftData model unless you want every keystroke to trigger a save. Buffer in `@State`, commit on Save.
 - **One model doesn't fit all**: Using a heavyweight reasoning model for structured extraction is wasteful. Match the model to the task — Flash for parsing, Pro for reasoning.
 - **Fix ambiguous math with module qualification**: When `cos()` is ambiguous, `CoreGraphics.cos()` is the answer. This is a recurring issue in SwiftUI projects that import both Foundation and CoreGraphics.
+
+---
+
+## Chapter 7: The ServingSize Enum — Making the Data Model Honest
+
+### The Problem with String/Double Serving Data
+
+Before this change, serving size was stored as three independent primitives on every `NutritionEntry` and `SavedFood`:
+
+```swift
+var servingQuantity: Double?   // e.g. 1.0
+var servingUnit: String?       // e.g. "cup"
+var servingMappings: [ServingMapping] // explicit conversion ratios
+```
+
+This worked, but it had a conceptual hole: there's no type-level distinction between a mass serving (100 g of chicken) and a volume serving (240 mL of milk) and a serving that's both (1 cup = 240 mL = 228 g of flour). All three looked identical in the model. Any code that needed to do unit conversion had to hunt through `servingMappings` for an explicit ratio, and if none existed, it silently fell back to `1.0`.
+
+The ask: **"The serving size could be an enum. That holds either mass or volume or both. And Gemini inserts this. And the database schema has to be updated."**
+
+This is exactly the kind of data modelling insight that makes a codebase better — not a feature, but an improvement in how truth is represented.
+
+### Designing the Enum
+
+The enum needed to carry three semantic cases:
+
+```swift
+enum ServingSize {
+    case mass(grams: Double)          // solid food — weight only
+    case volume(ml: Double)           // liquid — volume only
+    case both(grams: Double, ml: Double)  // labelled food with both (e.g. "1 cup (228g)")
+}
+```
+
+Each case stores its values in SI base units (grams, millilitres) regardless of how the user sees them. This means `convert()` only needs to know how to go from one display unit to the canonical base value and back:
+
+```swift
+func convert(_ value: Double, from: String, to: String) -> Double? {
+    // Mass-only: use massConversions table
+    // Volume-only: use volumeConversions table
+    // Both: can cross-convert via density (grams / mL)
+    //       e.g. convert 1 cup to oz: cups → mL → grams → oz
+}
+```
+
+The cross-dimensional path in `.both` is the clever part: if you know `grams` and `ml` for the same serving, you know the density. That lets you convert between mass and volume units for the same food, which is exactly what nutrition label math requires.
+
+### Standard Unit Tables
+
+Two static dictionaries map display strings to multipliers relative to the base unit:
+
+```swift
+static let massConversions: [String: Double] = [
+    "g": 1.0, "oz": 28.3495, "kg": 1000.0, "lb": 453.592
+]
+static let volumeConversions: [String: Double] = [
+    "mL": 1.0, "cup": 240.0, "tbsp": 14.787, "tsp": 4.929,
+    "fl oz": 29.574, "L": 1000.0
+]
+```
+
+`availableUnits` returns the appropriate list for the picker — mass types show weight units, volume types show volume units, `.both` shows all of them.
+
+### Threading It Through the Stack
+
+Getting typing right in one model is the easy part. The real work is threading the new type through every layer of the system without breaking anything:
+
+**Models** — `NutritionEntry` and `SavedFood` gain `serving: ServingSize?` and `servingCount: Double`. The legacy fields (`servingQuantity`, `servingUnit`, `servingMappings`) remain for the entries created before the migration. This is additive, not breaking.
+
+**ScanService** — `GeminiNutritionResponse` gets three new fields: `serving_type`, `serving_grams`, `serving_ml`. The mapping function builds the enum from these with a fallback chain:
+
+```swift
+let serving: ServingSize? = {
+    let g = servingGrams ?? servingWeightGrams  // new field or legacy weight
+    let ml = servingMl
+    switch servingType {
+    case "both":  if let g, let ml { return .both(grams: g, ml: ml) }; fallthrough
+    case "mass":  if let g { return .mass(grams: g) }
+    case "volume": if let ml { return .volume(ml: ml) }
+    default:      if let g { return .mass(grams: g) }  // legacy path
+    }
+    return nil
+}()
+```
+
+The `fallthrough` on `"both"` handles the case where Gemini says `"both"` but only provides one value — it gracefully degrades to mass-only.
+
+**SyncService** — The API DTOs (`APIEntry`, `APIFood`) add `servingType`, `servingGrams`, `servingMl` with snake_case `CodingKeys`. The outbound request bodies in `createEntry`, `updateEntry`, `createFood`, `updateFood` send the new fields:
+
+```swift
+"serving_type": entry.serving?.type as Any,   // "mass" | "volume" | "both" | nil
+"serving_grams": entry.serving?.grams as Any,
+"serving_ml": entry.serving?.ml as Any,
+```
+
+Using `as Any` is idiomatic Swift for optional values in `[String: Any]` dictionaries — it sends `null` to JSON when the optional is nil.
+
+**Server (db.js)** — Three new columns added to both `CREATE TABLE` statements. The `IF NOT EXISTS` guard means existing databases aren't touched; new databases get the columns from day one. Existing Turso rows simply have NULL for these fields, which is correct — they're pre-migration entries.
+
+**Server (routes.js)** — The POST handlers destructure the new fields and include them in the INSERT; the PUT handlers add them to the `allowedFields` array so they're settable. This follows the existing pattern for optional fields.
+
+**Server (index.js)** — Both Gemini prompts now ask for the three new fields with explicit rules. The key instruction for cross-dimensional foods:
+
+> For `serving_type`: use `"mass"` if only grams known, `"volume"` if only volume known, `"both"` if the label shows both a weight and a volume for the same serving.
+> For `serving_ml`: convert if label shows other volume units (1 cup = 240 mL, 1 tbsp = 15 mL, 1 fl oz = 30 mL).
+
+Giving Gemini explicit conversion constants produces more consistent output than asking it to estimate.
+
+**EditEntryView** — The unit picker now prefers `entry.serving?.availableUnits` (standardised unit tables) over the ad-hoc set extracted from `servingMappings`. The `unitFactor` tries the enum's `convert()` first, then falls back to `servingMappings` for custom units:
+
+```swift
+private var unitFactor: Double {
+    if selectedUnit == baseUnit { return 1.0 }
+    if let factor = entry.serving?.convert(1.0, from: baseUnit, to: selectedUnit) {
+        return factor  // works for all standard units
+    }
+    return conversionFactor(from: baseUnit, to: selectedUnit) ?? 1.0  // custom units
+}
+```
+
+### The Bug: Parameter Order
+
+Swift named parameters must be passed in declaration order. The `NutritionEntry` init declares:
+
+```swift
+init(... brand: String? = nil, serving: ServingSize? = nil, servingCount: Double = 1.0, servingQuantity: Double? = nil ...)
+```
+
+The initial `ScanService` call passed `serving:` after `servingMappings:`, which is incorrect order. The compiler error was:
+
+```
+error: argument 'serving' must precede argument 'servingQuantity'
+```
+
+This is one of those errors where you need to look at the init declaration, not guess. The fix was mechanical: reorder the arguments in the call site to match the declaration.
+
+### What We Didn't Do (Yet)
+
+- **LogFoodSheet** still uses `+/-` stepper buttons. The next iteration should replace these with a `TextField(.decimalPad)` backed by the `serving.availableUnits` picker, the same way `EditEntryView` works.
+- **Turso migration for existing rows**: The `IF NOT EXISTS` guard in `db.js` means existing databases won't get the new columns until the table is dropped and recreated. An `ALTER TABLE ... ADD COLUMN` migration script should be added for production.
+- **Decoding `serving` from API responses**: `SyncResponse` carries `APIEntry`/`APIFood` with the new fields, but `fetchAll()` isn't yet wired to populate SwiftData. When that sync path is built, it will reconstruct `ServingSize` from the three column values.
+
+### Lessons Learned
+
+- **Type the domain, not the storage**: Storing serving size as `(Double?, String?)` is database thinking. Storing it as `ServingSize` is domain thinking. The enum makes illegal states unrepresentable — you can't have a `.both` without at least one valid dimension.
+- **Additive migrations beat breaking ones**: Adding new optional fields and keeping old ones lets you ship without a migration script. Existing data still works; new data is richer.
+- **Give LLMs constants, not instructions**: Telling Gemini "1 cup = 240 mL, 1 tbsp = 15 mL" in the prompt is more reliable than "convert volume units to mL". Exact constants reduce hallucination surface area.
+- **Swift parameter order is positional, not semantic**: Even with named parameters, Swift enforces declaration order. When you add new properties to an `init`, always check call sites for order violations — the compiler will catch it, but only at build time.
+- **`fallthrough` in Swift switch is explicit and useful**: Unlike C, Swift doesn't fallthrough by default. Using it deliberately (as in the `ServingSize` decoding switch) communicates intent: "if this condition isn't met, try the next case."
