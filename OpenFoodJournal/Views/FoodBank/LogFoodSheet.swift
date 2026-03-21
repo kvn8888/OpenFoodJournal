@@ -19,6 +19,14 @@ struct LogFoodSheet: View {
     @State private var selectedMealType: MealType = .snack
     // Target date — defaults to today, could be extended to pick a date
     @State private var logDate: Date = .now
+    // Serving quantity multiplier — 1.0 = one serving, 2.0 = double, etc.
+    @State private var servingCount: Double = 1.0
+
+    /// Scaled calories based on serving count
+    private var scaledCalories: Double { food.calories * servingCount }
+    private var scaledProtein: Double { food.protein * servingCount }
+    private var scaledCarbs: Double { food.carbs * servingCount }
+    private var scaledFat: Double { food.fat * servingCount }
 
     var body: some View {
         NavigationStack {
@@ -36,6 +44,11 @@ struct LogFoodSheet: View {
                     if !food.micronutrients.isEmpty {
                         micronutrientSection
                     }
+
+                    Divider()
+
+                    // ── Serving quantity adjustment ────────────────────
+                    servingSection
 
                     Divider()
 
@@ -73,6 +86,13 @@ struct LogFoodSheet: View {
             .padding(.vertical, 4)
             .background(.quaternary, in: .capsule)
 
+            // Brand (if available)
+            if let brand = food.brand, !brand.isEmpty {
+                Text(brand)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
             // Food name
             Text(food.name)
                 .font(.title2)
@@ -93,10 +113,10 @@ struct LogFoodSheet: View {
     /// 2x2 grid showing calories, protein, carbs, and fat
     private var macroGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            MacroCell(label: "Calories", value: food.calories, unit: "kcal", color: .orange)
-            MacroCell(label: "Protein", value: food.protein, unit: "g", color: .blue)
-            MacroCell(label: "Carbs", value: food.carbs, unit: "g", color: .green)
-            MacroCell(label: "Fat", value: food.fat, unit: "g", color: .yellow)
+            MacroCell(label: "Calories", value: scaledCalories, unit: "kcal", color: .orange)
+            MacroCell(label: "Protein", value: scaledProtein, unit: "g", color: .blue)
+            MacroCell(label: "Carbs", value: scaledCarbs, unit: "g", color: .green)
+            MacroCell(label: "Fat", value: scaledFat, unit: "g", color: .yellow)
         }
     }
 
@@ -155,9 +175,20 @@ struct LogFoodSheet: View {
     /// and adds it to today's log via NutritionStore
     private var logButton: some View {
         Button {
-            // Convert SavedFood → NutritionEntry with the selected meal type
-            let entry = food.toNutritionEntry(mealType: selectedMealType)
-            // Add to the store (creates/fetches today's DailyLog automatically)
+            // Convert SavedFood → NutritionEntry with the selected meal type,
+            // scaled by the serving count
+            var entry = food.toNutritionEntry(mealType: selectedMealType)
+            entry.calories *= servingCount
+            entry.protein *= servingCount
+            entry.carbs *= servingCount
+            entry.fat *= servingCount
+            // Scale micronutrients too
+            for (key, micro) in entry.micronutrients {
+                entry.micronutrients[key] = MicronutrientValue(
+                    value: micro.value * servingCount,
+                    unit: micro.unit
+                )
+            }
             nutritionStore.log(entry, to: logDate)
             dismiss()
         } label: {
@@ -167,6 +198,58 @@ struct LogFoodSheet: View {
                 .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
+    }
+
+    // MARK: - Serving Quantity
+
+    /// Lets the user adjust how many servings they're logging.
+    /// Shows +/- buttons and a text field for direct entry.
+    private var servingSection: some View {
+        VStack(spacing: 8) {
+            Text("Servings")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 16) {
+                // Decrease button
+                Button {
+                    if servingCount > 0.25 {
+                        servingCount -= 0.25
+                    }
+                } label: {
+                    Image(systemName: "minus.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .disabled(servingCount <= 0.25)
+
+                // Serving count display
+                Text(servingCount.truncatingRemainder(dividingBy: 1) == 0
+                     ? String(format: "%.0f", servingCount)
+                     : String(format: "%.2g", servingCount))
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .monospacedDigit()
+                    .frame(minWidth: 60)
+
+                // Increase button
+                Button {
+                    servingCount += 0.25
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.blue)
+                }
+            }
+
+            // Show what one serving is
+            if let serving = food.servingSize {
+                Text("1 serving = \(serving)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+        }
     }
 
     // MARK: - Helpers

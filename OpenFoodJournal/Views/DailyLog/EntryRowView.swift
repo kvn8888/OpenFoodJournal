@@ -11,6 +11,14 @@ struct EntryRowView: View {
         HStack(spacing: 12) {
             // Macro mini-summary
             VStack(alignment: .leading, spacing: 2) {
+                // Show brand above food name if available
+                if let brand = entry.brand, !brand.isEmpty {
+                    Text(brand)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 Text(entry.name)
                     .font(.body)
                     .fontWeight(.medium)

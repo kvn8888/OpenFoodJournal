@@ -53,7 +53,8 @@ struct RadialMenuButton: View {
         ZStack {
             // Dim overlay when menu is open (tappable to dismiss)
             if isOpen {
-                Color.black.opacity(0.3)
+                Rectangle()
+                    .fill(.ultraThinMaterial)
                     .ignoresSafeArea()
                     .onTapGesture { close() }
                     .transition(.opacity)

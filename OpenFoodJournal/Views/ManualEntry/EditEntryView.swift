@@ -25,6 +25,12 @@ struct EditEntryView: View {
                 Section("Food Info") {
                     TextField("Food name", text: $entry.name)
 
+                    // Brand field — editable, shows placeholder if not set
+                    TextField("Brand (optional)", text: Binding(
+                        get: { entry.brand ?? "" },
+                        set: { entry.brand = $0.isEmpty ? nil : $0 }
+                    ))
+
                     Picker("Meal", selection: $entry.mealType) {
                         ForEach(MealType.allCases) { type in
                             Label(type.rawValue, systemImage: type.systemImage)
