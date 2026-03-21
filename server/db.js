@@ -132,6 +132,47 @@ async function runMigrations() {
     INSERT OR IGNORE INTO user_goals (id) VALUES ('default')
   `);
 
+  // ── Column-Level Migrations ────────────────────────────────────
+  // Add columns introduced after the initial schema was deployed.
+  // PRAGMA table_info() lets us check existing columns without catching exceptions.
+  // Each block only runs the ALTER TABLE if the column is absent, making it safe
+  // to re-deploy without touching already-migrated databases.
+
+  // serving_type / serving_grams / serving_ml — added with ServingSize enum refactor
+  const entryInfo = await db.execute("PRAGMA table_info(nutrition_entries)");
+  const entryColumns = entryInfo.rows.map((r) => r.name);
+  if (!entryColumns.includes("serving_type")) {
+    await db.execute(
+      "ALTER TABLE nutrition_entries ADD COLUMN serving_type TEXT"
+    );
+    await db.execute(
+      "ALTER TABLE nutrition_entries ADD COLUMN serving_grams REAL"
+    );
+    await db.execute(
+      "ALTER TABLE nutrition_entries ADD COLUMN serving_ml REAL"
+    );
+    console.log(
+      "[db] Migrated nutrition_entries: added serving_type, serving_grams, serving_ml"
+    );
+  }
+
+  const foodInfo = await db.execute("PRAGMA table_info(saved_foods)");
+  const foodColumns = foodInfo.rows.map((r) => r.name);
+  if (!foodColumns.includes("serving_type")) {
+    await db.execute(
+      "ALTER TABLE saved_foods ADD COLUMN serving_type TEXT"
+    );
+    await db.execute(
+      "ALTER TABLE saved_foods ADD COLUMN serving_grams REAL"
+    );
+    await db.execute(
+      "ALTER TABLE saved_foods ADD COLUMN serving_ml REAL"
+    );
+    console.log(
+      "[db] Migrated saved_foods: added serving_type, serving_grams, serving_ml"
+    );
+  }
+
   console.log("[db] Migrations complete.");
 }
 
