@@ -150,6 +150,147 @@ final class NutritionStore {
         Task { try? await sync?.updateEntry(entry) }
     }
 
+    // MARK: - Server Sync (initial population)
+
+    /// Merges a full SyncResponse from the server into the local SwiftData store.
+    /// Only inserts records that don't exist locally (identified by UUID).
+    /// Existing local records are left untouched — local changes are always the source of truth.
+    /// Call this on first launch when SwiftData is empty to populate from the server.
+    func applySync(_ response: SyncResponse) {
+        // ── Collect existing IDs so we can skip duplicates ────────────────
+        let existingEntryIds = Set(
+            (try? modelContext.fetch(FetchDescriptor<NutritionEntry>()))?.map(\.id) ?? []
+        )
+        let existingFoodIds = Set(
+            (try? modelContext.fetch(FetchDescriptor<SavedFood>()))?.map(\.id) ?? []
+        )
+
+        // ── 1. Ensure every APILog has a corresponding DailyLog ───────────
+        // Build a date-string → DailyLog cache for fast lookup when wiring entries.
+        var logByDate: [String: DailyLog] = [:]
+        for apiLog in response.dailyLogs {
+            // Normalise "2025-01-15" → midnight Date in the user's time zone
+            let date = Self.parseDate(apiLog.date) ?? .now
+            // Reuse existing log or create a new one
+            let log = fetchOrCreateLog(for: date)
+            // Also key by ID string for the entry-wiring step below
+            logByDate[apiLog.id] = log
+        }
+
+        // ── 2. Insert missing NutritionEntry records ───────────────────────
+        for apiEntry in response.nutritionEntries {
+            guard let entryUUID = UUID(uuidString: apiEntry.id),
+                  !existingEntryIds.contains(entryUUID) else { continue }
+
+            // Find the parent DailyLog using the API's daily_log_id
+            guard let log = logByDate[apiEntry.dailyLogId] else { continue }
+
+            // Reconstruct the ServingSize enum from its three column values
+            let serving = Self.buildServingSize(
+                type: apiEntry.servingType,
+                grams: apiEntry.servingGrams,
+                ml: apiEntry.servingMl
+            )
+
+            // Parse timestamp string (ISO 8601) → Date; fall back to today
+            let timestamp = ISO8601DateFormatter().date(from: apiEntry.timestamp ?? "") ?? .now
+
+            let entry = NutritionEntry(
+                id: entryUUID,
+                timestamp: timestamp,
+                name: apiEntry.name,
+                mealType: MealType(rawValue: apiEntry.mealType) ?? .snack,
+                scanMode: ScanMode(rawValue: apiEntry.scanMode ?? "manual") ?? .manual,
+                confidence: apiEntry.confidence,
+                calories: apiEntry.calories,
+                protein: apiEntry.protein,
+                carbs: apiEntry.carbs,
+                fat: apiEntry.fat,
+                micronutrients: apiEntry.micronutrients ?? [:],
+                servingSize: apiEntry.servingSize,
+                servingsPerContainer: apiEntry.servingsPerContainer,
+                brand: apiEntry.brand,
+                serving: serving,
+                servingQuantity: apiEntry.servingQuantity,
+                servingUnit: apiEntry.servingUnit,
+                servingMappings: apiEntry.servingMappings ?? []
+            )
+
+            modelContext.insert(entry)
+            entry.dailyLog = log
+            log.entries.append(entry)
+        }
+
+        // ── 3. Insert missing SavedFood records ────────────────────────────
+        for apiFood in response.savedFoods {
+            guard let foodUUID = UUID(uuidString: apiFood.id),
+                  !existingFoodIds.contains(foodUUID) else { continue }
+
+            let serving = Self.buildServingSize(
+                type: apiFood.servingType,
+                grams: apiFood.servingGrams,
+                ml: apiFood.servingMl
+            )
+
+            let food = SavedFood(
+                id: foodUUID,
+                name: apiFood.name,
+                brand: apiFood.brand,
+                calories: apiFood.calories,
+                protein: apiFood.protein,
+                carbs: apiFood.carbs,
+                fat: apiFood.fat,
+                micronutrients: apiFood.micronutrients ?? [:],
+                servingSize: apiFood.servingSize,
+                servingsPerContainer: apiFood.servingsPerContainer,
+                serving: serving,
+                servingQuantity: apiFood.servingQuantity,
+                servingUnit: apiFood.servingUnit,
+                servingMappings: apiFood.servingMappings ?? [],
+                originalScanMode: ScanMode(rawValue: apiFood.scanMode ?? "manual") ?? .manual
+            )
+
+            modelContext.insert(food)
+        }
+
+        save()
+    }
+
+    // MARK: - Sync Helpers
+
+    /// Parse an ISO date string like "2025-01-15" into the start-of-day Date in local time.
+    private static func parseDate(_ string: String) -> Date? {
+        // Try plain YYYY-MM-DD first (most common from the server)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        formatter.timeZone = .current
+        if let date = formatter.date(from: string) {
+            return Calendar.current.startOfDay(for: date)
+        }
+        // Fall back to full ISO 8601
+        return ISO8601DateFormatter().date(from: string).map {
+            Calendar.current.startOfDay(for: $0)
+        }
+    }
+
+    /// Reconstruct a ServingSize enum from the three column values stored in the database.
+    /// Mirrors the fallback logic in ScanService.toNutritionEntry().
+    private static func buildServingSize(type: String?, grams: Double?, ml: Double?) -> ServingSize? {
+        switch type {
+        case "both":
+            if let g = grams, let m = ml { return .both(grams: g, ml: m) }
+            fallthrough  // if one value is missing, degrade to mass or volume
+        case "mass":
+            if let g = grams { return .mass(grams: g) }
+        case "volume":
+            if let m = ml { return .volume(ml: m) }
+        default:
+            // Legacy rows — derive from gram weight if available
+            if let g = grams { return .mass(grams: g) }
+        }
+        return nil
+    }
+
     // MARK: - Micronutrient Aggregation
 
     /// The time period for aggregating micronutrient data
