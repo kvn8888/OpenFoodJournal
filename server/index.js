@@ -53,12 +53,15 @@ const flashModel = genAI.getGenerativeModel({
 
 // Gemini 3.1 Pro — high-reasoning model for food photo estimation
 // Uses thinking/reasoning for more accurate portion size and nutrient estimates
+// thinkingLevel replaces thinkingBudget for Gemini 3+ models (Google recommendation)
+// Values: "low" | "medium" | "high" — "high" is default for 3.1 Pro anyway,
+// but explicit config documents intent and survives model name changes.
 const proModel = genAI.getGenerativeModel({
   model: "gemini-3.1-pro-preview",
   generationConfig: {
     responseMimeType: "application/json",
     thinkingConfig: {
-      thinkingBudget: 8192,
+      thinkingLevel: "HIGH",
     },
   },
 });
