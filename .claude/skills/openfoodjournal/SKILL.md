@@ -56,7 +56,7 @@ See [references/models.md](references/models.md) for full property lists.
 
 See [references/services.md](references/services.md) for full API contracts.
 
-- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations.
+- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations. **`applySync(_ response: SyncResponse)`** merges a full server response into SwiftData — upserts DailyLogs by date, inserts missing entries/foods by UUID (skips if already local). Private helpers: `buildServingSize(type:grams:ml:) -> ServingSize?`, `parseDate(_ string:) -> Date?`.
 - **`SyncService`** — `@Observable @MainActor`. Handles all HTTP communication with the Turso-backed REST API at `/api/*`. Typed API models (`APIEntry`, `APIFood`, `APIContainer`, `APIGoals`, `SyncResponse`). Fire-and-forget pattern: local SwiftData write first, then async sync to server. Injected into views via `@Environment(SyncService.self)`.
 - **`ScanService`** — Multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
@@ -91,6 +91,18 @@ iOS App (SwiftData local cache)
 
 **Strategy**: Local-first, server sync. SwiftData writes happen immediately for UI responsiveness. SyncService fires async tasks to push changes to the server. Failures are silently caught (`try?`) — the local state is always authoritative for the current session.
 
+**Sync-on-launch**: `ContentView` `.task` checks `nutritionStore.fetchAllLogs().isEmpty`. If empty (first install), calls `syncService.fetchAll()` + `nutritionStore.applySync(_:)` to seed SwiftData from the server. Guard skips this on subsequent launches — local data wins.
+
+**Turso migration pattern** (`server/db.js`): Use `PRAGMA table_info(table_name)` to check existing columns before running `ALTER TABLE ... ADD COLUMN`. Idempotent on re-deploy. Example:
+```javascript
+const info = await db.execute("PRAGMA table_info(nutrition_entries)");
+const cols = info.rows.map(r => r.name);
+if (!cols.includes("serving_type")) {
+  await db.execute("ALTER TABLE nutrition_entries ADD COLUMN serving_type TEXT");
+  // ...
+}
+```
+
 **Server tables**: `daily_logs`, `nutrition_entries`, `saved_foods`, `tracked_containers`, `user_goals` — schema in `server/db.js`.
 
 **API endpoints** (mounted at `/api`):
@@ -117,6 +129,9 @@ iOS App (SwiftData local cache)
 4. **`@ObservationIgnored` on `@AppStorage`** — required in `UserGoals` to avoid double-wrapper conflict. Every new `@AppStorage` property needs it.
 5. **`private` enum across structs** — `private` scopes to the type, not the file. Use `fileprivate` for shared-file enums.
 6. **`ModelContainer(for:configurations:)`** — not `schema:`. The `Schema` wrapper is only for migrations.
+7. **Swift named parameters must be in declaration order** — adding a new `init` parameter doesn't let you put it anywhere in call sites. Reorder both the declaration *and* all call sites to match. Build will catch mismatches.
+8. **`PRAGMA table_info()` not `IF NOT EXISTS` for ALTER TABLE** — SQLite doesn't support `ALTER TABLE ADD COLUMN IF NOT EXISTS`. Use PRAGMA to check first.
+9. **Capture IDs before `modelContext.delete()`** — after deletion, SwiftData objects may be invalidated. Store `let id = object.id` before the delete call.
 
 ## Entitlements Still Needed (Xcode-only)
 
