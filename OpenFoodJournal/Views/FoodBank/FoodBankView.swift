@@ -94,7 +94,16 @@ struct FoodBankView: View {
                     SavedFoodRowView(food: food)
                 }
                 .tint(.primary)  // Keep text colors normal (not blue link style)
-                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                // Trailing swipe (left) — Edit is the first/light action, Delete requires more swipe
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    // Edit: opens the name/brand/macro editor
+                    Button {
+                        foodToEdit = food
+                    } label: {
+                        Label("Edit", systemImage: "pencil")
+                    }
+                    .tint(.blue)
+                    // Delete: destructive second action (deeper swipe required)
                     Button(role: .destructive) {
                         let foodId = food.id
                         modelContext.delete(food)
@@ -104,13 +113,14 @@ struct FoodBankView: View {
                         Label("Delete", systemImage: "trash")
                     }
                 }
+                // Leading swipe (right) — quick-add shortcut opens the same LogFoodSheet as tapping
                 .swipeActions(edge: .leading) {
                     Button {
-                        foodToEdit = food
+                        selectedFood = food
                     } label: {
-                        Label("Edit", systemImage: "pencil")
+                        Label("Add", systemImage: "plus")
                     }
-                    .tint(.blue)
+                    .tint(.green)
                 }
             }
         }

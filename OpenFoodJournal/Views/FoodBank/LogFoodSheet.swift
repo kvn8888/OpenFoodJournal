@@ -5,11 +5,14 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import SwiftData
 
 struct LogFoodSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(SyncService.self) private var syncService
 
     // ── Input: the saved food to potentially log ──────────────────
     let food: SavedFood
@@ -25,6 +28,10 @@ struct LogFoodSheet: View {
     @State private var quantityText: String
     // The unit the user has selected for this log (may differ from the food's stored unit)
     @State private var selectedUnit: String
+    // Controls the nested Edit Food sheet
+    @State private var showEditFood = false
+    // Controls the Add Serving Mapping sheet
+    @State private var showAddMapping = false
 
     // Snapshot of the food's baseline values at the time the sheet opens.
     // These never change; all display math is relative to these.
@@ -140,6 +147,13 @@ struct LogFoodSheet: View {
 
                     Divider()
 
+                    // ── Custom unit mappings ──────────────────────────
+                    // Lets the user define conversions like "1 cup = 244g" so
+                    // those units appear in the unit picker above.
+                    servingMappingsSection
+
+                    Divider()
+
                     // ── Meal type picker ──────────────────────────────
                     mealPicker
 
@@ -155,6 +169,15 @@ struct LogFoodSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                // Edit Food — opens EditFoodSheet as a nested sheet so the user can
+                // correct macros, name, or brand without leaving the log flow
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        showEditFood = true
+                    } label: {
+                        Image(systemName: "pencil")
+                    }
+                }
                 // "Done" dismisses the decimal pad keyboard
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -164,6 +187,16 @@ struct LogFoodSheet: View {
                             to: nil, from: nil, for: nil
                         )
                     }
+                }
+            }
+            // Nested sheet for editing the food's name, brand, and macros
+            .sheet(isPresented: $showEditFood) {
+                EditFoodSheet(food: food)
+            }
+            // Nested sheet for defining a new unit conversion mapping
+            .sheet(isPresented: $showAddMapping) {
+                AddServingMappingSheet { mapping in
+                    addMapping(mapping)
                 }
             }
         }
@@ -360,6 +393,60 @@ struct LogFoodSheet: View {
         }
     }
 
+    // MARK: - Serving Mappings
+
+    /// Shows the food's custom unit conversion mappings and lets the user add new ones.
+    /// New mappings (e.g. "1 cup = 244g") are saved to SwiftData and synced to Turso,
+    /// and immediately appear in the unit picker above.
+    private var servingMappingsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Unit Mappings")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                // Opens the AddServingMappingSheet for a new from→to conversion
+                Button {
+                    showAddMapping = true
+                } label: {
+                    Label("Add", systemImage: "plus.circle")
+                        .font(.subheadline)
+                }
+            }
+
+            if food.servingMappings.isEmpty {
+                // Hint text when no mappings exist yet
+                Text("Define custom unit conversions for this food (e.g. 1 cup = 244g). These will appear as unit options in the picker above.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // Show each existing mapping as a simple arrow expression
+                ForEach(food.servingMappings, id: \.self) { mapping in
+                    HStack(spacing: 6) {
+                        Text(mapping.from.displayString)
+                            .fontWeight(.medium)
+                        Image(systemName: "arrow.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(mapping.to.displayString)
+                        Spacer()
+                    }
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    /// Appends a new serving mapping to the food, saves to SwiftData, and syncs to Turso.
+    private func addMapping(_ mapping: ServingMapping) {
+        food.servingMappings.append(mapping)
+        try? modelContext.save()
+        let sync = syncService
+        Task { try? await sync.updateFood(food) }
+    }
+
     // MARK: - Helpers
 
     /// SF Symbol for the food's original capture method
@@ -377,6 +464,108 @@ struct LogFoodSheet: View {
         case .label: "Label Scan"
         case .foodPhoto: "Food Photo"
         case .manual: "Manual Entry"
+        }
+    }
+}
+
+
+
+// MARK: - Add Serving Mapping Sheet
+
+/// A compact form for defining a new unit conversion for a food.
+/// For example: "1 cup → 244 g" means the user can later enter "1 cup"
+/// in the quantity picker and the app will scale macros accordingly.
+/// The caller receives the completed `ServingMapping` via the `onAdd` closure.
+private struct AddServingMappingSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    // Callback — parent (LogFoodSheet) handles the actual model mutation
+    let onAdd: (ServingMapping) -> Void
+
+    // ── From side ─────────────────────────────────────────────────
+    @State private var fromValue: String = "1"
+    @State private var fromUnit: String = "serving"
+
+    // ── To side ───────────────────────────────────────────────────
+    @State private var toValue: String = ""
+    @State private var toUnit: String = "g"
+
+    /// True when both sides have a valid positive number (enables Save button)
+    private var isValid: Bool {
+        guard let from = Double(fromValue), let to = Double(toValue),
+              from > 0, to > 0,
+              !fromUnit.trimmingCharacters(in: .whitespaces).isEmpty,
+              !toUnit.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        return true
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                // "From" side — user's input unit (e.g. 1 cup)
+                Section {
+                    HStack {
+                        TextField("Amount", text: $fromValue)
+                            .keyboardType(.decimalPad)
+                            .frame(width: 80)
+                        Divider()
+                        TextField("Unit (e.g. cup, slice)", text: $fromUnit)
+                    }
+                } header: {
+                    Text("From")
+                } footer: {
+                    Text("The unit you measure or describe the food in.")
+                }
+
+                // "To" side — equivalent in a standard unit (e.g. 244 g)
+                Section {
+                    HStack {
+                        TextField("Amount", text: $toValue)
+                            .keyboardType(.decimalPad)
+                            .frame(width: 80)
+                        Divider()
+                        TextField("Unit (e.g. g, mL)", text: $toUnit)
+                    }
+                } header: {
+                    Text("To")
+                } footer: {
+                    Text("The equivalent amount in a standard unit like grams or mL.")
+                }
+
+                // Preview — shows what the mapping will look like once saved
+                if isValid {
+                    Section("Preview") {
+                        HStack(spacing: 6) {
+                            Text("\(fromValue) \(fromUnit)")
+                                .fontWeight(.medium)
+                            Image(systemName: "arrow.right")
+                                .foregroundStyle(.secondary)
+                            Text("\(toValue) \(toUnit)")
+                        }
+                        .font(.subheadline)
+                    }
+                }
+            }
+            .navigationTitle("Add Unit Mapping")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        // Build and pass the mapping back to LogFoodSheet
+                        let mapping = ServingMapping(
+                            from: ServingAmount(value: Double(fromValue) ?? 1, unit: fromUnit.trimmingCharacters(in: .whitespaces)),
+                            to: ServingAmount(value: Double(toValue) ?? 0, unit: toUnit.trimmingCharacters(in: .whitespaces))
+                        )
+                        onAdd(mapping)
+                        dismiss()
+                    }
+                    .fontWeight(.semibold)
+                    .disabled(!isValid)
+                }
+            }
         }
     }
 }
