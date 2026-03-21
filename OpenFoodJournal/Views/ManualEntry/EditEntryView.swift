@@ -52,10 +52,25 @@ struct EditEntryView: View {
 
     // MARK: - Computed helpers
 
-    /// All unique units the user can pick from (current unit + all mapping endpoints)
+    /// All unique units the user can pick from.
+    /// Prefers the structured ServingSize enum (standardised unit tables) when available,
+    /// then supplements with any custom units found in legacy servingMappings.
     private var availableUnits: [String] {
+        if let serving = entry.serving {
+            // Start with the standardised units for this serving dimension
+            var units = Set(serving.availableUnits)
+            // Always keep the base unit even if it isn't in the standard table
+            units.insert(baseUnit)
+            // Add any custom units from legacy mappings (e.g. "chicken breast")
+            for mapping in entry.servingMappings {
+                units.insert(mapping.from.unit)
+                units.insert(mapping.to.unit)
+            }
+            return units.sorted()
+        }
+        // Legacy path: derive units entirely from the stored mappings
         var units = Set<String>()
-        units.insert(baseUnit) // always include the original unit
+        units.insert(baseUnit)
         for mapping in entry.servingMappings {
             units.insert(mapping.from.unit)
             units.insert(mapping.to.unit)
@@ -64,10 +79,15 @@ struct EditEntryView: View {
     }
 
     /// Conversion factor: how many selectedUnit equal 1 baseUnit.
-    /// e.g. if baseUnit is "cup" and selectedUnit is "g", and mapping says 1 cup = 244 g,
-    /// then unitFactor = 244.0. Falls back to 1.0 if no mapping exists.
+    /// e.g. if baseUnit is "cup" and selectedUnit is "g", and the serving says 1 cup = 244 g,
+    /// then unitFactor = 244.0. Falls back to 1.0 if no conversion path exists.
     private var unitFactor: Double {
         if selectedUnit == baseUnit { return 1.0 }
+        // 1. Try the structured ServingSize enum (handles all standardised conversions)
+        if let factor = entry.serving?.convert(1.0, from: baseUnit, to: selectedUnit) {
+            return factor
+        }
+        // 2. Fall back to explicit servingMappings (handles custom units)
         return conversionFactor(from: baseUnit, to: selectedUnit) ?? 1.0
     }
 

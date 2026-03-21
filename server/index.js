@@ -79,6 +79,9 @@ Return a JSON object with this EXACT structure:
   "serving_unit": "<unit string, e.g. 'cup', 'g', 'piece', 'tbsp'>",
   "serving_weight_grams": <weight of one serving in grams if shown, otherwise null>,
   "servings_per_container": <number or null>,
+  "serving_type": "<'mass' if only grams known, 'volume' if only volume known, 'both' if both grams and volume are shown, otherwise null>",
+  "serving_grams": <gram weight of ONE serving as a number, or null if unknown>,
+  "serving_ml": <volume of ONE serving in mL as a number, or null if not a liquid/volume serving>,
   "calories": <number>,
   "protein": <grams as number>,
   "carbs": <grams as number>,
@@ -102,6 +105,9 @@ Rules:
 - For brand: look for the brand/manufacturer name on the packaging
 - For serving_quantity and serving_unit: parse the serving size into number + unit (e.g. "2 cookies" → quantity: 2, unit: "cookies")
 - For serving_weight_grams: if the label shows weight in grams (e.g. "1 cup (228g)"), extract the gram value as a number
+- For serving_type: use "mass" if only grams are given, "volume" if only a volume unit is given (mL, cup, tbsp, etc.), "both" if the label shows both a weight and a volume for the same serving
+- For serving_grams: the gram weight of exactly ONE serving (NOT per container). Use serving_weight_grams if available.
+- For serving_ml: the mL volume of ONE serving. Convert if label shows other volume units (1 cup = 240 mL, 1 tbsp = 15 mL, 1 fl oz = 30 mL). Omit (null) for solid foods.
 - For "% Daily Value" only nutrients, convert to actual amounts if possible, otherwise use "%" as unit
 - Use the canonical nutrient IDs listed above as micronutrient keys
 - If a value is 0, still include it
@@ -119,6 +125,9 @@ Return a JSON object with this EXACT structure:
   "serving_unit": "<unit string, e.g. 'piece', 'cup', 'bowl', 'plate'>",
   "serving_weight_grams": <estimated weight in grams>,
   "servings_per_container": 1,
+  "serving_type": "<'mass' if weight is the primary measure, 'volume' if volume is the primary measure, 'both' if both apply>",
+  "serving_grams": <estimated gram weight of the shown portion>,
+  "serving_ml": <estimated volume in mL if relevant, e.g. for drinks, otherwise null>,
   "calories": <estimated number>,
   "protein": <estimated grams>,
   "carbs": <estimated grams>,
@@ -140,6 +149,9 @@ Rules:
 - Be realistic about portion sizes shown in the image
 - Estimate based on typical nutritional values for the identified food
 - For serving_weight_grams: estimate the total weight of the food portion in grams
+- For serving_type: use "mass" for solid foods, "volume" for drinks/liquids, "both" if both weight and volume are naturally described
+- For serving_grams: estimated gram weight of the single portion shown
+- For serving_ml: estimated mL for beverages/liquids (null for solid foods)
 - confidence should be lower than label scans since these are estimates
 - Include at least fiber, sodium, cholesterol, saturated_fat in micronutrients if estimable
 - Use the canonical nutrient IDs listed above as micronutrient keys`;

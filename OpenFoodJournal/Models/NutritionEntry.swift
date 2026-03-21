@@ -34,13 +34,22 @@ final class NutritionEntry {
     var servingsPerContainer: Double?
     var brand: String?                 // Product brand, separate from food name
 
-    // Structured serving — numeric quantity + unit for math/conversions
-    // e.g. servingQuantity = 1.0, servingUnit = "cup"
+    // Structured serving — canonical measurement for one serving.
+    // Uses the ServingSize enum (mass/volume/both) with values in grams/mL.
+    // All unit conversions (g→oz, mL→cups, etc.) are derived from this.
+    var serving: ServingSize?
+
+    // How many servings the user logged (e.g. 2.5 servings).
+    // Macros on this entry = base macros × servingCount.
+    var servingCount: Double
+
+    // Legacy fields — kept for backward compatibility with existing data.
+    // New entries set these from the serving enum; old entries may have these only.
     var servingQuantity: Double?
     var servingUnit: String?
 
     // Per-food unit mappings — e.g. [{ from: 1 cup, to: 244 g }]
-    // Lets the app convert between volume, mass, and arbitrary units
+    // Lets the app convert between custom units (pieces, slices, etc.)
     var servingMappings: [ServingMapping]
 
     // Inverse relationship
@@ -62,6 +71,8 @@ final class NutritionEntry {
         servingSize: String? = nil,
         servingsPerContainer: Double? = nil,
         brand: String? = nil,
+        serving: ServingSize? = nil,
+        servingCount: Double = 1.0,
         servingQuantity: Double? = nil,
         servingUnit: String? = nil,
         servingMappings: [ServingMapping] = []
@@ -81,6 +92,8 @@ final class NutritionEntry {
         self.servingSize = servingSize
         self.servingsPerContainer = servingsPerContainer
         self.brand = brand
+        self.serving = serving
+        self.servingCount = servingCount
         self.servingQuantity = servingQuantity
         self.servingUnit = servingUnit
         self.servingMappings = servingMappings

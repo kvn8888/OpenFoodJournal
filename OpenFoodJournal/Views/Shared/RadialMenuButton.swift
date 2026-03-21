@@ -34,6 +34,10 @@ struct RadialMenuButton: View {
     @State private var highlightedID: String?   // Which item is under the drag
     @State private var didTrigger = false        // Prevents double-fire on release
 
+    // Glass morphing namespace — ties option circles to the plus button
+    // so they morph in/out of it on open/close.
+    @Namespace private var glassNamespace
+
     // ── Layout Constants ──────────────────────────────────────────
     /// Radius of the semicircle arc from center of plus button to center of options
     private let arcRadius: CGFloat = 110
@@ -51,35 +55,34 @@ struct RadialMenuButton: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            // GlassEffectContainer merges all glass circles when closed (offset 0,0),
-            // and splits them apart as they animate to their arc positions on open.
+            // GlassEffectContainer gives all glass shapes a shared sampling region.
+            // Option circles only exist in the hierarchy when open — this prevents
+            // glass shapes from overlapping the plus button when closed, which
+            // causes the glass renderer to blur icon content.
             GlassEffectContainer(spacing: 16) {
                 ZStack {
-                    // Each item gets an angle along the upper semicircle
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                        let angle = angleForIndex(index, total: items.count)
-                        let position = positionForAngle(angle)
-                        let isHighlighted = highlightedID == item.id
+                    if isOpen {
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                            let angle = angleForIndex(index, total: items.count)
+                            let position = positionForAngle(angle)
+                            let isHighlighted = highlightedID == item.id
 
-                        optionBubble(item: item, isHighlighted: isHighlighted)
-                            .offset(x: isOpen ? position.x : 0,
-                                    y: isOpen ? position.y : 0)
-                            .scaleEffect(isOpen ? (isHighlighted ? 1.15 : 1.0) : 1.0)
-                            .animation(
-                                .spring(duration: 0.4, bounce: 0.3)
-                                .delay(isOpen ? Double(index) * 0.04 : 0),
-                                value: isOpen
-                            )
-                            .animation(.spring(duration: 0.2), value: isHighlighted)
+                            optionBubble(item: item, isHighlighted: isHighlighted)
+                                .offset(x: position.x, y: position.y)
+                                .glassEffectID(item.id, in: glassNamespace)
+                                .glassEffectTransition(.matchedGeometry)
+                                .animation(.spring(duration: 0.2), value: isHighlighted)
+                        }
                     }
 
-                    // The central plus button
+                    // The central plus button — the morph target for option circles
                     plusButton
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .padding(.bottom, 24)
+        .animation(.spring(duration: 0.4, bounce: 0.3), value: isOpen)
     }
 
     // MARK: - Plus Button
@@ -93,6 +96,7 @@ struct RadialMenuButton: View {
             .animation(.spring(duration: 0.3), value: isOpen)
             .frame(width: plusSize, height: plusSize)
             .glassEffect(in: .circle)
+            .glassEffectID("plus", in: glassNamespace)
             .offset(dragOffset)
             .gesture(dragGesture)
             .simultaneousGesture(tapGesture)
@@ -103,30 +107,24 @@ struct RadialMenuButton: View {
     // MARK: - Option Bubble
 
     /// A single option circle with icon and label.
+    /// Only rendered when the menu is open, so glass never overlaps the plus button at rest.
     private func optionBubble(item: RadialMenuItem, isHighlighted: Bool) -> some View {
         VStack(spacing: 6) {
-            // Glass circle always present for GlassEffectContainer merge/split.
-            // Icon is an overlay so it doesn't participate in the glass capture pass.
-            Circle()
-                .fill(.clear)
+            Image(systemName: item.icon)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(isHighlighted ? item.color : .primary)
                 .frame(width: optionSize, height: optionSize)
                 .glassEffect(
                     isHighlighted ? .regular.tint(item.color.opacity(0.35)) : .regular,
                     in: .circle
                 )
-                .overlay {
-                    Image(systemName: item.icon)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isHighlighted ? item.color : .primary)
-                        .opacity(isOpen ? 1.0 : 0.0)
-                }
+                .scaleEffect(isHighlighted ? 1.15 : 1.0)
+                .animation(.spring(duration: 0.2), value: isHighlighted)
 
-            // Label moves with the circle — same animation, no separate delay.
             Text(item.label)
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
-                .opacity(isOpen ? 1.0 : 0.0)
         }
     }
 

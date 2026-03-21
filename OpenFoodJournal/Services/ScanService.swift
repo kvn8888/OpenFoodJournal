@@ -40,6 +40,10 @@ private struct GeminiNutritionResponse: Codable {
     let servingUnit: String?
     let servingWeightGrams: Double?
     let servingsPerContainer: Double?
+    // Structured serving fields — populated by updated Gemini prompt
+    let servingType: String?   // "mass" | "volume" | "both"
+    let servingGrams: Double?  // gram weight of one serving
+    let servingMl: Double?     // mL of one serving (nil for solid foods)
 
     // Core macros — always present
     let calories: Double
@@ -60,6 +64,9 @@ private struct GeminiNutritionResponse: Codable {
         case servingUnit = "serving_unit"
         case servingWeightGrams = "serving_weight_grams"
         case servingsPerContainer = "servings_per_container"
+        case servingType = "serving_type"
+        case servingGrams = "serving_grams"
+        case servingMl = "serving_ml"
         case scanMode = "scan_mode"
     }
 }
@@ -195,6 +202,27 @@ private extension GeminiNutritionResponse {
             ))
         }
 
+        // Build the typed ServingSize enum from the structured serving fields.
+        // Falls back to a mass serving derived from serving_weight_grams if the
+        // prompt-level fields are absent (e.g. from older server versions).
+        let serving: ServingSize? = {
+            let g = servingGrams ?? servingWeightGrams
+            let ml = servingMl
+            switch servingType {
+            case "both":
+                if let g, let ml { return .both(grams: g, ml: ml) }
+                fallthrough
+            case "mass":
+                if let g { return .mass(grams: g) }
+            case "volume":
+                if let ml { return .volume(ml: ml) }
+            default:
+                // Legacy path: derive from weight only
+                if let g { return .mass(grams: g) }
+            }
+            return nil
+        }()
+
         // Normalize micronutrient keys: if Gemini returns a name we recognize
         // (e.g. "Vitamin A" or "vitamin_a"), map it to the canonical ID.
         // Unknown nutrients pass through as-is with their original key.
@@ -226,6 +254,7 @@ private extension GeminiNutritionResponse {
             servingSize: servingSize,
             servingsPerContainer: servingsPerContainer,
             brand: brand,
+            serving: serving,
             servingQuantity: servingQuantity,
             servingUnit: servingUnit,
             servingMappings: mappings

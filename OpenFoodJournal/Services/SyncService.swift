@@ -85,6 +85,10 @@ struct APIEntry: Codable {
     let servingQuantity: Double?
     let servingUnit: String?
     let servingMappings: [ServingMapping]?
+    // Structured serving fields — nil for entries created before this schema version
+    let servingType: String?    // "mass" | "volume" | "both"
+    let servingGrams: Double?   // canonical grams value
+    let servingMl: Double?      // canonical mL value (nil for mass-only)
     let timestamp: String?
 
     enum CodingKeys: String, CodingKey {
@@ -98,6 +102,9 @@ struct APIEntry: Codable {
         case servingQuantity = "serving_quantity"
         case servingUnit = "serving_unit"
         case servingMappings = "serving_mappings"
+        case servingType = "serving_type"
+        case servingGrams = "serving_grams"
+        case servingMl = "serving_ml"
     }
 }
 
@@ -116,6 +123,10 @@ struct APIFood: Codable {
     let servingQuantity: Double?
     let servingUnit: String?
     let servingMappings: [ServingMapping]?
+    // Structured serving fields
+    let servingType: String?
+    let servingGrams: Double?
+    let servingMl: Double?
     let scanMode: String?
 
     enum CodingKeys: String, CodingKey {
@@ -126,6 +137,9 @@ struct APIFood: Codable {
         case servingQuantity = "serving_quantity"
         case servingUnit = "serving_unit"
         case servingMappings = "serving_mappings"
+        case servingType = "serving_type"
+        case servingGrams = "serving_grams"
+        case servingMl = "serving_ml"
         case scanMode = "scan_mode"
     }
 }
@@ -294,6 +308,9 @@ final class SyncService {
             "serving_quantity": entry.servingQuantity as Any,
             "serving_unit": entry.servingUnit as Any,
             "serving_mappings": encodeServingMappings(entry.servingMappings),
+            "serving_type": entry.serving?.type as Any,
+            "serving_grams": entry.serving?.grams as Any,
+            "serving_ml": entry.serving?.ml as Any,
         ]
 
         let url = baseURL.appendingPathComponent("api/entries")
@@ -315,6 +332,9 @@ final class SyncService {
             "serving_quantity": entry.servingQuantity as Any,
             "serving_unit": entry.servingUnit as Any,
             "serving_mappings": encodeServingMappings(entry.servingMappings),
+            "serving_type": entry.serving?.type as Any,
+            "serving_grams": entry.serving?.grams as Any,
+            "serving_ml": entry.serving?.ml as Any,
         ]
 
         let url = baseURL.appendingPathComponent("api/entries/\(entry.id.uuidString)")
@@ -347,6 +367,9 @@ final class SyncService {
             "serving_quantity": food.servingQuantity as Any,
             "serving_unit": food.servingUnit as Any,
             "serving_mappings": encodeServingMappings(food.servingMappings),
+            "serving_type": food.serving?.type as Any,
+            "serving_grams": food.serving?.grams as Any,
+            "serving_ml": food.serving?.ml as Any,
             "scan_mode": food.originalScanMode.rawValue,
         ]
 
@@ -368,6 +391,9 @@ final class SyncService {
             "serving_quantity": food.servingQuantity as Any,
             "serving_unit": food.servingUnit as Any,
             "serving_mappings": encodeServingMappings(food.servingMappings),
+            "serving_type": food.serving?.type as Any,
+            "serving_grams": food.serving?.grams as Any,
+            "serving_ml": food.serving?.ml as Any,
         ]
 
         let url = baseURL.appendingPathComponent("api/foods/\(food.id.uuidString)")

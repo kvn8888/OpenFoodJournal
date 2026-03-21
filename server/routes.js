@@ -124,6 +124,9 @@ router.post("/entries", async (req, res) => {
       serving_quantity,
       serving_unit,
       serving_mappings = [],
+      serving_type,
+      serving_grams,
+      serving_ml,
     } = req.body;
 
     if (!date || !name || !meal_type) {
@@ -143,8 +146,9 @@ router.post("/entries", async (req, res) => {
             (id, daily_log_id, name, brand, meal_type, scan_mode, confidence,
              calories, protein, carbs, fat, micronutrients,
              serving_size, servings_per_container, serving_quantity, serving_unit,
-             serving_mappings, timestamp, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             serving_mappings, serving_type, serving_grams, serving_ml,
+             timestamp, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         entryId,
         logId,
@@ -163,6 +167,9 @@ router.post("/entries", async (req, res) => {
         serving_quantity || null,
         serving_unit || null,
         JSON.stringify(serving_mappings),
+        serving_type || null,
+        serving_grams || null,
+        serving_ml || null,
         timestamp,
         timestamp,
         timestamp,
@@ -198,6 +205,9 @@ router.put("/entries/:id", async (req, res) => {
       "servings_per_container",
       "serving_quantity",
       "serving_unit",
+      "serving_type",
+      "serving_grams",
+      "serving_ml",
     ];
 
     for (const field of allowedFields) {
@@ -285,6 +295,9 @@ router.post("/foods", async (req, res) => {
       serving_quantity,
       serving_unit,
       serving_mappings = [],
+      serving_type,
+      serving_grams,
+      serving_ml,
       scan_mode = "manual",
     } = req.body;
 
@@ -299,8 +312,9 @@ router.post("/foods", async (req, res) => {
       sql: `INSERT INTO saved_foods 
             (id, name, brand, calories, protein, carbs, fat, micronutrients,
              serving_size, servings_per_container, serving_quantity, serving_unit,
-             serving_mappings, scan_mode, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             serving_mappings, serving_type, serving_grams, serving_ml,
+             scan_mode, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       args: [
         foodId,
         name,
@@ -315,6 +329,9 @@ router.post("/foods", async (req, res) => {
         serving_quantity || null,
         serving_unit || null,
         JSON.stringify(serving_mappings),
+        serving_type || null,
+        serving_grams || null,
+        serving_ml || null,
         scan_mode,
         timestamp,
         timestamp,
@@ -346,6 +363,9 @@ router.put("/foods/:id", async (req, res) => {
       "servings_per_container",
       "serving_quantity",
       "serving_unit",
+      "serving_type",
+      "serving_grams",
+      "serving_ml",
       "scan_mode",
     ];
 
