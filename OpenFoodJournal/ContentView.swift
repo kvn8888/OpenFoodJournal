@@ -24,7 +24,7 @@ struct ContentView: View {
                 SettingsView()
             }
         }
-        .tabBarMinimizeBehavior(.onScrollDown)
+        .tabBarMinimizeBehavior(.never)
         // Pull from server on every launch. Uses incremental sync when possible
         // (only fetches records changed since last sync), full fetch otherwise.
         .task {

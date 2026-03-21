@@ -13,6 +13,7 @@ struct LogFoodSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(SyncService.self) private var syncService
+    @Environment(UserGoals.self) private var goals
 
     // ── Input: the saved food to potentially log ──────────────────
     let food: SavedFood
@@ -87,25 +88,106 @@ struct LogFoodSheet: View {
         return units.sorted()
     }
 
-    /// How many selectedUnit equal 1 baseUnit.
-    /// e.g. if baseUnit is "cup" and selectedUnit is "g", factor = 240 (1 cup = 240g).
-    private var unitFactor: Double {
-        if selectedUnit == baseUnit { return 1.0 }
-        // Try the structured enum first (standardised mass/volume tables)
-        if let factor = food.serving?.convert(1.0, from: baseUnit, to: selectedUnit) {
+    /// How many of `unit` equal 1 baseUnit.
+    /// e.g. if baseUnit is "cup" and unit is "g", returns 240 (1 cup = 240g).
+    ///
+    /// Tries four strategies in order:
+    /// 1. ServingSize standard tables (same-dimension or cross-dimension with density)
+    /// 2. Direct servingMapping lookup (baseUnit ↔ target)
+    /// 3. Chain: servingMapping (baseUnit → bridge) then standard table (bridge → target)
+    /// 4. Canonical SI bridge from serving.grams or serving.ml
+    private func factorFor(_ unit: String) -> Double {
+        if unit == baseUnit { return 1.0 }
+
+        // 1. Try the structured enum (same-dimension or cross-dimension via density)
+        if let factor = food.serving?.convert(1.0, from: baseUnit, to: unit) {
             return factor
         }
-        // Fall back to explicit servingMappings for custom units
+
+        // 2. Direct servingMapping: baseUnit ↔ target
+        //    "serving" in a mapping is an alias for baseUnit (means "1 of this food's serving")
+        if let factor = mappingFactor(from: baseUnit, to: unit) {
+            return factor
+        }
+
+        // 3. Chain: servingMapping provides baseUnit → bridgeUnit,
+        //    then standard conversion tables handle bridgeUnit → target.
+        //    e.g. mapping "1 cup → 244 g" + standard table g → oz.
         for mapping in food.servingMappings {
-            if mapping.from.unit == baseUnit && mapping.to.unit == selectedUnit {
+            let pairs: [(from: ServingAmount, to: ServingAmount)] = [
+                (mapping.from, mapping.to),
+                (mapping.to, mapping.from)
+            ]
+            for pair in pairs where isBaseUnit(pair.from.unit) {
+                let bridgePerBase = pair.to.value / pair.from.value
+                if let f = sameDimensionFactor(from: pair.to.unit, to: unit) {
+                    return bridgePerBase * f
+                }
+            }
+        }
+
+        // 4. Canonical SI bridge: serving says 1 baseUnit = X grams (or Y mL).
+        //    Convert via standard tables within that dimension.
+        if let serving = food.serving {
+            let gramsPerBase = (serving.grams ?? 0) / baseQuantity
+            let mlPerBase = (serving.ml ?? 0) / baseQuantity
+            if gramsPerBase > 0, let targetPerGram = ServingSize.massConversions[unit] {
+                return gramsPerBase / targetPerGram
+            }
+            if mlPerBase > 0, let targetPerMl = ServingSize.volumeConversions[unit] {
+                return mlPerBase / targetPerMl
+            }
+        }
+
+        return 1.0
+    }
+
+    /// Whether the given unit string refers to the food's base serving unit.
+    /// "serving" in a mapping is always an alias for baseUnit.
+    private func isBaseUnit(_ unit: String) -> Bool {
+        unit == baseUnit || unit.lowercased() == "serving"
+    }
+
+    /// Direct lookup in servingMappings for a from → to pair (checks both directions).
+    /// Treats "serving" as an alias for baseUnit.
+    private func mappingFactor(from fromUnit: String, to toUnit: String) -> Double? {
+        for mapping in food.servingMappings {
+            if isBaseUnit(mapping.from.unit) && isBaseUnit(fromUnit)
+                && mapping.to.unit == toUnit {
                 return mapping.to.value / mapping.from.value
             }
-            if mapping.to.unit == baseUnit && mapping.from.unit == selectedUnit {
+            if isBaseUnit(mapping.to.unit) && isBaseUnit(fromUnit)
+                && mapping.from.unit == toUnit {
+                return mapping.from.value / mapping.to.value
+            }
+            // Non-base units: exact match only
+            if mapping.from.unit == fromUnit && mapping.to.unit == toUnit {
+                return mapping.to.value / mapping.from.value
+            }
+            if mapping.to.unit == fromUnit && mapping.from.unit == toUnit {
                 return mapping.from.value / mapping.to.value
             }
         }
-        return 1.0
+        return nil
     }
+
+    /// Same-dimension factor between two standard units (mass→mass or volume→volume).
+    /// Returns nil if the units are in different dimensions or unrecognised.
+    private func sameDimensionFactor(from: String, to: String) -> Double? {
+        if from == to { return 1.0 }
+        if let a = ServingSize.massConversions[from],
+           let b = ServingSize.massConversions[to] {
+            return a / b
+        }
+        if let a = ServingSize.volumeConversions[from],
+           let b = ServingSize.volumeConversions[to] {
+            return a / b
+        }
+        return nil
+    }
+
+    /// Shorthand — factor for the currently selected unit
+    private var unitFactor: Double { factorFor(selectedUnit) }
 
     // Macros expressed per single base-unit (e.g. kcal per 1 cup)
     private var calPerBaseUnit: Double { baseCalories / baseQuantity }
@@ -243,35 +325,37 @@ struct LogFoodSheet: View {
 
     // MARK: - Macro Grid
 
-    /// 2x2 grid showing calories, protein, carbs, and fat
+    /// Single row of macro rings showing value vs. daily goal
     private var macroGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
-            MacroCell(label: "Calories", value: scaledCalories, unit: "kcal", color: .orange)
-            MacroCell(label: "Protein", value: scaledProtein, unit: "g", color: .blue)
-            MacroCell(label: "Carbs", value: scaledCarbs, unit: "g", color: .green)
-            MacroCell(label: "Fat", value: scaledFat, unit: "g", color: .yellow)
+        HStack(spacing: 0) {
+            MacroRingView(value: scaledCalories, goal: goals.dailyCalories, color: .orange, label: "Calories", unit: "kcal")
+                .frame(maxWidth: .infinity)
+            MacroRingView(value: scaledProtein, goal: goals.dailyProtein, color: .blue, label: "Protein", unit: "g")
+                .frame(maxWidth: .infinity)
+            MacroRingView(value: scaledCarbs, goal: goals.dailyCarbs, color: .green, label: "Carbs", unit: "g")
+                .frame(maxWidth: .infinity)
+            MacroRingView(value: scaledFat, goal: goals.dailyFat, color: .yellow, label: "Fat", unit: "g")
+                .frame(maxWidth: .infinity)
         }
     }
 
     // MARK: - Micronutrients
 
-    /// Expandable section showing all dynamic micronutrients
+    /// Expandable section showing all dynamic micronutrients with progress bars
     private var micronutrientSection: some View {
         DisclosureGroup {
-            VStack(spacing: 8) {
-                // Sort micronutrient names alphabetically for consistent display
+            VStack(spacing: 10) {
                 let sorted = food.micronutrients.keys.sorted()
                 ForEach(sorted, id: \.self) { name in
                     if let micro = food.micronutrients[name] {
-                        HStack {
-                            Text(name)
-                                .font(.subheadline)
-                            Spacer()
-                            Text("\(micro.value, specifier: "%.1f") \(micro.unit)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .monospacedDigit()
-                        }
+                        let scaledValue = micro.value * scaleFactor
+                        let known = KnownMicronutrients.find(name)
+                        MicronutrientProgressRow(
+                            name: known?.name ?? name,
+                            value: scaledValue,
+                            unit: micro.unit,
+                            dailyValue: known?.dailyValue
+                        )
                     }
                 }
             }
@@ -382,6 +466,18 @@ struct LogFoodSheet: View {
                     .pickerStyle(.menu)
                     .font(.title2)
                     .fontWeight(.semibold)
+                    // Auto-convert quantity when the user switches units
+                    // e.g. "1 cup" → "240 g" so the macros stay equivalent
+                    .onChange(of: selectedUnit) { oldUnit, newUnit in
+                        let oldFactor = factorFor(oldUnit)
+                        let newFactor = factorFor(newUnit)
+                        guard oldFactor > 0, newFactor > 0 else { return }
+                        let converted = quantity * newFactor / oldFactor
+                        quantity = converted
+                        quantityText = converted.truncatingRemainder(dividingBy: 1) == 0
+                            ? String(format: "%.0f", converted)
+                            : String(format: "%.2f", converted)
+                    }
                 } else {
                     // Only one unit available — show it as static text
                     Text(selectedUnit)
@@ -578,31 +674,59 @@ struct AddServingMappingSheet: View {
     }
 }
 
-// MARK: - Macro Cell
+// MARK: - Micronutrient Progress Row
 
-/// A single macro display cell used in the 2x2 grid.
-/// Shows a colored accent, the value, unit, and label.
-private struct MacroCell: View {
-    let label: String
+/// A single micronutrient row with a progress bar showing % of daily value.
+/// Shows "None" for the daily value when no FDA reference exists.
+private struct MicronutrientProgressRow: View {
+    let name: String
     let value: Double
     let unit: String
-    let color: Color
+    let dailyValue: Double?  // nil = no known daily value
+
+    private var progress: Double {
+        guard let dv = dailyValue, dv > 0 else { return 0 }
+        return min(value / dv, 1.0)
+    }
+
+    private var percentText: String {
+        guard let dv = dailyValue, dv > 0 else { return "None" }
+        return "\(Int((value / dv) * 100))%"
+    }
 
     var body: some View {
         VStack(spacing: 4) {
-            Text("\(Int(value))")
-                .font(.title2)
-                .fontWeight(.bold)
-                .monospacedDigit()
-            Text(unit)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(name)
+                    .font(.subheadline)
+                Spacer()
+                Text("\(value, specifier: "%.1f") \(unit)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            HStack(spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.quaternary)
+                            .frame(height: 6)
+                        if dailyValue != nil && dailyValue! > 0 {
+                            Capsule()
+                                .fill(value > (dailyValue ?? 0) ? Color.orange : Color.accentColor)
+                                .frame(width: geo.size.width * progress, height: 6)
+                                .animation(.easeInOut, value: progress)
+                        }
+                    }
+                }
+                .frame(height: 6)
+
+                Text(percentText)
+                    .font(.caption2)
+                    .foregroundStyle(dailyValue == nil ? .tertiary : .secondary)
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 12)
-        .background(color.opacity(0.1), in: .rect(cornerRadius: 12))
     }
 }
