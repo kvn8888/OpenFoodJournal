@@ -29,9 +29,14 @@ final class SavedFood {
     // Serving info
     var servingSize: String?               // Display label (backward compat)
     var servingsPerContainer: Double?
-    var servingQuantity: Double?           // Numeric serving amount (e.g. 1.0)
-    var servingUnit: String?               // Unit (e.g. "cup", "g", "piece")
-    var servingMappings: [ServingMapping]   // Per-food unit conversions
+
+    // Structured serving — canonical measurement for one serving (mass/volume/both)
+    var serving: ServingSize?
+
+    // Legacy fields — kept for backward compat with old data
+    var servingQuantity: Double?
+    var servingUnit: String?
+    var servingMappings: [ServingMapping]
 
     // Optional photo from the original scan
     @Attribute(.externalStorage)
@@ -52,6 +57,7 @@ final class SavedFood {
         micronutrients: [String: MicronutrientValue] = [:],
         servingSize: String? = nil,
         servingsPerContainer: Double? = nil,
+        serving: ServingSize? = nil,
         servingQuantity: Double? = nil,
         servingUnit: String? = nil,
         servingMappings: [ServingMapping] = [],
@@ -69,6 +75,7 @@ final class SavedFood {
         self.micronutrients = micronutrients
         self.servingSize = servingSize
         self.servingsPerContainer = servingsPerContainer
+        self.serving = serving
         self.servingQuantity = servingQuantity
         self.servingUnit = servingUnit
         self.servingMappings = servingMappings
@@ -93,6 +100,7 @@ extension SavedFood {
             micronutrients: entry.micronutrients,
             servingSize: entry.servingSize,
             servingsPerContainer: entry.servingsPerContainer,
+            serving: entry.serving,
             servingQuantity: entry.servingQuantity,
             servingUnit: entry.servingUnit,
             servingMappings: entry.servingMappings,
@@ -117,6 +125,7 @@ extension SavedFood {
             servingSize: servingSize,
             servingsPerContainer: servingsPerContainer,
             brand: brand,
+            serving: serving,
             servingQuantity: servingQuantity,
             servingUnit: servingUnit,
             servingMappings: servingMappings

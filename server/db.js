@@ -55,6 +55,10 @@ async function runMigrations() {
       serving_quantity REAL,
       serving_unit TEXT,
       serving_mappings TEXT DEFAULT '[]',
+      -- Structured serving dimensions (populated by updated Gemini prompt)
+      serving_type TEXT,          -- 'mass' | 'volume' | 'both'
+      serving_grams REAL,         -- gram weight of one serving
+      serving_ml REAL,            -- mL volume of one serving (null for solid foods)
       timestamp TEXT NOT NULL DEFAULT (datetime('now')),
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -77,6 +81,10 @@ async function runMigrations() {
       serving_quantity REAL,
       serving_unit TEXT,
       serving_mappings TEXT DEFAULT '[]',
+      -- Structured serving dimensions
+      serving_type TEXT,
+      serving_grams REAL,
+      serving_ml REAL,
       scan_mode TEXT DEFAULT 'manual',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
