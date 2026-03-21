@@ -131,7 +131,11 @@ if (!cols.includes("serving_type")) {
 6. **`ModelContainer(for:configurations:)`** — not `schema:`. The `Schema` wrapper is only for migrations.
 7. **Swift named parameters must be in declaration order** — adding a new `init` parameter doesn't let you put it anywhere in call sites. Reorder both the declaration *and* all call sites to match. Build will catch mismatches.
 8. **`PRAGMA table_info()` not `IF NOT EXISTS` for ALTER TABLE** — SQLite doesn't support `ALTER TABLE ADD COLUMN IF NOT EXISTS`. Use PRAGMA to check first.
-9. **Capture IDs before `modelContext.delete()`** — after deletion, SwiftData objects may be invalidated. Store `let id = object.id` before the delete call.
+9. **`servingQuantity`/`servingUnit` must be set after scaling in LogFoodSheet** — `toNutritionEntry()` copies the food template's serving values; after scaling macros in logButton, write `entry.servingQuantity = quantity` and `entry.servingUnit = selectedUnit` so EditEntryView opens with the correct baseline.
+10. **`.swipeActions` is silently ignored outside a `List`** — it does nothing in `LazyVStack`, `ScrollView`, or `VStack`. If swipe actions don't fire, check that the `ForEach` is inside a `List`. The modifier compiles without error regardless of container.
+11. **`Button{}` inside `List` with `swipeActions` causes gesture lag** — iOS must disambiguate a button tap from a horizontal swipe, which adds a ~150ms delay. Replace with `YourRowView().contentShape(Rectangle()).onTapGesture { ... }` for zero-lag rows. `.contentShape(Rectangle())` is essential: without it, transparent/no-fill areas don't receive taps.
+12. **ZStack gesture priority** — in a `ZStack`, the **last** (top) view receives gestures first. Put a `Color.clear.contentShape(Rectangle()).onTapGesture { dismiss() }` layer **before** the overlay content to create an outside-tap dismiss. Views on top intercept taps; the clear layer catches everything that falls through.
+13. **`Color.clear` needs `.contentShape(Rectangle())`** — transparent views have no hit-test area by default. Without `contentShape`, taps pass through as if the view doesn't exist.
 
 ## Entitlements Still Needed (Xcode-only)
 
@@ -147,6 +151,16 @@ if (!cols.includes("serving_type")) {
 - **Retrospectives**: Live in `docs/`. Update when later fixes change the story.
 - **Skills**: This file is the project skill. Update it when architecture or requirements change.
 - **Commits**: Descriptive messages. Push after every significant change.
+
+**DailyLogView container**: Uses a `List` (not ScrollView+LazyVStack) with `.listStyle(.plain)` + `.scrollContentBackground(.hidden)`. `WeeklyCalendarStrip` and `MacroSummaryBar` are plain List rows with `listRowBackground(Color.clear)` + `listRowSeparator(.hidden)`. Meal sections use `MealSectionView` which returns a `Section{}` that becomes a proper sticky List section header in a List context. `.swipeActions` in `EntryRowView` (trailing delete) and `MealSectionView` (leading edit) fire correctly here.
+
+**RadialMenuButton**: Option bubbles support direct `.onTapGesture` (as well as drag-to-select). A `Color.clear.contentShape(Rectangle()).ignoresSafeArea()` layer behind `GlassEffectContainer` dismisses the menu when tapping outside. The layer is only inserted into the ZStack when `isOpen == true`.
+
+**Swipe mappings**:
+- `FoodBankView` row: trailing (swipe left) = Edit (blue) + Delete (red, no full-swipe); leading (swipe right) = Add to journal (green)
+- `MealSectionView` row: trailing (swipe left) = Delete (in `EntryRowView`); leading (swipe right) = Edit (in `MealSectionView`'s Button wrapper)
+
+**EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). `@Environment(SyncService.self)` required. Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveAndSyncEntry(entry)`.
 
 ## Current State (Last Updated: 2026-03-20)
 

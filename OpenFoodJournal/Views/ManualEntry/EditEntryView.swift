@@ -10,11 +10,14 @@ import SwiftData
 struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(SyncService.self) private var syncService
     @Environment(\.dismiss) private var dismiss
 
     @Bindable var entry: NutritionEntry
 
     @State private var showDeleteConfirm = false
+    // Controls the AddServingMappingSheet for adding custom unit conversions
+    @State private var showAddMapping = false
 
     // Editable serving quantity — initialized from the entry's current value
     @State private var quantity: Double
@@ -111,12 +114,21 @@ struct EditEntryView: View {
                 foodInfoSection
                 mealSection
                 servingSection
+                servingMappingsSection
                 nutritionSection
                 deleteSection
             }
             .navigationTitle("Edit Entry")
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
+            .sheet(isPresented: $showAddMapping) {
+                // Reuses the same AddServingMappingSheet from LogFoodSheet.swift.
+                // The onAdd callback mutates entry.servingMappings and saves to
+                // SwiftData, making the new unit appear in the unit picker above.
+                AddServingMappingSheet { mapping in
+                    addMapping(mapping)
+                }
+            }
             .toolbar {
                 // Done button above the keyboard to dismiss it
                 ToolbarItemGroup(placement: .keyboard) {
@@ -264,6 +276,50 @@ struct EditEntryView: View {
                 Label("Delete Entry", systemImage: "trash")
             }
         }
+    }
+
+    // MARK: - Serving Mappings
+
+    /// Shows existing unit mappings (e.g. "1 cup → 244 g") and an Add button.
+    /// Adding a mapping to an entry lets the user switch between units — especially
+    /// useful for volume-only foods where a custom weight mapping isn't in the
+    /// standard table (e.g. a thick smoothie has different density than water).
+    private var servingMappingsSection: some View {
+        Section {
+            if entry.servingMappings.isEmpty {
+                // Hint text — explains what mappings do and when they're useful
+                Text("Add custom unit conversions (e.g. 1 cup = 250 g) to switch between measurement dimensions in the unit picker above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(entry.servingMappings, id: \.self) { mapping in
+                    HStack(spacing: 6) {
+                        Text(mapping.from.displayString)
+                            .fontWeight(.medium)
+                        Image(systemName: "arrow.right")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(mapping.to.displayString)
+                        Spacer()
+                    }
+                    .font(.subheadline)
+                }
+            }
+
+            Button {
+                showAddMapping = true
+            } label: {
+                Label("Add Unit Mapping", systemImage: "plus")
+            }
+        } header: {
+            Text("Unit Mappings")
+        }
+    }
+
+    /// Appends a new mapping to the entry, saves to SwiftData, and syncs.
+    private func addMapping(_ mapping: ServingMapping) {
+        entry.servingMappings.append(mapping)
+        nutritionStore.saveAndSyncEntry(entry)
     }
 
     // MARK: - Unit conversion

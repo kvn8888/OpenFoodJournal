@@ -55,6 +55,18 @@ struct RadialMenuButton: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
+            // ── Dismiss layer ────────────────────────────────────────────────
+            // When the menu is open, a full-screen transparent tap target sits
+            // behind the glass container. Tapping anywhere outside the option
+            // bubbles or plus button closes the menu — matching the "tap outside
+            // to dismiss" UX pattern users expect from modal overlays.
+            if isOpen {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { close() }
+            }
+
             // GlassEffectContainer gives all glass shapes a shared sampling region.
             // Option circles only exist in the hierarchy when open — this prevents
             // glass shapes from overlapping the plus button when closed, which
@@ -72,6 +84,18 @@ struct RadialMenuButton: View {
                                 .glassEffectID(item.id, in: glassNamespace)
                                 .glassEffectTransition(.matchedGeometry)
                                 .animation(.spring(duration: 0.2), value: isHighlighted)
+                                // Direct tap on a bubble — same effect as dragging to it.
+                                // The dismiss layer is behind the GlassEffectContainer, so
+                                // taps on bubbles are captured here first and never reach
+                                // the dismiss layer.
+                                .onTapGesture {
+                                    close()
+                                    // Small delay lets the spring close animation start
+                                    // before presenting the sheet.
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                                        item.action()
+                                    }
+                                }
                         }
                     }
 

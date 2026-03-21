@@ -223,8 +223,13 @@ private struct ServerError: Codable {
 final class SyncService {
     // ── Observable State ──────────────────────────────────────────
     var isSyncing = false
-    var lastSyncDate: Date?
     var syncError: SyncError?
+
+    /// Persisted across launches so incremental sync knows where to resume from
+    var lastSyncDate: Date? {
+        get { UserDefaults.standard.object(forKey: "sync.lastSyncDate") as? Date }
+        set { UserDefaults.standard.set(newValue, forKey: "sync.lastSyncDate") }
+    }
 
     // ── Configuration ─────────────────────────────────────────────
     private let baseURL: URL = {

@@ -24,6 +24,18 @@ struct MealSectionView: View {
                         EntryRowView(entry: entry, onDelete: { onDelete(entry) })
                     }
                     .buttonStyle(.plain)
+                    // Swipe right (leading) — Edit shortcut, same as tapping the row
+                    .swipeActions(edge: .leading) {
+                        Button {
+                            onSelect(entry)
+                        } label: {
+                            Label("Edit", systemImage: "pencil")
+                        }
+                        .tint(.blue)
+                    }
+                    // Swipe left (trailing) — Delete, already defined in EntryRowView,
+                    // rendered here because DailyLogView now uses a List (where
+                    // swipeActions fire correctly).
                     .contextMenu {
                         // Edit — opens the full edit sheet
                         Button {

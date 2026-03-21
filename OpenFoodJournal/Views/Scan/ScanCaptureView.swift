@@ -4,14 +4,25 @@
 import SwiftUI
 import SwiftData
 import AVFoundation
+import PhotosUI
 
 struct ScanCaptureView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(\.dismiss) private var dismiss
 
+    /// The date the scanned entry will be logged to (passed from DailyLogView)
+    var logDate: Date = .now
+
     @State private var mode: ScanMode = .label
     @State private var cameraPermissionDenied = false
+    @State private var showPhotoPicker = false
+    @State private var photoSelection: PhotosPickerItem?
+
+    // After capture/selection, holds the image for the prompt step
+    @State private var capturedImage: UIImage?
+    @State private var promptText = ""
+    @FocusState private var isPromptFocused: Bool
 
     // CameraController manages the AVCaptureSession lifetime
     @State private var camera = CameraController()
@@ -32,65 +43,14 @@ struct ScanCaptureView: View {
                 }
             }
 
-            // UI overlay
-            VStack {
-                // Top bar
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.glass)
-
-                    Spacer()
-
-                    // Mode toggle
-                    GlassEffectContainer(spacing: 0) {
-                        Picker("Scan mode", selection: $mode) {
-                            Text("Label").tag(ScanMode.label)
-                            Text("Photo").tag(ScanMode.foodPhoto)
-                        }
-                        .pickerStyle(.segmented)
-                        .frame(width: 180)
-                    }
-
-                    Spacer()
-
-                    // Torch button
-                    Button {
-                        camera.toggleTorch()
-                    } label: {
-                        Image(systemName: camera.torchOn ? "bolt.fill" : "bolt.slash.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.glass)
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-
-                Spacer()
-
-                // Mode hint
-                Text(mode == .label
-                     ? "Point at a nutrition facts label"
-                     : "Point at your food for an estimate")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 8)
-                    .glassEffect(in: .capsule)
-                    .padding(.bottom, 24)
-                    .animation(.easeInOut, value: mode)
-
-                // Capture button
-                CaptureButton(isScanning: scanService.isScanning) {
-                    Task { await capture() }
-                }
-                .padding(.bottom, 48)
+            // After capturing/selecting a photo, show confirmation with prompt field
+            if let image = capturedImage {
+                promptOverlay(image: image)
+                    .transition(.opacity)
+            } else {
+                // Camera UI overlay — only visible before capture
+                cameraOverlay
+                    .transition(.opacity)
             }
 
             // Error banner
@@ -108,6 +68,7 @@ struct ScanCaptureView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: 0.25), value: capturedImage != nil)
         .task {
             await camera.setup()
             if camera.permissionDenied {
@@ -117,20 +78,175 @@ struct ScanCaptureView: View {
         .onDisappear {
             camera.stop()
         }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelection, matching: .images)
+        .onChange(of: photoSelection) { _, newItem in
+            guard let newItem else { return }
+            Task {
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let image = UIImage(data: data) {
+                    withAnimation { capturedImage = image }
+                }
+            }
+            photoSelection = nil
+        }
+    }
+
+    // MARK: - Camera Overlay
+
+    /// The live camera UI: mode toggle, torch, photo library, capture button
+    private var cameraOverlay: some View {
+        VStack {
+            // Top bar
+            HStack {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.glass)
+
+                Spacer()
+
+                // Mode toggle
+                GlassEffectContainer(spacing: 0) {
+                    Picker("Scan mode", selection: $mode) {
+                        Text("Label").tag(ScanMode.label)
+                        Text("Photo").tag(ScanMode.foodPhoto)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                }
+
+                Spacer()
+
+                // Photo library button
+                Button {
+                    showPhotoPicker = true
+                } label: {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.glass)
+
+                // Torch button
+                Button {
+                    camera.toggleTorch()
+                } label: {
+                    Image(systemName: camera.torchOn ? "bolt.fill" : "bolt.slash.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 40, height: 40)
+                }
+                .buttonStyle(.glass)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            Spacer()
+
+            // Mode hint
+            Text(mode == .label
+                 ? "Point at a nutrition facts label"
+                 : "Point at your food for an estimate")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.85))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+                .glassEffect(in: .capsule)
+                .padding(.bottom, 24)
+                .animation(.easeInOut, value: mode)
+
+            // Capture button
+            CaptureButton(isScanning: scanService.isScanning) {
+                Task { await capture() }
+            }
+            .padding(.bottom, 48)
+        }
+    }
+
+    // MARK: - Prompt Overlay
+
+    /// Shown after capture/selection. Displays the photo with an optional prompt
+    /// field before sending to Gemini.
+    private func promptOverlay(image: UIImage) -> some View {
+        ZStack {
+            // Dim the camera preview behind
+            Color.black.opacity(0.7)
+                .ignoresSafeArea()
+
+            VStack(spacing: 20) {
+                // Photo preview
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .frame(maxHeight: 300)
+                    .padding(.horizontal, 24)
+
+                // Optional prompt
+                HStack(spacing: 8) {
+                    TextField("Add context, e.g. \"walnut shrimp\"", text: $promptText)
+                        .font(.subheadline)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .focused($isPromptFocused)
+                        .submitLabel(.done)
+                        .onSubmit { isPromptFocused = false }
+                    if !promptText.isEmpty {
+                        Button {
+                            promptText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.white.opacity(0.6))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 8)
+                    }
+                }
+                .glassEffect(in: .capsule)
+                .padding(.horizontal, 32)
+
+                // Action buttons
+                HStack(spacing: 16) {
+                    // Retake — go back to camera
+                    Button {
+                        withAnimation {
+                            capturedImage = nil
+                            promptText = ""
+                        }
+                    } label: {
+                        Text("Retake")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glass)
+
+                    // Send to Gemini
+                    Button {
+                        isPromptFocused = false
+                        let prompt = promptText.isEmpty ? nil : promptText
+                        scanService.scanInBackground(image: image, mode: mode, prompt: prompt)
+                        dismiss()
+                    } label: {
+                        Label("Analyze", systemImage: "wand.and.sparkles")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                }
+                .padding(.horizontal, 32)
+            }
+        }
     }
 
     // MARK: - Capture
 
+    /// Takes a photo and transitions to the prompt step
     private func capture() async {
         guard !scanService.isScanning else { return }
-
         let image = await camera.capturePhoto()
         guard let image else { return }
-
-        // Kick off scan in background and dismiss camera immediately.
-        // DailyLogView will show a processing overlay and handle the result.
-        scanService.scanInBackground(image: image, mode: mode)
-        dismiss()
+        withAnimation { capturedImage = image }
     }
 }
 

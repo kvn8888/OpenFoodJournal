@@ -107,10 +107,10 @@ final class ScanService {
 
     /// Kicks off a scan in the background. The caller can dismiss immediately.
     /// Result lands in `pendingResult`; errors land in `error`.
-    func scanInBackground(image: UIImage, mode: ScanMode) {
+    func scanInBackground(image: UIImage, mode: ScanMode, prompt: String? = nil) {
         Task { @MainActor in
             do {
-                let entry = try await scan(image: image, mode: mode)
+                let entry = try await scan(image: image, mode: mode, prompt: prompt)
                 pendingResult = entry
             } catch {
                 // error is already set via the scan() method
@@ -120,7 +120,7 @@ final class ScanService {
 
     /// Sends a captured image to the Render proxy and returns a NutritionEntry.
     /// The entry is NOT inserted into SwiftData — caller should review and confirm.
-    func scan(image: UIImage, mode: ScanMode) async throws -> NutritionEntry {
+    func scan(image: UIImage, mode: ScanMode, prompt: String? = nil) async throws -> NutritionEntry {
         isScanning = true
         error = nil
         defer { isScanning = false }
@@ -129,7 +129,7 @@ final class ScanService {
             throw ScanError.imageEncodingFailed
         }
 
-        let request = try buildRequest(imageData: jpegData, mode: mode)
+        let request = try buildRequest(imageData: jpegData, mode: mode, prompt: prompt)
 
         let (data, response): (Data, URLResponse)
         do {
@@ -159,7 +159,7 @@ final class ScanService {
 
     // MARK: - Private Helpers
 
-    private func buildRequest(imageData: Data, mode: ScanMode) throws -> URLRequest {
+    private func buildRequest(imageData: Data, mode: ScanMode, prompt: String? = nil) throws -> URLRequest {
         let url = proxyBaseURL.appendingPathComponent("scan")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -172,6 +172,11 @@ final class ScanService {
         // Mode field
         let modeParam = mode == .label ? "label" : "food_photo"
         body.appendFormField(name: "mode", value: modeParam, boundary: boundary)
+
+        // Optional user prompt for additional context (e.g. "this is walnut shrimp")
+        if let prompt, !prompt.trimmingCharacters(in: .whitespaces).isEmpty {
+            body.appendFormField(name: "prompt", value: prompt, boundary: boundary)
+        }
 
         // Image field
         body.appendFormFile(name: "image", filename: "capture.jpg", mimeType: "image/jpeg", data: imageData, boundary: boundary)

@@ -12,6 +12,9 @@ struct DailyLogView: View {
     @State private var selectedDate: Date = .now
     @State private var presentedSheet: DailyLogSheet?
     @State private var selectedEntry: NutritionEntry?
+    // Captures the selected date when the user opens the scan camera,
+    // so the result is logged to the correct day even if the calendar changes.
+    @State private var scanDate: Date = .now
 
     private var log: DailyLog? {
         nutritionStore.fetchLog(for: selectedDate)
@@ -20,44 +23,56 @@ struct DailyLogView: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // Weekly calendar strip — shows 7 days with state-driven styling
-                        WeeklyCalendarStrip(selectedDate: $selectedDate)
-                            .padding(.horizontal)
+                // Replaced ScrollView+LazyVStack with List so that .swipeActions on
+                // EntryRowView and MealSectionView actually fire — swipeActions is a
+                // List-only modifier in SwiftUI and is silently ignored in a LazyVStack.
+                List {
+                    // Calendar strip — clear background, no separator, matches original padding
+                    WeeklyCalendarStrip(selectedDate: $selectedDate)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
 
-                        // Macro summary card
-                        MacroSummaryBar(log: log, goals: goals)
-                            .padding(.horizontal)
-
-                        // Meal sections
-                        if let log, !log.entries.isEmpty {
-                            LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
-                                ForEach(MealType.allCases) { mealType in
-                                    MealSectionView(
-                                        mealType: mealType,
-                                        entries: log.entries(for: mealType),
-                                        onSelect: { entry in
-                                            selectedEntry = entry
-                                            presentedSheet = .editEntry(entry)
-                                        },
-                                        onDelete: { entry in
-                                            nutritionStore.delete(entry)
-                                        }
-                                    )
-                                }
-                            }
-                            .padding(.horizontal)
-                        } else {
-                            EmptyLogView()
-                                .padding(.top, 40)
+                    // Macro summary card — tap to view micronutrient details
+                    MacroSummaryBar(log: log, goals: goals)
+                        .background {
+                            NavigationLink("", destination: MicronutrientSummaryView())
+                                .opacity(0)
                         }
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
 
-                        // Bottom padding for FAB
-                        Color.clear.frame(height: 100)
+                    // Meal sections — MealSectionView returns a Section{} so each
+                    // meal type becomes a sticky List section with its header
+                    if let log, !log.entries.isEmpty {
+                        ForEach(MealType.allCases) { mealType in
+                            MealSectionView(
+                                mealType: mealType,
+                                entries: log.entries(for: mealType),
+                                onSelect: { entry in
+                                    selectedEntry = entry
+                                    presentedSheet = .editEntry(entry)
+                                },
+                                onDelete: { entry in
+                                    nutritionStore.delete(entry)
+                                }
+                            )
+                        }
+                    } else {
+                        EmptyLogView()
+                            .padding(.top, 40)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
-                    .padding(.top, 8)
+
+                    // Spacer so the last entry is never hidden behind the radial FAB
+                    Color.clear
+                        .frame(height: 100)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                 }
+                .listStyle(.plain)
                 .scrollContentBackground(.hidden)
 
                 // Radial floating action menu — plus button with drag-to-action options
@@ -88,20 +103,16 @@ struct DailyLogView: View {
                         label: "Scan",
                         icon: "camera.fill",
                         color: .blue,
-                        action: { presentedSheet = .scan }
+                        action: {
+                            scanDate = selectedDate
+                            presentedSheet = .scan
+                        }
                     ),
                 ])
             }
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    NavigationLink {
-                        MicronutrientSummaryView()
-                    } label: {
-                        Image(systemName: "list.bullet.clipboard")
-                    }
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Text(selectedDate, style: .date)
                         .font(.caption)
@@ -112,15 +123,15 @@ struct DailyLogView: View {
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
             case .scan:
-                ScanCaptureView()
+                ScanCaptureView(logDate: selectedDate)
             case .manualEntry:
                 ManualEntryView(defaultDate: selectedDate)
             case .editEntry(let entry):
                 EditEntryView(entry: entry)
             case .foodBank:
-                FoodBankView()
+                FoodBankView(logDate: selectedDate)
             case .containers:
-                ContainerListView()
+                ContainerListView(logDate: selectedDate)
             }
         }
         // Processing overlay — shown after camera dismisses while Gemini analyzes
@@ -150,7 +161,7 @@ struct DailyLogView: View {
             set: { if !$0 { scanService.pendingResult = nil } }
         )) {
             if let entry = scanService.pendingResult {
-                ScanResultSheet(entry: entry)
+                ScanResultSheet(entry: entry, logDate: scanDate)
             }
         }
     }
@@ -179,34 +190,39 @@ enum DailyLogSheet: Identifiable {
 // MARK: - Scan Result Sheet
 
 /// Wraps ScanResultCard in a sheet presented after background scanning completes.
-/// Handles confirm (log + auto-save to Food Bank) and retake (re-open camera).
+/// Handles log-only, log+save, and retake actions.
 private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(\.dismiss) private var dismiss
 
     @Bindable var entry: NutritionEntry
+    let logDate: Date
 
     var body: some View {
         ScanResultCard(
             entry: entry,
             onConfirm: {
-                // Log entry to today's journal
-                nutritionStore.log(entry, to: .now)
+                // Log entry only — no Food Bank save
+                nutritionStore.log(entry, to: logDate)
+                scanService.pendingResult = nil
+                dismiss()
+            },
+            onConfirmAndSave: {
+                // Log entry to journal
+                nutritionStore.log(entry, to: logDate)
 
-                // Auto-save to Food Bank
+                // Also save to Food Bank
                 let saved = SavedFood(from: entry)
                 nutritionStore.modelContext.insert(saved)
                 try? nutritionStore.modelContext.save()
                 let sync = nutritionStore.syncService
                 Task { try? await sync?.createFood(saved) }
 
-                // Clear pending result and dismiss
                 scanService.pendingResult = nil
                 dismiss()
             },
             onRetake: {
-                // Clear result and dismiss — user can re-open camera from FAB
                 scanService.pendingResult = nil
                 dismiss()
             }

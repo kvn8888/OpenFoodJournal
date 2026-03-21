@@ -16,8 +16,7 @@ struct MacrosApp: App {
     init() {
         let isTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
         let config = ModelConfiguration(
-            isStoredInMemoryOnly: isTest,
-            cloudKitDatabase: isTest ? .none : .automatic
+            isStoredInMemoryOnly: isTest
         )
         let container: ModelContainer
         do {
@@ -35,6 +34,7 @@ struct MacrosApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .cursorAtEnd()
                 .modelContainer(modelContainer)
                 .environment(nutritionStore)
                 .environment(scanService)

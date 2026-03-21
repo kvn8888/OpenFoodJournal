@@ -54,6 +54,11 @@ struct MacroChartView: View {
         return logs.map { value(for: $0) }.reduce(0, +) / Double(logs.count)
     }
 
+    /// Index of the next/previous macro for swipe navigation
+    private var macroIndex: Int {
+        ChartMacro.allCases.firstIndex(of: selectedMacro) ?? 0
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             // Macro picker
@@ -117,6 +122,23 @@ struct MacroChartView: View {
         }
         .padding()
         .glassEffect(in: .rect(cornerRadius: 20))
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 30)
+                .onEnded { value in
+                    let horizontal = value.translation.width
+                    guard abs(horizontal) > abs(value.translation.height) else { return }
+
+                    let allCases = ChartMacro.allCases
+                    if horizontal < 0, macroIndex < allCases.count - 1 {
+                        // Swipe left → next macro
+                        withAnimation { selectedMacro = allCases[macroIndex + 1] }
+                    } else if horizontal > 0, macroIndex > 0 {
+                        // Swipe right → previous macro
+                        withAnimation { selectedMacro = allCases[macroIndex - 1] }
+                    }
+                }
+        )
         .animation(.easeInOut, value: selectedMacro)
     }
 }
