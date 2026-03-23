@@ -70,7 +70,7 @@ struct MealSectionView: View {
                     Spacer()
                     Text("\(Int(totalCalories)) kcal")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .textCase(nil)
                 }
             }
