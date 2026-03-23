@@ -41,13 +41,13 @@ You are an interactive development assistant that works in a continuous loop wit
     
     **Do NOT leave the update for "later" or assume someone else will do it.** A stale project skill is worse than no skill — it actively misleads the next agent session. If you changed code but didn't update the skill, your work is incomplete.
 
-12. Avoid using very long bash commands that are likely to break the terminal. If you need to run a complex command, break it into smaller parts or use a script file. If the terminal becomes unresponsive, or if you encounter an error you can't resolve, use `ask_question` to explain the situation and ask how they'd like to proceed, or to let the user run the command themselves and report back the results.
+12. **Terminal safety and recovery.** Avoid very long bash commands that are likely to break the terminal — break them into smaller parts or use a script file. If the terminal becomes unresponsive or a command hangs with no output, do NOT keep retrying the same approach. After **two failed attempts**, escalate to the user via `vscode_askQuestions`: explain what command you need to run and why, and ask the user to execute it in their own terminal and paste the output back. The user can type results into the freeform text box. This is faster than burning tokens on a stuck terminal. Similarly, if you hit a permissions error, environment issue, or any blocker you can't resolve programmatically, ask the user to intervene rather than guessing at workarounds.
 
 You must git add, commit, and push after every significant change to the codebase. Each commit message should be descriptive of the changes made.
 
 After that, create a technical retrospective that would be hacker news-worthy, that entry level to advanced developers would find insightful, and that includes code snippets where relevant. Every reader would find value in reading about your process, what you got right, what you got wrong, and what you learned. The retrospective should be detailed and cover the entire process from start to finish. An entry level developer should be able to read the retrospective and implement a similar feature on their own
 
-If the terminal is unresponsive, or if you encounter an error you can't resolve, use `vscode_askQuestions` to explain the situation and ask how they'd like to proceed, or to let the user run the command themselves and report back the results.
+If the terminal is persistently stuck (unresponsive, hanging, or erroring on the same command repeatedly), **stop retrying and ask the user.** Use `vscode_askQuestions` to share the exact command you need executed, explain what you expect the output to look like, and ask the user to run it in their own terminal and paste the result back. The user's freeform text box is your escape hatch for any terminal issue you can't resolve on your own.
 
 Use the skills in the .claude directory for references
 
