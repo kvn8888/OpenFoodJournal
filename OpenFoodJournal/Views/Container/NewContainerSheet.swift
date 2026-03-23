@@ -21,6 +21,7 @@ struct NewContainerSheet: View {
     @State private var gramsPerServingText = ""
     @State private var startWeightText = ""
     @State private var searchText = ""
+    @FocusState private var focusedField: Bool
 
     // Filtered foods based on search
     private var filteredFoods: [SavedFood] {
@@ -45,6 +46,10 @@ struct NewContainerSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { focusedField = false }
                 }
             }
         }
@@ -107,6 +112,7 @@ struct NewContainerSheet: View {
                         TextField("e.g. 39", text: $gramsPerServingText)
                             .keyboardType(.decimalPad)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .focused($focusedField)
                         Text("g")
                             .font(.title3)
                             .foregroundStyle(.secondary)
@@ -128,6 +134,7 @@ struct NewContainerSheet: View {
                         TextField("e.g. 500", text: $startWeightText)
                             .keyboardType(.decimalPad)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
+                            .focused($focusedField)
                         Text("g")
                             .font(.title3)
                             .foregroundStyle(.secondary)

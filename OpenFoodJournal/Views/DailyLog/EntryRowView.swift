@@ -58,7 +58,7 @@ struct EntryRowView: View {
 
 // MARK: - Subviews
 
-private struct MacroChip: View {
+struct MacroChip: View {
     let value: Double
     let color: Color
     let label: String

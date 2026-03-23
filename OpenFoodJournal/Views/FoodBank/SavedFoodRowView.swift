@@ -11,21 +11,34 @@ struct SavedFoodRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // ── Left: Source icon based on how the food was originally captured ──
-            // Gives visual context: camera = label scan, fork = food photo, pencil = manual
-            sourceIcon
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .frame(width: 32)
+            // ── Left: Calorie count as the primary identifier ──
+            VStack(alignment: .center, spacing: 2) {
+                Text("\(Int(food.calories))")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .monospacedDigit()
+                Text("cal")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: 44)
 
             // ── Center: Food name + serving info ──
             VStack(alignment: .leading, spacing: 2) {
+                // Show brand above food name if available
+                if let brand = food.brand, !brand.isEmpty {
+                    Text(brand)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
                 Text(food.name)
                     .font(.body)
                     .fontWeight(.medium)
                     .lineLimit(1)
 
-                // Show serving size if available, otherwise show how it was captured
+                // Show serving size if available
                 if let serving = food.servingSize {
                     Text(serving)
                         .font(.caption)
@@ -36,29 +49,13 @@ struct SavedFoodRowView: View {
 
             Spacer()
 
-            // ── Right: Calorie count as the primary macro ──
-            VStack(alignment: .trailing, spacing: 2) {
-                Text("\(Int(food.calories))")
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .monospacedDigit()
-                Text("cal")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            // ── Right: Macro chips matching the journal's EntryRowView ──
+            HStack(spacing: 6) {
+                MacroChip(value: food.protein, color: .blue, label: "P")
+                MacroChip(value: food.carbs, color: .green, label: "C")
+                MacroChip(value: food.fat, color: .yellow, label: "F")
             }
         }
         .padding(.vertical, 4)
-    }
-
-    // Maps the original scan mode to a meaningful SF Symbol
-    private var sourceIcon: Image {
-        switch food.originalScanMode {
-        case .label:
-            Image(systemName: "barcode.viewfinder")
-        case .foodPhoto:
-            Image(systemName: "fork.knife")
-        case .manual:
-            Image(systemName: "pencil.circle")
-        }
     }
 }

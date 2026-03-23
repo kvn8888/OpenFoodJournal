@@ -121,6 +121,15 @@ struct ScanResultCard: View {
         }
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
         .ignoresSafeArea(edges: .bottom)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") {
+                    // Resign first responder globally to dismiss keyboard from any field
+                    UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+                }
+            }
+        }
     }
 }
 

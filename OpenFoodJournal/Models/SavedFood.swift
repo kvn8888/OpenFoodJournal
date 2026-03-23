@@ -45,6 +45,10 @@ final class SavedFood {
     // How this food was originally captured (label scan, food photo, or manual)
     var originalScanMode: ScanMode
 
+    // Tracks when this food was last used (logged or saved).
+    // Defaults to createdAt so newly saved foods surface to the top of "Last Used" sort.
+    var lastUsedAt: Date
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -81,6 +85,7 @@ final class SavedFood {
         self.servingMappings = servingMappings
         self.sourceImage = sourceImage
         self.originalScanMode = originalScanMode
+        self.lastUsedAt = createdAt  // New foods count as "just used" for sort ordering
     }
 }
 
