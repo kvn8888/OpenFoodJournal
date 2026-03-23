@@ -43,7 +43,7 @@ See [references/models.md](references/models.md) for full property lists.
 
 - **`DailyLog`** — `@Model`, keyed by `@Attribute(.unique) date` normalized to midnight. Owns `[NutritionEntry]` via cascade delete.
 - **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/serving/servingCount/servingQuantity/servingUnit/servingMappings. `@Attribute(.externalStorage)` on `sourceImage`.
-- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Created from entries or manual input.
+- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting. Created from entries or manual input.
 - **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
 - **`UserGoals`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for each goal property to avoid property-wrapper conflicts.
 - **`MealType`** — enum: `.breakfast`, `.lunch`, `.dinner`, `.snack`
@@ -171,7 +171,7 @@ if (!cols.includes("serving_type")) {
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight → derived nutrition logged
 - Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
-- WeeklyCalendarStrip with progress rings on DailyLogView
+- WeeklyCalendarStrip: expandable calendar (collapsed = week strip with swipe, expanded = scrollable monthly grid with sticky headers and progress rings)
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values, summary view with progress bars
 - Turso DB integration: server-side schema + REST API complete, iOS SyncService with fire-and-forget mutations
 - Entitlements configured: Camera, HealthKit privacy descriptions in Info.plist
