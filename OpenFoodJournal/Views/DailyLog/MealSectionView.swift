@@ -63,14 +63,14 @@ struct MealSectionView: View {
             } header: {
                 HStack {
                     Label(mealType.rawValue, systemImage: mealType.systemImage)
-                        .font(.footnote)
+                        .font(.subheadline)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.primary)
                         .textCase(nil)
                     Spacer()
                     Text("\(Int(totalCalories)) kcal")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                         .textCase(nil)
                 }
             }
