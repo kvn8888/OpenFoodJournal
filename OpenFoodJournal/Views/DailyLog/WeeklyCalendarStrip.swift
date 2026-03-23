@@ -138,9 +138,6 @@ struct WeeklyCalendarStrip: View {
             // ── Header: month/year label + Today button ──
             calendarHeader
 
-            // ── Day-of-week labels (S M T W T F S) ──
-            dayOfWeekLabels
-
             // ── Horizontally scrollable weeks ──
             weekScroller
         }
@@ -176,23 +173,6 @@ struct WeeklyCalendarStrip: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-    }
-
-    // MARK: - Day-of-Week Labels
-
-    /// Fixed row of single-letter weekday headers (S M T W T F S)
-    private var dayOfWeekLabels: some View {
-        HStack(spacing: 0) {
-            ForEach(Calendar.current.veryShortWeekdaySymbols, id: \.self) { label in
-                Text(label)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 4)
     }
 
     // MARK: - Week Scroller
