@@ -1,12 +1,16 @@
 // Macros — Food Journaling App
 // AGPL-3.0 License
 //
-// WeeklyCalendarStrip — A continuously scrollable monthly calendar
-// modeled after iOS Calendar's monthly view:
-//   • Vertical continuous scroll with smooth snapping to month boundaries
-//   • Sticky month/year headers that transition as you scroll
+// WeeklyCalendarStrip — A horizontally scrollable week strip that snaps
+// cleanly to week boundaries (Sun–Sat), inspired by the smooth momentum
+// snapping of the iOS Calendar app.
+//
+//   • Horizontal continuous scroll through ~52 weeks of history
+//   • Each "page" is one full week (Sun–Sat), always snaps to alignment
+//   • scrollTargetLayout + scrollTargetBehavior(.viewAligned) for the snap
 //   • Each day shows a progress ring based on calorie intake vs. goal
 //   • Tapping a day selects it and updates the parent's selectedDate
+//   • "Today" button to jump back to the current week
 //
 // Day cell states drive visual appearance:
 //   1. Selected (active day) — bold text, filled background, progress ring
@@ -63,50 +67,32 @@ enum DayCellState {
     }
 }
 
-// MARK: - Month Identifier
+// MARK: - Week Identifier
 
-/// Hashable identifier for a calendar month, used as scroll anchor targets.
-/// Stores year and month so we can generate dates and create stable IDs.
-private struct MonthID: Hashable, Identifiable {
-    let year: Int
-    let month: Int
+/// A Hashable/Identifiable value for each week in the horizontal scroll.
+/// Stores the Sunday start date so we can generate all 7 days and use it
+/// as a stable scroll anchor target.
+private struct WeekID: Hashable, Identifiable {
+    /// The Sunday that starts this week (start of day)
+    let startDate: Date
 
-    var id: Int { year * 100 + month }
+    /// Stable identifier — timeIntervalSinceReferenceDate of the Sunday
+    var id: TimeInterval { startDate.timeIntervalSinceReferenceDate }
 
-    /// Human-readable month/year label (e.g. "March 2026")
-    var label: String {
-        let components = DateComponents(year: year, month: month, day: 1)
-        guard let date = Calendar.current.date(from: components) else { return "" }
-        return date.formatted(.dateTime.month(.wide).year())
-    }
-
-    /// All dates in this month
+    /// The 7 dates (Sun–Sat) in this week
     var dates: [Date] {
-        let calendar = Calendar.current
-        let components = DateComponents(year: year, month: month, day: 1)
-        guard let firstDay = calendar.date(from: components),
-              let range = calendar.range(of: .day, in: .month, for: firstDay) else { return [] }
-        return range.compactMap { day in
-            calendar.date(from: DateComponents(year: year, month: month, day: day))
+        (0..<7).compactMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: startDate)
         }
-    }
-
-    /// The weekday index (0 = Sunday) of the first day of this month.
-    /// Used to add leading empty cells so the grid aligns with day-of-week columns.
-    var firstWeekdayOffset: Int {
-        let calendar = Calendar.current
-        let components = DateComponents(year: year, month: month, day: 1)
-        guard let firstDay = calendar.date(from: components) else { return 0 }
-        // calendar.component(.weekday) returns 1=Sunday...7=Saturday
-        return calendar.component(.weekday, from: firstDay) - 1
     }
 }
 
 // MARK: - WeeklyCalendarStrip
 
-/// Continuously scrollable monthly calendar that replaces the old 7-day strip.
-/// Generates months from 12 months ago to the current month, with smooth
-/// scroll-snapping to month boundaries.
+/// Horizontally scrollable week strip with smooth snap-to-week behavior.
+/// Pre-generates ~52 weeks of history so the user can freely scroll back
+/// in time. Uses scrollTargetLayout + scrollTargetBehavior(.viewAligned)
+/// for the iOS Calendar-style momentum snapping.
 struct WeeklyCalendarStrip: View {
     /// The currently selected date — bound to the parent's state.
     @Binding var selectedDate: Date
@@ -120,147 +106,139 @@ struct WeeklyCalendarStrip: View {
     /// Calendar used for all date math
     private let calendar = Calendar.current
 
-    /// Whether the calendar is expanded (shows full months) or collapsed (shows one week)
-    @State private var isExpanded = false
+    /// Number of weeks of history to make scrollable
+    private let weeksOfHistory = 52
 
-    /// The months available for scrolling (past 12 months + current month)
-    private var months: [MonthID] {
-        let today = Date.now
-        let currentYear = calendar.component(.year, from: today)
-        let currentMonth = calendar.component(.month, from: today)
-
-        // Generate 12 months back + current month = 13 months
-        return (-12...0).compactMap { offset in
-            var components = DateComponents(year: currentYear, month: currentMonth + offset)
-            guard let date = calendar.date(from: components) else { return nil }
-            return MonthID(
-                year: calendar.component(.year, from: date),
-                month: calendar.component(.month, from: date)
-            )
-        }
-    }
-
-    /// The week dates for the collapsed (single-week) view
-    private var weekDates: [Date] {
-        guard let weekInterval = calendar.dateInterval(of: .weekOfYear, for: selectedDate) else {
+    /// Pre-computed array of WeekIDs from ~1 year ago to the current week.
+    /// Each entry represents one Sunday–Saturday week.
+    private var weeks: [WeekID] {
+        // Find the Sunday that starts the current week
+        guard let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: Date.now)?.start else {
             return []
         }
-        return (0..<7).compactMap { offset in
-            calendar.date(byAdding: .day, value: offset, to: weekInterval.start)
+        // Generate weeksOfHistory weeks back + current week
+        return (-weeksOfHistory...0).compactMap { offset in
+            guard let sunday = calendar.date(byAdding: .weekOfYear, value: offset, to: currentWeekStart) else {
+                return nil
+            }
+            return WeekID(startDate: calendar.startOfDay(for: sunday))
         }
     }
 
-    /// 7 column grid for the days of the week
-    private let dayColumns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
-
-    /// Day-of-week header labels
-    private let dayLabels = Calendar.current.veryShortWeekdaySymbols
+    /// The WeekID that contains the currently selected date
+    private var selectedWeekID: WeekID? {
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: selectedDate) else {
+            return nil
+        }
+        return WeekID(startDate: calendar.startOfDay(for: interval.start))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Toggle header: tap to expand/collapse ──
-            toggleHeader
+            // ── Header: month/year label + Today button ──
+            calendarHeader
 
-            if isExpanded {
-                // ── Expanded: full monthly calendar with vertical scroll ──
-                expandedCalendar
-            } else {
-                // ── Collapsed: single week strip (original behavior) ──
-                collapsedWeekStrip
-            }
+            // ── Day-of-week labels (S M T W T F S) ──
+            dayOfWeekLabels
+
+            // ── Horizontally scrollable weeks ──
+            weekScroller
         }
         .glassEffect(in: .rect(cornerRadius: 16))
-        .animation(.spring(duration: 0.35, bounce: 0.15), value: isExpanded)
     }
 
-    // MARK: - Toggle Header
+    // MARK: - Header
 
-    /// Shows current month/year and chevron to expand/collapse
-    private var toggleHeader: some View {
-        Button {
-            isExpanded.toggle()
-        } label: {
-            HStack {
-                Text(selectedDate.formatted(.dateTime.month(.wide).year()))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.primary)
+    /// Shows the month/year for the selected date, plus a "Today" button
+    /// when the user has scrolled away from the current day.
+    private var calendarHeader: some View {
+        HStack {
+            Text(selectedDate.formatted(.dateTime.month(.wide).year()))
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
 
-                Image(systemName: "chevron.down")
+            Spacer()
+
+            // Today button — only visible when not on today's date
+            if !calendar.isDateInToday(selectedDate) {
+                Button {
+                    withAnimation(.spring(duration: 0.3)) {
+                        selectedDate = .now
+                    }
+                } label: {
+                    Text("Today")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.blue)
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Day-of-Week Labels
+
+    /// Fixed row of single-letter weekday headers (S M T W T F S)
+    private var dayOfWeekLabels: some View {
+        HStack(spacing: 0) {
+            ForEach(Calendar.current.veryShortWeekdaySymbols, id: \.self) { label in
+                Text(label)
                     .font(.caption2)
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
-                    .rotationEffect(.degrees(isExpanded ? 180 : 0))
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
+    }
 
-                Spacer()
+    // MARK: - Week Scroller
 
-                // Today button — quickly jump back to today
-                if !calendar.isDateInToday(selectedDate) {
-                    Button {
-                        withAnimation(.spring(duration: 0.3)) {
-                            selectedDate = .now
-                        }
-                    } label: {
-                        Text("Today")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.blue)
+    /// The horizontal ScrollView containing all weeks.
+    /// scrollTargetLayout marks each week HStack as a snap target,
+    /// and scrollTargetBehavior(.viewAligned) makes the scroll decelerate
+    /// to the nearest week boundary — this is the iOS Calendar-style snap.
+    private var weekScroller: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(weeks) { week in
+                        // One full week row (Sun–Sat)
+                        weekRow(for: week)
+                            .containerRelativeFrame(.horizontal)
+                            .id(week.id)
+                    }
+                }
+                .scrollTargetLayout()
+            }
+            .scrollTargetBehavior(.viewAligned)
+            .onAppear {
+                // Start scrolled to the week containing the selected date
+                if let target = selectedWeekID {
+                    proxy.scrollTo(target.id, anchor: .center)
+                }
+            }
+            .onChange(of: selectedDate) { _, newDate in
+                // When selectedDate changes (e.g. "Today" button), scroll to that week
+                if let target = weekIDForDate(newDate) {
+                    withAnimation(.spring(duration: 0.3)) {
+                        proxy.scrollTo(target.id, anchor: .center)
                     }
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
-        .buttonStyle(.plain)
+        .padding(.bottom, 8)
     }
 
-    // MARK: - Expanded Calendar
+    // MARK: - Week Row
 
-    /// Full monthly calendar view with continuous vertical scrolling
-    private var expandedCalendar: some View {
-        VStack(spacing: 0) {
-            // ── Day-of-week column headers ──
-            dayOfWeekHeaders
-
-            // ── Scrollable months ──
-            ScrollViewReader { proxy in
-                ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
-                        ForEach(months) { month in
-                            Section {
-                                monthGrid(for: month)
-                            } header: {
-                                // Sticky month header that pins during scroll
-                                Text(month.label)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 4)
-                            }
-                        }
-                    }
-                    .scrollTargetLayout()
-                }
-                .scrollTargetBehavior(.viewAligned)
-                .frame(height: 280)
-                .onAppear {
-                    // Scroll to the month containing the selected date
-                    let targetMonth = monthID(for: selectedDate)
-                    proxy.scrollTo(targetMonth.id, anchor: .top)
-                }
-            }
-        }
-        .transition(.opacity.combined(with: .move(edge: .top)))
-    }
-
-    // MARK: - Collapsed Week Strip
-
-    /// Single-week horizontal strip (the original interaction pattern)
-    private var collapsedWeekStrip: some View {
+    /// Renders 7 day cells in a horizontal row for one week.
+    private func weekRow(for week: WeekID) -> some View {
         HStack(spacing: 0) {
-            ForEach(weekDates, id: \.self) { date in
+            ForEach(week.dates, id: \.self) { date in
                 DayCellView(
                     date: date,
                     state: cellState(for: date)
@@ -276,98 +254,16 @@ struct WeeklyCalendarStrip: View {
             }
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .gesture(weekSwipeGesture)
-        .transition(.opacity.combined(with: .move(edge: .bottom)))
-    }
-
-    /// Horizontal drag offset for the week swipe animation
-    @State private var dragOffset: CGFloat = 0
-
-    /// Swipe gesture to navigate between weeks
-    private var weekSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onEnded { value in
-                let horizontal = value.translation.width
-                let isHorizontal = abs(horizontal) > abs(value.translation.height)
-                let threshold: CGFloat = 50
-
-                if isHorizontal && abs(horizontal) > threshold {
-                    if horizontal < 0, !isCurrentWeek {
-                        // Swipe left → next week
-                        let next = calendar.date(byAdding: .weekOfYear, value: 1, to: selectedDate) ?? selectedDate
-                        if next <= Date.now {
-                            withAnimation(.spring(duration: 0.3)) {
-                                selectedDate = next
-                            }
-                        }
-                    } else if horizontal > 0 {
-                        // Swipe right → previous week
-                        withAnimation(.spring(duration: 0.3)) {
-                            selectedDate = calendar.date(byAdding: .weekOfYear, value: -1, to: selectedDate) ?? selectedDate
-                        }
-                    }
-                }
-            }
-    }
-
-    /// Whether the selected date is in the current week
-    private var isCurrentWeek: Bool {
-        calendar.isDate(selectedDate, equalTo: .now, toGranularity: .weekOfYear)
-    }
-
-    // MARK: - Shared Components
-
-    /// Day-of-week column headers (S M T W T F S)
-    private var dayOfWeekHeaders: some View {
-        LazyVGrid(columns: dayColumns, spacing: 0) {
-            ForEach(dayLabels, id: \.self) { label in
-                Text(label)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-            }
-        }
-        .padding(.horizontal, 4)
-        .padding(.bottom, 4)
-    }
-
-    /// Grid of day cells for a single month
-    private func monthGrid(for month: MonthID) -> some View {
-        LazyVGrid(columns: dayColumns, spacing: 4) {
-            // Leading empty cells to align first day with correct weekday column
-            ForEach(0..<month.firstWeekdayOffset, id: \.self) { _ in
-                Color.clear.frame(height: 40)
-            }
-
-            // Actual day cells
-            ForEach(month.dates, id: \.self) { date in
-                DayCellView(date: date, state: cellState(for: date), compact: true)
-                    .frame(height: 40)
-                    .onTapGesture {
-                        if date <= Date.now || calendar.isDateInToday(date) {
-                            withAnimation(.spring(duration: 0.3)) {
-                                selectedDate = date
-                                // Auto-collapse after selecting a date
-                                isExpanded = false
-                            }
-                        }
-                    }
-            }
-        }
-        .padding(.horizontal, 4)
     }
 
     // MARK: - Helpers
 
-    /// Creates a MonthID from a Date
-    private func monthID(for date: Date) -> MonthID {
-        MonthID(
-            year: calendar.component(.year, from: date),
-            month: calendar.component(.month, from: date)
-        )
+    /// Finds the WeekID that contains a given date
+    private func weekIDForDate(_ date: Date) -> WeekID? {
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: date) else {
+            return nil
+        }
+        return WeekID(startDate: calendar.startOfDay(for: interval.start))
     }
 
     /// Determines the visual state for a given date.
@@ -401,14 +297,11 @@ struct WeeklyCalendarStrip: View {
 
 // MARK: - DayCellView
 
-/// A single day cell used in both the week strip and month grid.
-/// In the week strip, it shows a 3-letter day abbreviation above the date circle.
-/// In the month grid, only the date circle is shown (headers handle day labels).
+/// A single day cell showing a day abbreviation and a date number inside
+/// a progress ring. Used in the week strip rows.
 private struct DayCellView: View {
     let date: Date
     let state: DayCellState
-    /// When true, hides the day abbreviation (used in month grid where column headers exist)
-    var compact: Bool = false
 
     /// 3-letter day abbreviation (e.g. "Mon", "Tue")
     private var dayAbbreviation: String {
@@ -426,18 +319,16 @@ private struct DayCellView: View {
         return false
     }
 
-    /// Ring/circle size — smaller in compact mode to fit month grid
-    private var circleSize: CGFloat { compact ? 30 : 34 }
+    /// Ring/circle size
+    private let circleSize: CGFloat = 34
 
     var body: some View {
-        VStack(spacing: compact ? 0 : 4) {
-            // Day abbreviation (only in non-compact / week strip mode)
-            if !compact {
-                Text(dayAbbreviation)
-                    .font(.caption2)
-                    .fontWeight(.medium)
-                    .foregroundStyle(dayTextColor)
-            }
+        VStack(spacing: 4) {
+            // Day abbreviation (e.g. "Mon")
+            Text(dayAbbreviation)
+                .font(.caption2)
+                .fontWeight(.medium)
+                .foregroundStyle(dayTextColor)
 
             // Date number inside a progress ring
             ZStack {
@@ -446,7 +337,7 @@ private struct DayCellView: View {
                     // No ring for future days
                 } else {
                     Circle()
-                        .stroke(.secondary.opacity(0.15), lineWidth: compact ? 2 : 2.5)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 2.5)
                 }
 
                 // Progress ring — fills clockwise from top
@@ -454,7 +345,7 @@ private struct DayCellView: View {
                     .trim(from: 0, to: state.progressFraction)
                     .stroke(
                         state.ringColor,
-                        style: StrokeStyle(lineWidth: compact ? 2 : 2.5, lineCap: .round)
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
 
@@ -467,13 +358,13 @@ private struct DayCellView: View {
 
                 // The date number text
                 Text(dayNumber)
-                    .font(compact ? .caption : .subheadline)
+                    .font(.subheadline)
                     .fontWeight(isSelected ? .bold : .semibold)
                     .foregroundStyle(dateTextColor)
             }
             .frame(width: circleSize, height: circleSize)
         }
-        .padding(.vertical, compact ? 2 : 4)
+        .padding(.vertical, 4)
     }
 
     // MARK: - State-Driven Styling

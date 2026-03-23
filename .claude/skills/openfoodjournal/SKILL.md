@@ -171,7 +171,7 @@ if (!cols.includes("serving_type")) {
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight → derived nutrition logged
 - Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
-- WeeklyCalendarStrip: expandable calendar (collapsed = week strip with swipe, expanded = scrollable monthly grid with sticky headers and progress rings)
+- WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping to week boundaries (scrollTargetLayout + scrollTargetBehavior(.viewAligned) + containerRelativeFrame). 52 weeks of history via LazyHStack of WeekID structs. Today button, progress rings per day cell.
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values, summary view with progress bars
 - Turso DB integration: server-side schema + REST API complete, iOS SyncService with fire-and-forget mutations
 - Entitlements configured: Camera, HealthKit privacy descriptions in Info.plist

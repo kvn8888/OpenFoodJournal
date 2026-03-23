@@ -1,4 +1,4 @@
-# From Static Strips to Scrollable Months: Redesigning a Food Journal's UX in One Session
+# From Static Strips to Scrollable Weeks: Redesigning a Food Journal's UX in One Session
 
 A nutrition tracker lives or dies by how fast you can log a meal. If it takes more than a few seconds to find a food, enter data, and move on, people stop using it. This session tackled five pain points in OpenFoodJournal — a SwiftUI + SwiftData iOS app — all rooted in the same insight: **the UI was making common actions harder than they needed to be**.
 
@@ -150,132 +150,109 @@ This sends the `resignFirstResponder` message up the responder chain — the UIK
 
 Six files needed the Done button: `ScanResultCard`, `ScanCaptureView`, `CompleteContainerSheet`, `NewContainerSheet`, `EditFoodSheet`, and `GoalsEditorView`. The audit was mechanical — search for `TextField` and `keyboardType(.decimalPad)` across the project, check if each has a dismiss mechanism, add one if not.
 
-## Step 4: The Calendar Rewrite — From Strip to Scrollable Grid
+## Step 4: The Calendar Rewrite — From Discrete Swipes to Continuous Scroll
 
-This was the biggest change. The old `WeeklyCalendarStrip` showed one week at a time (Sunday–Saturday) with left/right swipe gestures. The request was to make it behave like the iOS Calendar app: a vertically scrollable month grid that snaps smoothly to month boundaries.
+This was the biggest change. The old `WeeklyCalendarStrip` showed one week at a time (Sunday–Saturday) with a `DragGesture` that snapped forward/backward by exactly one week on each swipe. Want to check 3 weeks ago? Three deliberate swipe-and-wait gestures. The request was inspired by iOS Calendar's interaction feel: **continuous horizontal scrolling with smooth momentum that snaps to week boundaries**, not discrete tap-to-advance.
 
-Rather than replacing the week strip entirely, I made it **expandable** — tapping the month/year header toggles between the compact week strip and a full monthly grid:
+The key insight: the iOS Calendar reference wasn't about emulating a monthly grid — it was about the *interaction pattern*. Scroll freely, let momentum carry you, and the view gracefully settles on a clean boundary. Applied to weeks instead of months.
+
+### The Architecture
+
+The old approach used `DragGesture` with manual offset calculation. The new one uses SwiftUI's built-in scroll snapping (iOS 17+):
 
 ```swift
-@State private var isExpanded = false
-
-var body: some View {
-    VStack(spacing: 0) {
-        toggleHeader  // Tap to expand/collapse + "Today" button
-
-        if isExpanded {
-            expandedCalendar  // Full monthly grid
-        } else {
-            collapsedWeekStrip  // Original week strip
+ScrollView(.horizontal, showsIndicators: false) {
+    LazyHStack(spacing: 0) {
+        ForEach(weeks) { week in
+            weekRow(for: week)
+                .containerRelativeFrame(.horizontal)  // Each week fills the viewport
+                .id(week.id)
         }
     }
-    .glassEffect(in: .rect(cornerRadius: 16))
-    .animation(.spring(duration: 0.35, bounce: 0.15), value: isExpanded)
+    .scrollTargetLayout()  // Marks each child as a snap target
 }
+.scrollTargetBehavior(.viewAligned)  // Decelerates to nearest target
 ```
 
-### The Month Grid
+Three APIs make this work together:
 
-Each month is a `Section` inside a `LazyVStack` with `pinnedViews: [.sectionHeaders]` — this gives you sticky month headers that stay visible as you scroll, exactly like iOS Calendar:
+1. **`.containerRelativeFrame(.horizontal)`** — Each week row sizes itself to exactly fill the ScrollView's width. No hardcoded widths, no GeometryReader.
+2. **`.scrollTargetLayout()`** — Tells SwiftUI that each child of the `LazyHStack` is a valid snap point.
+3. **`.scrollTargetBehavior(.viewAligned)`** — When the user lifts their finger, the scroll velocity decelerates toward (not stops at) the nearest target. This is the smooth momentum snap.
 
-```swift
-ScrollView(.vertical, showsIndicators: false) {
-    LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
-        ForEach(months) { month in
-            Section {
-                monthGrid(for: month)
-            } header: {
-                Text(month.label)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-    .scrollTargetLayout()
-}
-.scrollTargetBehavior(.viewAligned)
-.frame(height: 280)
-```
+The combination produces the iOS Calendar feel: flick hard and it glides past several weeks before settling cleanly on a boundary. Flick gently and it snaps to the adjacent week. No custom gesture math, no `UIScrollView` wrapping.
 
-The `.scrollTargetLayout()` + `.scrollTargetBehavior(.viewAligned)` combination (iOS 17+) is the key to smooth snapping. When the user lifts their finger mid-scroll, SwiftUI automatically decelerates to the nearest section boundary instead of stopping at an arbitrary offset. This is the same API that makes `TabView` with `.page` style snap — it just works on any `ScrollView` with marked target content.
+### WeekID: Modeling Scroll Targets
 
-### The MonthID Model
-
-Each month is identified by a `MonthID` struct that generates its own date arrays:
+Each week is identified by its Sunday start date:
 
 ```swift
-private struct MonthID: Hashable, Identifiable {
-    let year: Int
-    let month: Int
+private struct WeekID: Hashable, Identifiable {
+    let startDate: Date  // The Sunday that starts this week
 
-    var id: Int { year * 100 + month }
+    var id: TimeInterval { startDate.timeIntervalSinceReferenceDate }
 
     var dates: [Date] {
-        let calendar = Calendar.current
-        let components = DateComponents(year: year, month: month, day: 1)
-        guard let firstDay = calendar.date(from: components),
-              let range = calendar.range(of: .day, in: .month, for: firstDay)
-        else { return [] }
-        return range.compactMap { day in
-            calendar.date(from: DateComponents(year: year, month: month, day: day))
+        (0..<7).compactMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: startDate)
         }
-    }
-
-    var firstWeekdayOffset: Int {
-        // Returns 0 for Sunday, 1 for Monday, etc.
-        // Used to add leading empty cells so the grid aligns correctly
-        let calendar = Calendar.current
-        let components = DateComponents(year: year, month: month, day: 1)
-        guard let firstDay = calendar.date(from: components) else { return 0 }
-        return calendar.component(.weekday, from: firstDay) - 1
     }
 }
 ```
 
-The `firstWeekdayOffset` is critical for grid alignment. Without leading empty cells, January 1st (a Wednesday) would appear in the Sunday column. The `ForEach(0..<month.firstWeekdayOffset)` before the actual day cells fills those leading slots with `Color.clear` spacers.
+Using `timeIntervalSinceReferenceDate` as the ID is a trick to get a stable, unique identifier without worrying about date formatting or calendar math edge cases. Two `Date` values that represent the same moment always produce the same `TimeInterval`.
 
-### DayCellView Dual Mode
-
-The existing `DayCellView` needed to work in both the week strip (where it shows day abbreviations like "Mon") and the month grid (where column headers handle that). A `compact` parameter controls this:
+The view pre-generates 52 weeks of history:
 
 ```swift
-private struct DayCellView: View {
-    let date: Date
-    let state: DayCellState
-    var compact: Bool = false
+private var weeks: [WeekID] {
+    guard let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: Date.now)?.start else {
+        return []
+    }
+    return (-weeksOfHistory...0).compactMap { offset in
+        guard let sunday = calendar.date(byAdding: .weekOfYear, value: offset, to: currentWeekStart) else {
+            return nil
+        }
+        return WeekID(startDate: calendar.startOfDay(for: sunday))
+    }
+}
+```
 
-    private var circleSize: CGFloat { compact ? 30 : 34 }
+`calendar.dateInterval(of: .weekOfYear, for:)` returns the Sunday–Saturday interval containing the given date. This respects the user's locale — if their calendar starts on Monday, `firstWeekday` would shift everything. Using `.weekOfYear` instead of manual arithmetic avoids that class of bugs.
 
-    var body: some View {
-        VStack(spacing: compact ? 0 : 4) {
-            if !compact {
-                Text(dayAbbreviation)
-                    .font(.caption2)
+### Scroll Position Sync
+
+When the user taps "Today" or selects a date via another UI path, the scroll position needs to jump to the correct week. `ScrollViewReader` + `onChange(of:)` handles this:
+
+```swift
+ScrollViewReader { proxy in
+    ScrollView(.horizontal, showsIndicators: false) {
+        // ... week content ...
+    }
+    .onAppear {
+        if let target = selectedWeekID {
+            proxy.scrollTo(target.id, anchor: .center)
+        }
+    }
+    .onChange(of: selectedDate) { _, newDate in
+        if let target = weekIDForDate(newDate) {
+            withAnimation(.spring(duration: 0.3)) {
+                proxy.scrollTo(target.id, anchor: .center)
             }
-            // Progress ring + date number (shared between both modes)
-            ZStack { /* ... */ }
-                .frame(width: circleSize, height: circleSize)
         }
     }
 }
 ```
 
-This avoided duplicating the progress ring rendering logic. The `compact` parameter defaults to `false`, so existing call sites in the week strip don't need changes.
+The `onAppear` scroll has no animation (instant jump to the right week on first render). The `onChange` scroll animates with a spring — so tapping "Today" produces a smooth glide back to the current week.
 
-### Auto-Collapse Behavior
+### What I Got Wrong First
 
-When you tap a date in the expanded grid, the calendar collapses back to the week strip centered on that date. This felt natural in testing — you expand to find a date, tap it, and the view gets out of your way:
+My first implementation was an expandable calendar with a collapsed week strip and an expanded vertical monthly grid. It had sticky headers, `LazyVGrid` month sections, and an expand/collapse toggle. It was technically impressive and completely missed the point.
 
-```swift
-.onTapGesture {
-    if date <= Date.now || calendar.isDateInToday(date) {
-        withAnimation(.spring(duration: 0.3)) {
-            selectedDate = date
-            isExpanded = false  // Collapse after selection
-        }
-    }
-}
-```
+The user's request was about **horizontal scrolling with momentum snapping** — not about showing more dates. A vertical monthly grid solves a different problem (seeing a month at a glance). The actual pain was: "I can't scroll freely through my week history." The fix was removing the `DragGesture` and replacing it with a proper `ScrollView` that has the right snapping behavior behind it.
+
+**Lesson**: When a user references another app's interaction, focus on the *verb* (scrolls with momentum, snaps cleanly) not the *noun* (monthly grid, sticky headers). The interaction pattern is the feature, not the layout.
 
 ## The Gotcha: The Phantom Duplicate File
 
@@ -293,9 +270,9 @@ This is a common trap with Xcode's directory-based target membership. If you cre
 
 ## What's Next
 
-The calendar's momentum snapping works via `.scrollTargetBehavior(.viewAligned)`, but the iOS Calendar app has an even smoother feel — it uses custom `UIScrollView` deceleration curves that SwiftUI doesn't expose. A future refinement could wrap a `UIScrollView` via `UIViewRepresentable` with tuned `decelerationRate` and `UIScrollViewDelegate` snapping, but the current behavior is good enough for most users.
-
 The Food Bank's "Last Used" sort is only as good as the data. Existing foods start with `lastUsedAt = createdAt`, so the first time a user opens the app after the update, the order will match "Newest First." It self-corrects as they log meals, but a migration that backdates `lastUsedAt` from actual log entries would be more accurate.
+
+The calendar currently generates 52 static weeks on init. If the user keeps the app open across a week boundary, the list won't update. A smarter approach would regenerate weeks lazily or observe a timer, but for a food journal that's typically opened-and-closed per meal, it's not a real issue.
 
 ---
 
