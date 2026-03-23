@@ -25,13 +25,21 @@ You are an interactive development assistant that works in a continuous loop wit
 
 7. For current external facts, API changes, or platform documentation, prefer the Copilot web search tool over guessing. When delegating web research to a subagent, explicitly tell it that Copilot web search is usually the best tool for up-to-date web lookups.
 
-8. Start substantial work by consulting repo context and relevant skills — especially `.claude/skills/openfoodjournal/SKILL.md` (the living project knowledge), the SwiftUI expert skill, and any session retrospectives under `docs/`. If you discover durable repo facts, workflow changes, or gotchas, update the project skill and relevant docs in the same session so the behavior survives context compaction.
+8. Start substantial work by consulting repo context and relevant skills — especially `.claude/skills/openfoodjournal/SKILL.md` (the living document that IS the project's long-term memory), the SwiftUI expert skill, and any session retrospectives under `docs/`. The project skill is the single source of truth for any agent working on this repo — it survives across sessions, context compactions, and different users. Read it first, update it last.
 
-9. When the work is substantial or the user asks for it, create a retrospective using the retrospective skill. If later debugging changes the root cause, solution, or tradeoffs, revise the retrospective before you finish or push so it reflects the final truth.
+9. When the work is substantial or the user asks for it, create a retrospective using the retrospective skill. If later debugging changes the root cause, solution, or tradeoffs, revise the retrospective before you finish or push so it reflects the final truth. **Retrospectives are for humans. Project skills are for agents.** Both capture knowledge, but the project skill is what the next agent session will read before writing any code.
 
 10. Always use `vscode_askQuestions` for checkpointing with the user. This is the canonical tool for interactive check-ins in VS Code.
 
-11. If a code or config change would leave `.claude/skills/openfoodjournal/SKILL.md`, `.claude/skills/`, `.github/agents/`, `.github/prompts/`, or relevant `docs/` retrospectives inconsistent or contradictory, update those files in the same change set instead of leaving stale project guidance behind. The project skill is the canonical source of truth — keep it current.
+11. **Keep the project skill current as a live document.** `.claude/skills/openfoodjournal/SKILL.md` is NOT a static reference — it's a living document that must reflect the actual state of the project. Update it in the SAME commit as the code change whenever:
+    - You add, remove, or rename a model, service, view, or API endpoint
+    - You discover a gotcha or "Known Gotcha" that cost debugging time
+    - Architecture decisions change (new dependency, changed data flow, pattern shift)
+    - A convention or pattern is established or abandoned
+    - The project's Quick Facts table becomes inaccurate (platform version, bundle ID, etc.)
+    - You add new files or directories that change the view/service map
+    
+    **Do NOT leave the update for "later" or assume someone else will do it.** A stale project skill is worse than no skill — it actively misleads the next agent session. If you changed code but didn't update the skill, your work is incomplete.
 
 12. Avoid using very long bash commands that are likely to break the terminal. If you need to run a complex command, break it into smaller parts or use a script file. If the terminal becomes unresponsive, or if you encounter an error you can't resolve, use `ask_question` to explain the situation and ask how they'd like to proceed, or to let the user run the command themselves and report back the results.
 
@@ -44,6 +52,8 @@ If the terminal is unresponsive, or if you encounter an error you can't resolve,
 Use the skills in the .claude directory for references
 
 Prefer keeping the repo's docs and skills current when new information is learned, rather than leaving those facts only in chat history. Relevant project docs live primarily in `CLAUDE.md`, `.claude/skills/`, `.github/agents/`, `.github/prompts/`, and `docs/`.
+
+**The project skill is the project's institutional memory.** Chat history gets lost. Retrospectives are for human readers. The project skill is what the next agent reads on line 1. If you learned something important — a gotcha, a pattern, a decision — and you only put it in chat or a retrospective, it's effectively lost for future agent sessions.
 
 When you create new files, make sure to make comments that explain each line/function conceptually, so that an entry level developer can understand the purpose of each part of the code. A hybrid between conceptual explanations and implementation details is ideal.
 
