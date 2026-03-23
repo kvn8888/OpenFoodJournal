@@ -42,10 +42,12 @@ const upload = multer({
 // ── Initialize Gemini Client ──────────────────────────────────────────
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
-// Gemini Flash — fast, good at structured extraction from nutrition labels
-// gemini-flash-latest resolves to gemini-3-flash-preview
+// Gemini 3.1 Flash Lite — fast, lightweight model optimized for OCR/extraction tasks
+// Significantly lower latency than full Flash for structured data extraction from labels.
+// With client-side image compression (max 2000px, 90% JPEG), the inline base64 payload
+// is small enough that the Files API upload step would add more overhead than it saves.
 const flashModel = genAI.getGenerativeModel({
-  model: "gemini-flash-latest",
+  model: "gemini-3.1-flash-lite-preview",
   generationConfig: {
     responseMimeType: "application/json",
   },
@@ -256,7 +258,7 @@ runMigrations()
   .then(() => {
     app.listen(PORT, () => {
       console.log(`OpenFoodJournal server listening on port ${PORT}`);
-      console.log(`Gemini models: Flash latest (labels), 3.1 Pro w/ thinking (food photos)`);
+      console.log(`Gemini models: 3.1 Flash Lite (labels), 3.1 Pro w/ thinking (food photos)`);
       console.log(`API routes mounted at /api/*`);
     });
   })

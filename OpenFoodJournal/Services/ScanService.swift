@@ -125,7 +125,15 @@ final class ScanService {
         error = nil
         defer { isScanning = false }
 
-        guard let jpegData = image.jpegData(compressionQuality: 0.85) else {
+        // Resize to max 2000px on longest edge before JPEG encoding.
+        // A 12MP camera image (4032x3024) base64-encoded at 0.85 quality is ~4-6MB.
+        // Resizing first cuts that to ~150-400KB, which dramatically reduces:
+        //   1. Upload time (especially on cellular)
+        //   2. Gemini's base64 decode overhead
+        // OCR doesn't need more than 2000px to read a nutrition label.
+        let resized = image.resizedForOCR(maxDimension: 2000)
+
+        guard let jpegData = resized.jpegData(compressionQuality: 0.90) else {
             throw ScanError.imageEncodingFailed
         }
 
@@ -282,5 +290,28 @@ private extension Data {
         append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
         append(fileData)
         append("\r\n".data(using: .utf8)!)
+    }
+}
+
+// MARK: - UIImage Resize for OCR
+
+private extension UIImage {
+    /// Resizes the image so its longest edge is at most `maxDimension` points.
+    /// Returns self unchanged if already within bounds.
+    /// Uses UIGraphicsImageRenderer for memory-efficient rendering.
+    func resizedForOCR(maxDimension: CGFloat) -> UIImage {
+        let longest = max(size.width, size.height)
+        guard longest > maxDimension else { return self }
+
+        let scale = maxDimension / longest
+        let newSize = CGSize(
+            width: (size.width * scale).rounded(),
+            height: (size.height * scale).rounded()
+        )
+
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            draw(in: CGRect(origin: .zero, size: newSize))
+        }
     }
 }
