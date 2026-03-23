@@ -159,9 +159,35 @@ gotcha, a pattern, a decision — and you only put it in chat or a
 retrospective, it's effectively lost for future agent sessions.
 ```
 
-## Step 5: Propagating Changes Across All Repos
+## Step 5: The Web Search Rule — Stop Guessing, Start Searching
 
-With the improved prompt written, I synced it across four locations:
+After syncing the memory triad across all repos, a recurring frustration surfaced: agents confidently using stale training data instead of doing a quick web search. A user says "use `gemini-3.1-pro-preview`" and the agent just... goes with it, even if that model slug doesn't exist. It has a web search tool right there but defaults to its training data.
+
+The old rule 7 was polite about it:
+
+```markdown
+7. For current external facts, API changes, or platform documentation,
+   prefer the Copilot web search tool over guessing.
+```
+
+"Prefer" is too weak. The new rule frames the cost asymmetry explicitly:
+
+```markdown
+7. **When in doubt, search — don't guess.** If the user references a model
+   name, API, library version, tool, or concept you don't confidently
+   recognize, use the web search tool (`vscode-websearchforcopilot/websearch`)
+   to look it up *before* responding. Do NOT rely on training data for
+   anything time-sensitive — model slugs, SDK versions, API parameter names,
+   pricing, and deprecation status all change faster than your training cutoff.
+   The cost of a quick web search is near-zero; the cost of hallucinating an
+   outdated answer is an entire debugging session.
+```
+
+The key insight: **frame the cost comparison.** LLMs respond to reasoning about tradeoffs. "Prefer web search" is a suggestion. "A web search costs nothing; hallucinating costs a debugging session" is a cost-benefit argument the model can internalize.
+
+## Step 6: Propagating Changes Across All Repos
+
+With the improved prompt written (memory triad + web search rule), I synced it across four locations:
 
 1. **`kvn8888/agent-skills`** — the canonical reusable version in `skills/stretch/references/stretch.agent.md`
 2. **OpenFoodJournal** — project-specific version referencing `.claude/skills/openfoodjournal/SKILL.md`
@@ -202,6 +228,8 @@ Being explicit about the tool name — rather than saying "use the appropriate t
 **Test the private repo bug workaround.** The empty `skillFolderHash` bug means `npx skills update` might not detect changes to privately-hosted skills. I should write a simple CI check that compares installed skill hashes against the source repo.
 
 **Measure whether the memory triad actually works.** Right now this is a hypothesis: that explaining *why* and giving *concrete triggers* will lead to better skill maintenance. The real test is whether agents in future sessions actually update the project skill when they should. I should track this across a few sessions.
+
+**Apply the same "explain why" pattern more broadly.** The web search rule worked because it framed a cost comparison. The memory triad worked because it explained the audience and purpose. Most agent prompt rules could benefit from this approach — when you tell an LLM *why* a behavior matters, it's more likely to follow through in edge cases where the rule isn't an exact match.
 
 ## What's Next
 
