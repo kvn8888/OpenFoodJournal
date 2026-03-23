@@ -58,7 +58,7 @@ See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations. **`applySync(_ response: SyncResponse)`** merges a full server response into SwiftData — upserts DailyLogs by date, inserts missing entries/foods by UUID (skips if already local). Private helpers: `buildServingSize(type:grams:ml:) -> ServingSize?`, `parseDate(_ string:) -> Date?`.
 - **`SyncService`** — `@Observable @MainActor`. Handles all HTTP communication with the Turso-backed REST API at `/api/*`. Typed API models (`APIEntry`, `APIFood`, `APIContainer`, `APIGoals`, `SyncResponse`). Fire-and-forget pattern: local SwiftData write first, then async sync to server. Injected into views via `@Environment(SyncService.self)`.
-- **`ScanService`** — Multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing.
+- **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
 - **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
 
@@ -71,8 +71,8 @@ See [references/views.md](references/views.md) for detailed view hierarchy and n
 ```
 User taps Scan → CameraController (AVCaptureSession) → JPEG
   → ScanService.scan(image, mode) → multipart POST to /scan
-  → Label mode: Gemini 2.5 Flash (fast structured extraction)
-  → Food photo mode: Gemini 2.5 Pro w/ thinkingBudget:8192 (high reasoning)
+  → Label mode: Gemini 3.1 Flash Lite (fast, low-latency OCR extraction)
+  → Food photo mode: Gemini 3.1 Pro w/ thinkingLevel:HIGH (high reasoning)
   → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
   → ScanResultCard (editable) → User taps "Add to Log"
   → NutritionStore.log(entry, to: date) → SwiftData insert
