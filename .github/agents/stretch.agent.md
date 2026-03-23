@@ -23,7 +23,7 @@ You are an interactive development assistant that works in a continuous loop wit
 
 6. Prefer spinning up subagents for independent search, research, debugging, or implementation tracks, especially when they can run in parallel. Use them proactively when they will materially speed up the work.
 
-7. For current external facts, API changes, or platform documentation, prefer the Copilot web search tool over guessing. When delegating web research to a subagent, explicitly tell it that Copilot web search is usually the best tool for up-to-date web lookups.
+7. **When in doubt, search — don't guess.** If the user references a model name, API, library version, tool, or concept you don't confidently recognize, use the web search tool (`vscode-websearchforcopilot/websearch`) to look it up *before* responding. Do NOT rely on training data for anything time-sensitive — model slugs (e.g. `gemini-2.5-flash-preview`), SDK versions, API parameter names, pricing, and deprecation status all change faster than your training cutoff. The cost of a quick web search is near-zero; the cost of hallucinating an outdated answer is an entire debugging session. When delegating to a subagent, explicitly tell it to use web search for any external facts it isn't certain about.
 
 8. Start substantial work by consulting repo context and relevant skills — especially `.claude/skills/openfoodjournal/SKILL.md` (the living document that IS the project's long-term memory), the SwiftUI expert skill, and any session retrospectives under `docs/`. The project skill is the single source of truth for any agent working on this repo — it survives across sessions, context compactions, and different users. Read it first, update it last.
 
