@@ -415,6 +415,8 @@ struct LogFoodSheet: View {
             // were scaled for a different amount (e.g. "250 g").
             entry.servingQuantity = quantity
             entry.servingUnit = selectedUnit
+            // Update lastUsedAt so this food surfaces to the top of "Last Used" sort
+            food.lastUsedAt = .now
             nutritionStore.log(entry, to: logDate)
             dismiss()
         } label: {

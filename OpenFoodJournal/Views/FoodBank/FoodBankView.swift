@@ -22,20 +22,25 @@ struct FoodBankView: View {
 
     // ── Local State ───────────────────────────────────────────────
     @State private var searchText = ""
-    @State private var sortOrder: SortOrder = .newest
+    @State private var sortOrder: SortOrder = .lastUsed
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
     @State private var foodToEdit: SavedFood?          // For the edit sheet
 
     // ── Computed: filter + sort the foods based on search text ────
-    // Filters by name (case-insensitive) so users can quickly find a food.
+    // Filters by name and brand (case-insensitive) so users can quickly find a food.
     // Safe to compute here because the result is never held in @State — SwiftData
     // @Model objects must stay owned by the ModelContext, not captured in @State.
     private var filteredFoods: [SavedFood] {
         let filtered = searchText.isEmpty
             ? allFoods
-            : allFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+            : allFoods.filter {
+                $0.name.localizedCaseInsensitiveContains(searchText) ||
+                ($0.brand?.localizedCaseInsensitiveContains(searchText) ?? false)
+            }
 
         switch sortOrder {
+        case .lastUsed:
+            return filtered.sorted { $0.lastUsedAt > $1.lastUsedAt }
         case .newest:
             return filtered  // Already sorted by createdAt desc from @Query
         case .alphabetical:
@@ -164,6 +169,7 @@ struct FoodBankView: View {
 /// Controls how saved foods are ordered in the list.
 /// Each case has a user-friendly label and an SF Symbol icon.
 enum SortOrder: String, CaseIterable, Identifiable {
+    case lastUsed
     case newest
     case alphabetical
     case calories
@@ -172,6 +178,7 @@ enum SortOrder: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
+        case .lastUsed: "Last Used"
         case .newest: "Newest First"
         case .alphabetical: "A → Z"
         case .calories: "Highest Calories"
@@ -180,6 +187,7 @@ enum SortOrder: String, CaseIterable, Identifiable {
 
     var icon: String {
         switch self {
+        case .lastUsed: "clock.arrow.circlepath"
         case .newest: "clock"
         case .alphabetical: "textformat.abc"
         case .calories: "flame"

@@ -48,6 +48,10 @@ struct CompleteContainerSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { isWeightFocused = false }
+                }
             }
         }
     }

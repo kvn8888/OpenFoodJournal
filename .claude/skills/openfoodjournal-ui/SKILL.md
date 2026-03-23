@@ -334,3 +334,22 @@ Before merging any new view:
 - [ ] Tappable elements have 44+ pt hit targets
 - [ ] Empty states use `ContentUnavailableView`
 - [ ] Progress indicators use the status color thresholds
+
+## UI Roadmap
+
+### Food Bank Improvements
+- [ ] Remove source icons (barcode/fork/pencil) from `SavedFoodRowView` — they add visual noise without value
+- [ ] Shift calorie count from right edge to where source icons were (left-center area)
+- [ ] Add macro chips (P/C/F) to the right of each food row — same `MacroChip` pattern as `EntryRowView`
+- [ ] Add "Last Used" sort option and make it the **default** — newly added foods count as "last used" even before being logged, so recently saved foods surface to the top for better glanceability
+- [ ] Search should match `brand` field in addition to `name`
+
+### Keyboard UX
+- [ ] Every keyboard popup must have a "Done" button to dismiss — use `.toolbar { ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done") { focusedField = nil } } }`
+
+### Calendar Strip → Continuous Scrollable Calendar
+- [ ] Replace fixed Sun–Sat `WeeklyCalendarStrip` with a continuously scrollable calendar
+- [ ] Interaction design modeled after iOS Calendar monthly view: vertical continuous scroll with smooth momentum snapping to month boundaries
+- [ ] Sticky month/year header that transitions smoothly as user scrolls between months
+- [ ] Days show the same progress ring colors as current day cells
+- [ ] Tapping a day selects it and scrolls the journal to that date

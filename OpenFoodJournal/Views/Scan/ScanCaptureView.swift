@@ -69,6 +69,12 @@ struct ScanCaptureView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: capturedImage != nil)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { isPromptFocused = false }
+            }
+        }
         .task {
             await camera.setup()
             if camera.permissionDenied {
