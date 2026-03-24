@@ -12,7 +12,7 @@ struct ScanResultCard: View {
     let onConfirmAndSave: () -> Void     // Log + save to Food Bank
     let onRetake: () -> Void
 
-    @State private var showExtended = false
+    @State private var showExtended = true
 
     var body: some View {
         VStack(spacing: 0) {
