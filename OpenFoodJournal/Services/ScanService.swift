@@ -56,6 +56,21 @@ private struct GeminiNutritionResponse: Codable {
 
     let scanMode: String?
 
+    /// Server-side timing breakdown returned by the proxy
+    let serverTiming: ServerTiming?
+
+    struct ServerTiming: Codable {
+        let totalMs: Int
+        let geminiMs: Int
+        let prepMs: Int
+
+        enum CodingKeys: String, CodingKey {
+            case totalMs = "total_ms"
+            case geminiMs = "gemini_ms"
+            case prepMs = "prep_ms"
+        }
+    }
+
     enum CodingKeys: String, CodingKey {
         case name, brand, confidence, calories, protein, carbs, fat
         case micronutrients
@@ -68,6 +83,7 @@ private struct GeminiNutritionResponse: Codable {
         case servingGrams = "serving_grams"
         case servingMl = "serving_ml"
         case scanMode = "scan_mode"
+        case serverTiming = "server_timing"
     }
 }
 
@@ -142,6 +158,9 @@ final class ScanService {
             throw ScanError.imageEncodingFailed
         }
 
+        let prepEnd = ContinuousClock.now
+        let prepMs = msFrom(prepEnd.duration(to: scanStart))
+
         let request = try buildRequest(imageData: jpegData, mode: mode, prompt: prompt)
 
         let (data, response): (Data, URLResponse)
@@ -150,6 +169,9 @@ final class ScanService {
         } catch {
             throw ScanError.networkError(error)
         }
+
+        let networkEnd = ContinuousClock.now
+        let networkMs = msFrom(networkEnd.duration(to: prepEnd))
 
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ScanError.invalidResponse
@@ -167,14 +189,35 @@ final class ScanService {
             throw ScanError.decodingError(error)
         }
 
-        // Measure and log the full scan duration (upload + Gemini + decode)
-        let durationMs = Int(scanStart.duration(to: .now).components.attoseconds / 1_000_000_000_000_000)
-        lastScanDurationMs = durationMs
-        print("📸 Scan completed in \(durationMs)ms (mode: \(mode.rawValue))")
+        // Measure and log the full scan duration broken down by phase
+        let totalMs = msFrom(ContinuousClock.now.duration(to: scanStart))
+        let decodeMs = totalMs - abs(prepMs) - abs(networkMs)
+        lastScanDurationMs = totalMs
+
+        print("📸 Scan completed in \(totalMs)ms (mode: \(mode.rawValue))")
+        print("   ├─ Image prep (resize + JPEG): \(abs(prepMs))ms")
+        print("   ├─ Network round-trip: \(abs(networkMs))ms")
+        if let st = geminiResponse.serverTiming {
+            print("   │  ├─ Server total: \(st.totalMs)ms")
+            print("   │  │  ├─ Server prep (base64): \(st.prepMs)ms")
+            print("   │  │  └─ Gemini API call: \(st.geminiMs)ms")
+            let uploadMs = abs(networkMs) - st.totalMs
+            if uploadMs > 0 {
+                print("   │  └─ Upload + download overhead: \(uploadMs)ms")
+            }
+        }
+        print("   └─ Client decode: \(abs(decodeMs))ms")
 
         var entry = geminiResponse.toNutritionEntry(mode: mode, imageData: jpegData)
-        entry.scanDurationMs = durationMs
+        entry.scanDurationMs = totalMs
         return entry
+    }
+
+    /// Convert a ContinuousClock.Duration to milliseconds (always positive)
+    private func msFrom(_ duration: ContinuousClock.Instant.Duration) -> Int {
+        let attoseconds = duration.components.attoseconds
+        let seconds = duration.components.seconds
+        return abs(Int(seconds * 1000 + attoseconds / 1_000_000_000_000_000))
     }
 
     // MARK: - Private Helpers
