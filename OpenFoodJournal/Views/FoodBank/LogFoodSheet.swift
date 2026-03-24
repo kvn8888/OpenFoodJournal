@@ -34,177 +34,42 @@ struct LogFoodSheet: View {
     // Controls the Add Serving Mapping sheet
     @State private var showAddMapping = false
 
-    // Snapshot of the food's baseline values at the time the sheet opens.
-    // These never change; all display math is relative to these.
-    private let baseCalories: Double
-    private let baseProtein: Double
-    private let baseCarbs: Double
-    private let baseFat: Double
-    private let baseQuantity: Double  // the food's stored serving quantity
-    private let baseUnit: String      // the food's stored serving unit
+    // Centralised unit conversion + macro scaling logic (shared with EditEntryView)
+    private let converter: ServingConverter
+
+    // Keep baseUnit accessible for onChange unit-switch logic
+    private let baseUnit: String
 
     init(food: SavedFood, logDate: Date = .now) {
         self.food = food
         self.logDate = logDate
-        // Use the food's own serving quantity and unit as the starting point.
-        // If not set, default to "1 serving" which maps to a 1x multiplier.
         let qty = food.servingQuantity ?? 1.0
         let unit = food.servingUnit ?? "serving"
         _quantity = State(initialValue: qty)
-        // Show whole numbers without ".0", decimals up to 2 places
         _quantityText = State(initialValue: qty.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
         _selectedUnit = State(initialValue: unit)
-        self.baseCalories = food.calories
-        self.baseProtein = food.protein
-        self.baseCarbs = food.carbs
-        self.baseFat = food.fat
-        self.baseQuantity = max(qty, 0.01)  // avoid division by zero
         self.baseUnit = unit
+        self.converter = ServingConverter(
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            quantity: qty,
+            unit: unit,
+            serving: food.serving,
+            mappings: food.servingMappings
+        )
     }
 
-    // MARK: - Serving computed helpers
+    // MARK: - Serving computed helpers (delegated to ServingConverter)
 
-    /// Units the user can switch between in the picker.
-    /// Prefers the structured ServingSize enum when available, then supplements
-    /// with any custom units from legacy servingMappings.
-    private var availableUnits: [String] {
-        if let serving = food.serving {
-            var units = Set(serving.availableUnits)
-            units.insert(baseUnit)
-            for mapping in food.servingMappings {
-                units.insert(mapping.from.unit)
-                units.insert(mapping.to.unit)
-            }
-            return units.sorted()
-        }
-        // Legacy path — only the units explicitly covered by mappings
-        var units = Set<String>()
-        units.insert(baseUnit)
-        for mapping in food.servingMappings {
-            units.insert(mapping.from.unit)
-            units.insert(mapping.to.unit)
-        }
-        return units.sorted()
-    }
-
-    /// How many of `unit` equal 1 baseUnit.
-    /// e.g. if baseUnit is "cup" and unit is "g", returns 240 (1 cup = 240g).
-    ///
-    /// Tries four strategies in order:
-    /// 1. ServingSize standard tables (same-dimension or cross-dimension with density)
-    /// 2. Direct servingMapping lookup (baseUnit ↔ target)
-    /// 3. Chain: servingMapping (baseUnit → bridge) then standard table (bridge → target)
-    /// 4. Canonical SI bridge from serving.grams or serving.ml
-    private func factorFor(_ unit: String) -> Double {
-        if unit == baseUnit { return 1.0 }
-
-        // 1. Try the structured enum (same-dimension or cross-dimension via density)
-        if let factor = food.serving?.convert(1.0, from: baseUnit, to: unit) {
-            return factor
-        }
-
-        // 2. Direct servingMapping: baseUnit ↔ target
-        //    "serving" in a mapping is an alias for baseUnit (means "1 of this food's serving")
-        if let factor = mappingFactor(from: baseUnit, to: unit) {
-            return factor
-        }
-
-        // 3. Chain: servingMapping provides baseUnit → bridgeUnit,
-        //    then standard conversion tables handle bridgeUnit → target.
-        //    e.g. mapping "1 cup → 244 g" + standard table g → oz.
-        for mapping in food.servingMappings {
-            let pairs: [(from: ServingAmount, to: ServingAmount)] = [
-                (mapping.from, mapping.to),
-                (mapping.to, mapping.from)
-            ]
-            for pair in pairs where isBaseUnit(pair.from.unit) {
-                let bridgePerBase = pair.to.value / pair.from.value
-                if let f = sameDimensionFactor(from: pair.to.unit, to: unit) {
-                    return bridgePerBase * f
-                }
-            }
-        }
-
-        // 4. Canonical SI bridge: serving says 1 baseUnit = X grams (or Y mL).
-        //    Convert via standard tables within that dimension.
-        if let serving = food.serving {
-            let gramsPerBase = (serving.grams ?? 0) / baseQuantity
-            let mlPerBase = (serving.ml ?? 0) / baseQuantity
-            if gramsPerBase > 0, let targetPerGram = ServingSize.massConversions[unit] {
-                return gramsPerBase / targetPerGram
-            }
-            if mlPerBase > 0, let targetPerMl = ServingSize.volumeConversions[unit] {
-                return mlPerBase / targetPerMl
-            }
-        }
-
-        return 1.0
-    }
-
-    /// Whether the given unit string refers to the food's base serving unit.
-    /// "serving" in a mapping is always an alias for baseUnit.
-    private func isBaseUnit(_ unit: String) -> Bool {
-        unit == baseUnit || unit.lowercased() == "serving"
-    }
-
-    /// Direct lookup in servingMappings for a from → to pair (checks both directions).
-    /// Treats "serving" as an alias for baseUnit.
-    private func mappingFactor(from fromUnit: String, to toUnit: String) -> Double? {
-        for mapping in food.servingMappings {
-            if isBaseUnit(mapping.from.unit) && isBaseUnit(fromUnit)
-                && mapping.to.unit == toUnit {
-                return mapping.to.value / mapping.from.value
-            }
-            if isBaseUnit(mapping.to.unit) && isBaseUnit(fromUnit)
-                && mapping.from.unit == toUnit {
-                return mapping.from.value / mapping.to.value
-            }
-            // Non-base units: exact match only
-            if mapping.from.unit == fromUnit && mapping.to.unit == toUnit {
-                return mapping.to.value / mapping.from.value
-            }
-            if mapping.to.unit == fromUnit && mapping.from.unit == toUnit {
-                return mapping.from.value / mapping.to.value
-            }
-        }
-        return nil
-    }
-
-    /// Same-dimension factor between two standard units (mass→mass or volume→volume).
-    /// Returns nil if the units are in different dimensions or unrecognised.
-    private func sameDimensionFactor(from: String, to: String) -> Double? {
-        if from == to { return 1.0 }
-        if let a = ServingSize.massConversions[from],
-           let b = ServingSize.massConversions[to] {
-            return a / b
-        }
-        if let a = ServingSize.volumeConversions[from],
-           let b = ServingSize.volumeConversions[to] {
-            return a / b
-        }
-        return nil
-    }
-
-    /// Shorthand — factor for the currently selected unit
-    private var unitFactor: Double { factorFor(selectedUnit) }
-
-    // Macros expressed per single base-unit (e.g. kcal per 1 cup)
-    private var calPerBaseUnit: Double { baseCalories / baseQuantity }
-    private var proPerBaseUnit: Double { baseProtein / baseQuantity }
-    private var carbPerBaseUnit: Double { baseCarbs / baseQuantity }
-    private var fatPerBaseUnit: Double { baseFat / baseQuantity }
-
-    /// Scaling multiplier for the log button — how much to multiply food.calories etc.
-    /// Formula: (quantity in selectedUnit) / unitFactor / baseQuantity,
-    /// then multiply by baseQuantity to get back to a simple scale factor.
-    private var scaleFactor: Double { quantity / unitFactor / baseQuantity }
-
-    /// Scaled macros for the current quantity + unit combination
-    private var scaledCalories: Double { calPerBaseUnit / unitFactor * quantity }
-    private var scaledProtein: Double   { proPerBaseUnit / unitFactor * quantity }
-    private var scaledCarbs: Double     { carbPerBaseUnit / unitFactor * quantity }
-    private var scaledFat: Double       { fatPerBaseUnit / unitFactor * quantity }
+    private var availableUnits: [String] { converter.availableUnits }
+    private var unitFactor: Double { converter.factorFor(selectedUnit) }
+    private var scaledCalories: Double { converter.scaledCalories(quantity: quantity, unit: selectedUnit) }
+    private var scaledProtein: Double { converter.scaledProtein(quantity: quantity, unit: selectedUnit) }
+    private var scaledCarbs: Double { converter.scaledCarbs(quantity: quantity, unit: selectedUnit) }
+    private var scaledFat: Double { converter.scaledFat(quantity: quantity, unit: selectedUnit) }
 
     var body: some View {
         NavigationStack {
@@ -348,7 +213,7 @@ struct LogFoodSheet: View {
                 let sorted = food.micronutrients.keys.sorted()
                 ForEach(sorted, id: \.self) { name in
                     if let micro = food.micronutrients[name] {
-                        let scaledValue = micro.value * scaleFactor
+                        let scaledValue = micro.value * quantity / unitFactor / converter.baseQuantity
                         let known = KnownMicronutrients.find(name)
                         MicronutrientProgressRow(
                             name: known?.name ?? name,
@@ -396,8 +261,7 @@ struct LogFoodSheet: View {
             // Create the entry from the food template
             var entry = food.toNutritionEntry(mealType: selectedMealType)
             // Scale all macros by the ratio of (selected quantity / base serving size)
-            // using the same formula as EditEntryView: divide by unitFactor then by baseQuantity
-            let factor = quantity / unitFactor / baseQuantity
+            let factor = quantity / unitFactor / converter.baseQuantity
             entry.calories *= factor
             entry.protein *= factor
             entry.carbs *= factor
@@ -471,8 +335,8 @@ struct LogFoodSheet: View {
                     // Auto-convert quantity when the user switches units
                     // e.g. "1 cup" → "240 g" so the macros stay equivalent
                     .onChange(of: selectedUnit) { oldUnit, newUnit in
-                        let oldFactor = factorFor(oldUnit)
-                        let newFactor = factorFor(newUnit)
+                        let oldFactor = converter.factorFor(oldUnit)
+                        let newFactor = converter.factorFor(newUnit)
                         guard oldFactor > 0, newFactor > 0 else { return }
                         let converted = quantity * newFactor / oldFactor
                         quantity = converted

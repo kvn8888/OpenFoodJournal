@@ -137,23 +137,27 @@ struct RadialMenuButton: View {
     /// A single option circle with icon and label.
     /// Only rendered when the menu is open, so glass never overlaps the plus button at rest.
     private func optionBubble(item: RadialMenuItem, isHighlighted: Bool) -> some View {
-        VStack(spacing: 6) {
+        let size = isHighlighted ? optionSize * 1.15 : optionSize
+
+        return VStack(spacing: 6) {
             Image(systemName: item.icon)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(isHighlighted ? item.color : .primary)
-                .frame(width: optionSize, height: optionSize)
+                .frame(width: size, height: size)
                 .glassEffect(
-                    isHighlighted ? .regular.tint(item.color.opacity(0.35)) : .regular,
+                    isHighlighted
+                        ? .regular.tint(item.color.opacity(0.35))
+                        : .regular,
                     in: .circle
                 )
-                .scaleEffect(isHighlighted ? 1.15 : 1.0)
-                .animation(.spring(duration: 0.2), value: isHighlighted)
+                .frame(width: optionSize * 1.15, height: optionSize * 1.15) // ← layout never changes
 
             Text(item.label)
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
         }
+        .animation(.spring(duration: 0.2), value: isHighlighted)
     }
 
     // MARK: - Gestures
