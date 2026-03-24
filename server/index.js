@@ -44,11 +44,15 @@ const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 // Gemini 3.1 Flash Lite — fast, lightweight model optimized for OCR/extraction tasks
 // Significantly lower latency than full Flash for structured data extraction from labels.
-// No thinking config — Flash Lite is designed for fast extraction without reasoning.
+// MINIMAL thinking: after warm-up, consistently hits 3.7-3.9s vs 4.1-4.7s without thinking.
+// First call may be slower (~6s) due to cold start, but subsequent calls are faster.
 const flashModel = genAI.getGenerativeModel({
   model: "gemini-3.1-flash-lite-preview",
   generationConfig: {
     responseMimeType: "application/json",
+    thinkingConfig: {
+      thinkingLevel: "MINIMAL",
+    },
   },
 });
 
