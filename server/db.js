@@ -132,6 +132,24 @@ async function runMigrations() {
     INSERT OR IGNORE INTO user_goals (id) VALUES ('default')
   `);
 
+  // Preferences — singleton row for UI customization (ring slots, etc.)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS preferences (
+      id TEXT PRIMARY KEY DEFAULT 'default',
+      ring_slot_1 TEXT NOT NULL DEFAULT 'macro_protein',
+      ring_slot_2 TEXT NOT NULL DEFAULT 'macro_carbs',
+      ring_slot_3 TEXT NOT NULL DEFAULT 'macro_fat',
+      ring_slot_4 TEXT NOT NULL DEFAULT '',
+      ring_slot_5 TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // Seed default preferences if none exist
+  await db.execute(`
+    INSERT OR IGNORE INTO preferences (id) VALUES ('default')
+  `);
+
   // ── Column-Level Migrations ────────────────────────────────────
   // Add columns introduced after the initial schema was deployed.
   // PRAGMA table_info() lets us check existing columns without catching exceptions.

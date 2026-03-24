@@ -40,6 +40,7 @@ struct SyncResponse: Codable {
     let savedFoods: [APIFood]
     let trackedContainers: [APIContainer]
     let userGoals: APIGoals?
+    let preferences: APIPreferences?
     let syncedAt: String
 
     enum CodingKeys: String, CodingKey {
@@ -48,6 +49,7 @@ struct SyncResponse: Codable {
         case savedFoods = "saved_foods"
         case trackedContainers = "tracked_containers"
         case userGoals = "user_goals"
+        case preferences
         case syncedAt = "synced_at"
     }
 }
@@ -191,6 +193,23 @@ struct APIGoals: Codable {
         case proteinGoal = "protein_goal"
         case carbsGoal = "carbs_goal"
         case fatGoal = "fat_goal"
+    }
+}
+
+/// User preferences from the API (ring slot configuration, etc.)
+struct APIPreferences: Codable {
+    let ringSlot1: String?
+    let ringSlot2: String?
+    let ringSlot3: String?
+    let ringSlot4: String?
+    let ringSlot5: String?
+
+    enum CodingKeys: String, CodingKey {
+        case ringSlot1 = "ring_slot_1"
+        case ringSlot2 = "ring_slot_2"
+        case ringSlot3 = "ring_slot_3"
+        case ringSlot4 = "ring_slot_4"
+        case ringSlot5 = "ring_slot_5"
     }
 }
 
@@ -473,6 +492,31 @@ final class SyncService {
         ]
 
         let url = baseURL.appendingPathComponent("api/goals")
+        try await put(url: url, body: body)
+    }
+
+    // ══════════════════════════════════════════════════════════════
+    // PREFERENCES
+    // ══════════════════════════════════════════════════════════════
+
+    /// Fetch preferences from the server
+    func fetchPreferences() async throws -> APIPreferences {
+        let url = baseURL.appendingPathComponent("api/preferences")
+        let data = try await get(url: url)
+        return try decoder.decode(APIPreferences.self, from: data)
+    }
+
+    /// Push preferences to the server (fire-and-forget from views)
+    func updatePreferences(_ prefs: Preferences) async throws {
+        let body: [String: Any] = [
+            "ring_slot_1": prefs.ringSlot1,
+            "ring_slot_2": prefs.ringSlot2,
+            "ring_slot_3": prefs.ringSlot3,
+            "ring_slot_4": prefs.ringSlot4,
+            "ring_slot_5": prefs.ringSlot5,
+        ]
+
+        let url = baseURL.appendingPathComponent("api/preferences")
         try await put(url: url, body: body)
     }
 

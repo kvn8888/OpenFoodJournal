@@ -21,7 +21,7 @@ struct MacrosApp: App {
         let container: ModelContainer
         do {
             container = try ModelContainer(
-                for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self,
+                for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self, Preferences.self,
                 configurations: config
             )
         } catch {
@@ -29,6 +29,9 @@ struct MacrosApp: App {
         }
         modelContainer = container
         _nutritionStore = State(initialValue: NutritionStore(modelContext: container.mainContext))
+
+        // Ensure the Preferences singleton exists in SwiftData
+        _ = Preferences.current(in: container.mainContext)
     }
 
     var body: some Scene {

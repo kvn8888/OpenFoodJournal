@@ -589,6 +589,60 @@ router.put("/goals", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════
+// PREFERENCES
+// ═══════════════════════════════════════════════════════════════════════
+
+// GET /api/preferences — Get current preferences
+router.get("/preferences", async (req, res) => {
+  try {
+    const result = await db.execute(
+      "SELECT * FROM preferences WHERE id = 'default'"
+    );
+    if (result.rows.length === 0) {
+      return res.json({
+        ring_slot_1: "macro_protein",
+        ring_slot_2: "macro_carbs",
+        ring_slot_3: "macro_fat",
+        ring_slot_4: "",
+        ring_slot_5: "",
+      });
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("[api] GET /preferences error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/preferences — Update preferences
+router.put("/preferences", async (req, res) => {
+  try {
+    const { ring_slot_1, ring_slot_2, ring_slot_3, ring_slot_4, ring_slot_5 } =
+      req.body;
+
+    await db.execute({
+      sql: `UPDATE preferences 
+            SET ring_slot_1 = ?, ring_slot_2 = ?, ring_slot_3 = ?, 
+                ring_slot_4 = ?, ring_slot_5 = ?, updated_at = ?
+            WHERE id = 'default'`,
+      args: [
+        ring_slot_1 ?? "macro_protein",
+        ring_slot_2 ?? "macro_carbs",
+        ring_slot_3 ?? "macro_fat",
+        ring_slot_4 ?? "",
+        ring_slot_5 ?? "",
+        now(),
+      ],
+    });
+
+    res.json({ updated: true });
+  } catch (err) {
+    console.error("[api] PUT /preferences error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════
 // SYNC — Bulk fetch for initial app load
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -638,13 +692,18 @@ router.get("/sync", async (req, res) => {
       "SELECT * FROM user_goals WHERE id = 'default'"
     );
 
+    const prefsQuery = db.execute(
+      "SELECT * FROM preferences WHERE id = 'default'"
+    );
+
     // Run all queries in parallel
-    const [logs, entries, foods, containers, goals] = await Promise.all([
+    const [logs, entries, foods, containers, goals, prefs] = await Promise.all([
       logsQuery,
       entriesQuery,
       foodsQuery,
       containersQuery,
       goalsQuery,
+      prefsQuery,
     ]);
 
     res.json({
@@ -653,6 +712,7 @@ router.get("/sync", async (req, res) => {
       saved_foods: foods.rows.map(parseFoodRow),
       tracked_containers: containers.rows.map(parseContainerRow),
       user_goals: goals.rows[0] || null,
+      preferences: prefs.rows[0] || null,
       synced_at: now(),
     });
   } catch (err) {

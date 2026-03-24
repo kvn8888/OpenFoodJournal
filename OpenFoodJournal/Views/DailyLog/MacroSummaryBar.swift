@@ -2,6 +2,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import SwiftData
 
 // MARK: - Macro nutrient IDs (used alongside KnownMicronutrients IDs)
 // Prefix with "macro_" so they don't collide with micronutrient IDs.
@@ -46,16 +47,13 @@ enum MacroNutrientID: String, CaseIterable {
 struct MacroSummaryBar: View {
     let log: DailyLog?
     let goals: UserGoals
+    @Environment(SyncService.self) private var syncService
 
-    // ── 5 persisted ring slots ────────────────────────────────────
-    // Each stores a nutrient ID: "macro_protein", "macro_carbs", "macro_fat",
-    // "macro_calories", or a micronutrient ID like "sodium", "fiber".
-    // Empty string = slot is unassigned (shows + button).
-    @AppStorage("summaryBar.slot1") private var slot1: String = MacroNutrientID.protein.rawValue
-    @AppStorage("summaryBar.slot2") private var slot2: String = MacroNutrientID.carbs.rawValue
-    @AppStorage("summaryBar.slot3") private var slot3: String = MacroNutrientID.fat.rawValue
-    @AppStorage("summaryBar.slot4") private var slot4: String = ""
-    @AppStorage("summaryBar.slot5") private var slot5: String = ""
+    // ── Preferences (SwiftData singleton) ─────────────────────────
+    // Ring slot configuration persisted in the Preferences model.
+    // Fetched via @Query; exactly one row should exist.
+    @Query private var allPrefs: [Preferences]
+    private var prefs: Preferences? { allPrefs.first }
 
     // ── State ─────────────────────────────────────────────────────
     @State private var editingSlot: Int? = nil    // Which slot index is being picked (1–5)
@@ -67,8 +65,14 @@ struct MacroSummaryBar: View {
     private var carbs: Double { log?.totalCarbs ?? 0 }
     private var fat: Double { log?.totalFat ?? 0 }
 
-    /// All 5 slot bindings as an array for easy indexed access
-    private var slotIDs: [String] { [slot1, slot2, slot3, slot4, slot5] }
+    /// All 5 slot IDs read from Preferences (or defaults)
+    private var slotIDs: [String] {
+        guard let p = prefs else {
+            return [MacroNutrientID.protein.rawValue, MacroNutrientID.carbs.rawValue,
+                    MacroNutrientID.fat.rawValue, "", ""]
+        }
+        return [p.ringSlot1, p.ringSlot2, p.ringSlot3, p.ringSlot4, p.ringSlot5]
+    }
 
     /// Aggregated micronutrient totals for the day — sum across all entries
     private var microTotals: [String: Double] {
@@ -114,22 +118,23 @@ struct MacroSummaryBar: View {
                 Label("Edit Tracked Nutrients", systemImage: "slider.horizontal.3")
             }
         }
-        .sheet(isPresented: $showEditSheet) {
-            SlotEditSheet(
-                slot1: $slot1, slot2: $slot2, slot3: $slot3,
-                slot4: $slot4, slot5: $slot5,
-                allSlotIDs: slotIDs
-            )
-            .presentationDetents([.medium, .large])
+        .sheet(isPresented: $showEditSheet, onDismiss: syncPreferences) {
+            if let p = prefs {
+                SlotEditSheet(preferences: p, allSlotIDs: slotIDs)
+                    .presentationDetents([.medium, .large])
+            }
         }
-        .sheet(item: $editingSlot) { slot in
-            NutrientPickerSheet(
-                selectedID: bindingForSlot(slot),
-                otherSlotIDs: slotIDs.enumerated()
-                    .filter { $0.offset != slot - 1 }
-                    .map { $0.element }
-            )
-            .presentationDetents([.medium, .large])
+        .sheet(item: $editingSlot, onDismiss: syncPreferences) { slot in
+            if let p = prefs {
+                NutrientPickerSheet(
+                    preferences: p,
+                    slotIndex: slot,
+                    otherSlotIDs: slotIDs.enumerated()
+                        .filter { $0.offset != slot - 1 }
+                        .map { $0.element }
+                )
+                .presentationDetents([.medium, .large])
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Daily macro summary")
@@ -205,16 +210,14 @@ struct MacroSummaryBar: View {
         return colors[(index - 1) % colors.count]
     }
 
-    /// Returns a binding to the slot at the given 1-based index
-    private func bindingForSlot(_ index: Int) -> Binding<String> {
-        switch index {
-        case 1: $slot1
-        case 2: $slot2
-        case 3: $slot3
-        case 4: $slot4
-        default: $slot5
+    /// Fire-and-forget push of preferences to the server after sheet dismissal
+    private func syncPreferences() {
+        guard let p = prefs else { return }
+        Task {
+            try? await syncService.updatePreferences(p)
         }
     }
+
 }
 
 // MARK: - Int Identifiable (for sheet item binding)
@@ -225,15 +228,41 @@ extension Int: @retroactive Identifiable {
 
 // MARK: - Nutrient Picker Sheet (for + button taps)
 
-/// Lets the user pick any nutrient (macro or micro) for a slot.
-/// Excludes nutrients already assigned to other slots.
+/// Lets the user pick any nutrient (macro or micro) for a specific slot.
+/// Writes directly to the Preferences model. Excludes nutrients in other slots.
 private struct NutrientPickerSheet: View {
-    @Binding var selectedID: String
+    @Bindable var preferences: Preferences
+    let slotIndex: Int
     let otherSlotIDs: [String]
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
-    /// Macros not already used in other slots
+    /// Current value for the slot being edited
+    private var currentID: String {
+        get { slotValue(for: slotIndex) }
+    }
+
+    private func slotValue(for index: Int) -> String {
+        switch index {
+        case 1: preferences.ringSlot1
+        case 2: preferences.ringSlot2
+        case 3: preferences.ringSlot3
+        case 4: preferences.ringSlot4
+        default: preferences.ringSlot5
+        }
+    }
+
+    private func setSlot(_ value: String) {
+        switch slotIndex {
+        case 1: preferences.ringSlot1 = value
+        case 2: preferences.ringSlot2 = value
+        case 3: preferences.ringSlot3 = value
+        case 4: preferences.ringSlot4 = value
+        default: preferences.ringSlot5 = value
+        }
+        preferences.updatedAt = Date()
+    }
+
     private var availableMacros: [MacroNutrientID] {
         MacroNutrientID.allCases.filter { macro in
             !otherSlotIDs.contains(macro.rawValue) &&
@@ -241,7 +270,6 @@ private struct NutrientPickerSheet: View {
         }
     }
 
-    /// Micros not already used in other slots
     private var availableMicros: [KnownMicronutrient] {
         KnownMicronutrients.all.filter { nutrient in
             !otherSlotIDs.contains(nutrient.id) &&
@@ -252,22 +280,20 @@ private struct NutrientPickerSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // Clear option if currently assigned
-                if !selectedID.isEmpty {
+                if !currentID.isEmpty {
                     Button(role: .destructive) {
-                        selectedID = ""
+                        setSlot("")
                         dismiss()
                     } label: {
                         Label("Remove", systemImage: "minus.circle")
                     }
                 }
 
-                // Macros section
                 if !availableMacros.isEmpty {
                     Section("Macros") {
                         ForEach(availableMacros, id: \.rawValue) { macro in
                             Button {
-                                selectedID = macro.rawValue
+                                setSlot(macro.rawValue)
                                 dismiss()
                             } label: {
                                 HStack {
@@ -279,7 +305,7 @@ private struct NutrientPickerSheet: View {
                                     Text(macro.unit)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    if macro.rawValue == selectedID {
+                                    if macro.rawValue == currentID {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(.blue)
                                     }
@@ -290,14 +316,13 @@ private struct NutrientPickerSheet: View {
                     }
                 }
 
-                // Micros grouped by category
                 ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
                     let nutrients = availableMicros.filter { $0.category == category }
                     if !nutrients.isEmpty {
                         Section(category.rawValue) {
                             ForEach(nutrients) { nutrient in
                                 Button {
-                                    selectedID = nutrient.id
+                                    setSlot(nutrient.id)
                                     dismiss()
                                 } label: {
                                     HStack {
@@ -306,7 +331,7 @@ private struct NutrientPickerSheet: View {
                                         Text("\(nutrient.dailyValue, specifier: "%.0f") \(nutrient.unit)/day")
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
-                                        if nutrient.id == selectedID {
+                                        if nutrient.id == currentID {
                                             Image(systemName: "checkmark")
                                                 .foregroundStyle(.blue)
                                         }
@@ -333,13 +358,9 @@ private struct NutrientPickerSheet: View {
 // MARK: - Slot Edit Sheet (Context Menu)
 
 /// Edit sheet for all 5 configurable slots.
-/// Each row is tappable to navigate to an inline picker.
+/// Each row navigates to an inline picker. Writes directly to Preferences model.
 private struct SlotEditSheet: View {
-    @Binding var slot1: String
-    @Binding var slot2: String
-    @Binding var slot3: String
-    @Binding var slot4: String
-    @Binding var slot5: String
+    @Bindable var preferences: Preferences
     let allSlotIDs: [String]
     @Environment(\.dismiss) private var dismiss
 
@@ -347,20 +368,21 @@ private struct SlotEditSheet: View {
         NavigationStack {
             List {
                 Section("Ring Slots") {
-                    slotRow(index: 1, binding: $slot1)
-                    slotRow(index: 2, binding: $slot2)
-                    slotRow(index: 3, binding: $slot3)
-                    slotRow(index: 4, binding: $slot4)
-                    slotRow(index: 5, binding: $slot5)
+                    slotRow(index: 1, keyPath: \.ringSlot1)
+                    slotRow(index: 2, keyPath: \.ringSlot2)
+                    slotRow(index: 3, keyPath: \.ringSlot3)
+                    slotRow(index: 4, keyPath: \.ringSlot4)
+                    slotRow(index: 5, keyPath: \.ringSlot5)
                 }
 
                 Section {
                     Button(role: .destructive) {
-                        slot1 = MacroNutrientID.protein.rawValue
-                        slot2 = MacroNutrientID.carbs.rawValue
-                        slot3 = MacroNutrientID.fat.rawValue
-                        slot4 = ""
-                        slot5 = ""
+                        preferences.ringSlot1 = MacroNutrientID.protein.rawValue
+                        preferences.ringSlot2 = MacroNutrientID.carbs.rawValue
+                        preferences.ringSlot3 = MacroNutrientID.fat.rawValue
+                        preferences.ringSlot4 = ""
+                        preferences.ringSlot5 = ""
+                        preferences.updatedAt = Date()
                     } label: {
                         Label("Reset to Defaults", systemImage: "arrow.counterclockwise")
                     }
@@ -376,23 +398,27 @@ private struct SlotEditSheet: View {
         }
     }
 
-    /// A single row: shows the nutrient name (or "Empty — tap to add") and navigates to the picker
     @ViewBuilder
-    private func slotRow(index: Int, binding: Binding<String>) -> some View {
+    private func slotRow(index: Int, keyPath: ReferenceWritableKeyPath<Preferences, String>) -> some View {
         let otherIDs = allSlotIDs.enumerated()
             .filter { $0.offset != index - 1 }
             .map { $0.element }
+        let value = preferences[keyPath: keyPath]
 
         NavigationLink {
-            InlineNutrientPicker(selectedID: binding, otherSlotIDs: otherIDs)
+            InlineNutrientPicker(
+                preferences: preferences,
+                keyPath: keyPath,
+                otherSlotIDs: otherIDs
+            )
         } label: {
             HStack {
                 Image(systemName: "\(index).circle.fill")
                     .foregroundStyle(colorForEditSlot(index))
 
-                if let macro = MacroNutrientID(rawValue: binding.wrappedValue) {
+                if let macro = MacroNutrientID(rawValue: value) {
                     Text(macro.label)
-                } else if let micro = KnownMicronutrients.nutrient(forID: binding.wrappedValue) {
+                } else if let micro = KnownMicronutrients.nutrient(forID: value) {
                     Text(micro.name)
                 } else {
                     Text("Empty — tap to add")
@@ -401,10 +427,13 @@ private struct SlotEditSheet: View {
 
                 Spacer()
 
-                if !binding.wrappedValue.isEmpty {
-                    Button("Remove") { binding.wrappedValue = "" }
-                        .font(.caption)
-                        .tint(.red)
+                if !value.isEmpty {
+                    Button("Remove") {
+                        preferences[keyPath: keyPath] = ""
+                        preferences.updatedAt = Date()
+                    }
+                    .font(.caption)
+                    .tint(.red)
                 }
             }
         }
@@ -419,12 +448,15 @@ private struct SlotEditSheet: View {
 // MARK: - Inline Nutrient Picker (for Edit Sheet navigation)
 
 /// Nutrient picker embedded inside the SlotEditSheet's NavigationStack.
-/// Shows macros + micros. Selecting auto-pops back.
+/// Writes directly to the Preferences model via keyPath. Auto-pops on selection.
 private struct InlineNutrientPicker: View {
-    @Binding var selectedID: String
+    @Bindable var preferences: Preferences
+    let keyPath: ReferenceWritableKeyPath<Preferences, String>
     let otherSlotIDs: [String]
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
+
+    private var currentID: String { preferences[keyPath: keyPath] }
 
     private var availableMacros: [MacroNutrientID] {
         MacroNutrientID.allCases.filter { macro in
@@ -440,25 +472,27 @@ private struct InlineNutrientPicker: View {
         }
     }
 
+    private func select(_ value: String) {
+        preferences[keyPath: keyPath] = value
+        preferences.updatedAt = Date()
+        dismiss()
+    }
+
     var body: some View {
         List {
-            // Clear option
-            if !selectedID.isEmpty {
+            if !currentID.isEmpty {
                 Button(role: .destructive) {
-                    selectedID = ""
-                    dismiss()
+                    select("")
                 } label: {
                     Label("Remove", systemImage: "minus.circle")
                 }
             }
 
-            // Macros
             if !availableMacros.isEmpty {
                 Section("Macros") {
                     ForEach(availableMacros, id: \.rawValue) { macro in
                         Button {
-                            selectedID = macro.rawValue
-                            dismiss()
+                            select(macro.rawValue)
                         } label: {
                             HStack {
                                 Circle()
@@ -466,7 +500,7 @@ private struct InlineNutrientPicker: View {
                                     .frame(width: 10, height: 10)
                                 Text(macro.label)
                                 Spacer()
-                                if macro.rawValue == selectedID {
+                                if macro.rawValue == currentID {
                                     Image(systemName: "checkmark")
                                         .foregroundStyle(.blue)
                                 }
@@ -477,15 +511,13 @@ private struct InlineNutrientPicker: View {
                 }
             }
 
-            // Micros by category
             ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
                 let nutrients = availableMicros.filter { $0.category == category }
                 if !nutrients.isEmpty {
                     Section(category.rawValue) {
                         ForEach(nutrients) { nutrient in
                             Button {
-                                selectedID = nutrient.id
-                                dismiss()
+                                select(nutrient.id)
                             } label: {
                                 HStack {
                                     Text(nutrient.name)
@@ -493,7 +525,7 @@ private struct InlineNutrientPicker: View {
                                     Text("\(nutrient.dailyValue, specifier: "%.0f") \(nutrient.unit)/day")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    if nutrient.id == selectedID {
+                                    if nutrient.id == currentID {
                                         Image(systemName: "checkmark")
                                             .foregroundStyle(.blue)
                                     }
