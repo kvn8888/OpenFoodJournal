@@ -148,6 +148,20 @@ if (!cols.includes("serving_type")) {
 - HealthKit capability
 - iCloud + CloudKit capability
 
+## Future Consideration: CloudKit Migration (App Store Branch)
+
+When preparing an App Store release, the sync backend can optionally migrate from Turso to CloudKit Private Database. This would live on a separate branch (`app-store-version`), not `main`. The project owner personally uses Turso.
+
+**Why CloudKit**: Private Database = $0 forever (data stored in user's iCloud, not developer's servers). Auto multi-device sync. Zero app size impact (system framework). Infinite scale (per-user storage).
+
+**What it replaces**: `SyncService.swift`, `server/routes.js` CRUD endpoints, Turso DB, Render hosting for data routes. The Express server would remain as a thin Gemini scan proxy (1 endpoint).
+
+**Model changes required**: CloudKit mandates all properties optional or with default values (current models mostly comply). No `#Unique` constraints allowed (we don't use any). Relationships must be optional (already the case). No server-side filtering (already query locally).
+
+**What you lose**: Server-side analytics/debugging over user data, real-time sync (CloudKit is eventual, seconds-to-minutes), cross-platform potential (no Android/web with CloudKit).
+
+**Migration scope**: Adapt `ModelContainer` config to use CloudKit container, give all non-optional model properties defaults, remove `SyncService` calls from views, remove Turso REST routes from server. Keep Gemini proxy. Test with multiple devices.
+
 ## Conventions
 
 - **Comments**: Explain *why*, not *what*. Entry-level devs should understand each function's purpose.
@@ -173,8 +187,9 @@ if (!cols.includes("serving_type")) {
 - Builds successfully with `xcodebuild` (generic/platform=iOS)
 - Render proxy deployed at `openfoodjournal.onrender.com` (Gemini proxy + Turso REST API)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
-- Container Tracking: create from Food Bank food, enter start weight, complete with final weight → derived nutrition logged
+- Container Tracking: create from Food Bank food (with "Recently Used" section, max 3), enter start weight, complete with final weight → derived nutrition logged
 - Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
+- Entry timestamps: visible in EntryRowView (compact time format), editable via DatePicker in EditEntryView
 - WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping to week boundaries (scrollTargetLayout + scrollTargetBehavior(.viewAligned) + containerRelativeFrame). 52 weeks of history via LazyHStack of WeekID structs. Today button, progress rings per day cell.
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values, summary view with progress bars
 - Turso DB integration: server-side schema + REST API complete, iOS SyncService with fire-and-forget mutations
