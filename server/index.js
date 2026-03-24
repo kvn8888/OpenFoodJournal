@@ -53,6 +53,14 @@ const flashModel = genAI.getGenerativeModel({
   },
 });
 
+// Fallback model for label scans when Flash Lite is overloaded (500/503)
+const flashFallback = genAI.getGenerativeModel({
+  model: "gemini-2.5-flash",
+  generationConfig: {
+    responseMimeType: "application/json",
+  },
+});
+
 // Gemini 3.1 Pro — high-reasoning model for food photo estimation
 // Uses thinking/reasoning for more accurate portion size and nutrient estimates
 // thinkingLevel replaces thinkingBudget for Gemini 3+ models (Google recommendation)
@@ -60,6 +68,17 @@ const flashModel = genAI.getGenerativeModel({
 // but explicit config documents intent and survives model name changes.
 const proModel = genAI.getGenerativeModel({
   model: "gemini-3.1-pro-preview",
+  generationConfig: {
+    responseMimeType: "application/json",
+    thinkingConfig: {
+      thinkingLevel: "HIGH",
+    },
+  },
+});
+
+// Fallback for food photo scans when Pro is overloaded
+const proFallback = genAI.getGenerativeModel({
+  model: "gemini-2.5-pro",
   generationConfig: {
     responseMimeType: "application/json",
     thinkingConfig: {
@@ -187,11 +206,10 @@ app.post("/scan", upload.single("image"), async (req, res) => {
 
     console.log(`[scan] mode=${mode}, size=${req.file.size} bytes, mime=${req.file.mimetype}`);
 
-    // ── Pick the right prompt and model based on scan mode ──────
+    // ── Pick the right prompt based on scan mode ──────────────────
     const prompt = mode === "label" ? LABEL_PROMPT : FOOD_PHOTO_PROMPT;
-    const activeModel = mode === "label" ? flashModel : proModel;
 
-    console.log(`[scan] Using model: ${mode === "label" ? "gemini-flash" : "gemini-pro (thinking)"}`);
+    console.log(`[scan] Using model: ${mode === "label" ? "gemini-flash-lite" : "gemini-pro (thinking)"}`);
 
     // ── Convert uploaded image to the format Gemini expects ───────
     // Gemini needs base64-encoded image data with a MIME type
@@ -204,11 +222,31 @@ app.post("/scan", upload.single("image"), async (req, res) => {
 
     const prepMs = Date.now() - serverStart;
 
-    // ── Call Gemini API ───────────────────────────────────────────
+    // ── Call Gemini API with automatic fallback on 500/503 ────────
+    const primaryModel = mode === "label" ? flashModel : proModel;
+    const fallbackModel = mode === "label" ? flashFallback : proFallback;
+    let usedFallback = false;
+
     const geminiStart = Date.now();
-    const result = await activeModel.generateContent([prompt, imagePart]);
+    let result;
+    try {
+      result = await primaryModel.generateContent([prompt, imagePart]);
+    } catch (primaryErr) {
+      const msg = primaryErr.message || "";
+      if (msg.includes("500") || msg.includes("503") || msg.includes("overloaded") || msg.includes("high demand")) {
+        console.log(`[scan] Primary model failed (${msg.substring(0, 80)}), falling back...`);
+        usedFallback = true;
+        result = await fallbackModel.generateContent([prompt, imagePart]);
+      } else {
+        throw primaryErr;
+      }
+    }
     const geminiMs = Date.now() - geminiStart;
     const responseText = result.response.text();
+
+    if (usedFallback) {
+      console.log(`[scan] Fallback model succeeded (${mode === "label" ? "gemini-2.5-flash" : "gemini-2.5-pro"})`);
+    }
 
     console.log(`[scan] Gemini responded with ${responseText.length} chars`);
 
