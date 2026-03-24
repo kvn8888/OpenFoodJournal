@@ -100,19 +100,19 @@ struct ScanResultCard: View {
                     Button(action: onConfirmAndSave) {
                         Label("Add to Log & Save", systemImage: "plus.circle.fill")
                             .font(.subheadline.weight(.semibold))
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.glassProminent)
 
                     HStack(spacing: 12) {
                         Button("Retake", action: onRetake)
                             .buttonStyle(.glass)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
 
                         // Log only — no Food Bank save
                         Button("Add to Log", action: onConfirm)
                             .buttonStyle(.glass)
-                            .frame(maxWidth: .infinity)
+                            .frame(maxWidth: .infinity, minHeight: 44)
                     }
                 }
                 .padding(.horizontal, 20)

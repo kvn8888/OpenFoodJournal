@@ -51,7 +51,7 @@ struct MacroSummaryBar: View {
             }
         }
         .padding()
-        .glassEffect(in: .rect(cornerRadius: 20))
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Daily macro summary")
     }
