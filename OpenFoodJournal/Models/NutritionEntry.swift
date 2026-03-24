@@ -52,6 +52,10 @@ final class NutritionEntry {
     // Lets the app convert between custom units (pieces, slices, etc.)
     var servingMappings: [ServingMapping]
 
+    // How long the scan took (end-to-end from image upload to parsed result), in milliseconds.
+    // Nil for manual entries. Used to track optimization progress.
+    var scanDurationMs: Int?
+
     // Inverse relationship
     var dailyLog: DailyLog?
 

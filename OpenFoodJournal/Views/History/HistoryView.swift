@@ -36,17 +36,8 @@ struct HistoryView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    // Calendar date picker
-                    DatePicker(
-                        "Select date",
-                        selection: $selectedDate,
-                        in: ...Date.now,
-                        displayedComponents: .date
-                    )
-                    .datePickerStyle(.graphical)
-                    .padding(.horizontal)
-                    .glassEffect(in: .rect(cornerRadius: 20))
-                    .padding(.horizontal)
+                    // Calendar with calorie progress rings on each day
+                    CalendarGridView(selectedDate: $selectedDate)
 
                     // Week-over-week macro comparison
                     weekComparisonSection
@@ -90,13 +81,19 @@ struct HistoryView: View {
                 .font(.headline)
                 .padding(.horizontal)
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                comparisonCard("Calories", thisWeek: avgMacro(\.totalCalories, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCalories, logs: lastWeekLogs), unit: "kcal", color: .orange)
-                comparisonCard("Protein", thisWeek: avgMacro(\.totalProtein, logs: thisWeekLogs), lastWeek: avgMacro(\.totalProtein, logs: lastWeekLogs), unit: "g", color: .blue)
-                comparisonCard("Carbs", thisWeek: avgMacro(\.totalCarbs, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCarbs, logs: lastWeekLogs), unit: "g", color: .green)
-                comparisonCard("Fat", thisWeek: avgMacro(\.totalFat, logs: thisWeekLogs), lastWeek: avgMacro(\.totalFat, logs: lastWeekLogs), unit: "g", color: .yellow)
+            // Each macro card navigates to the NutritionDetailView
+            NavigationLink {
+                NutritionDetailView()
+            } label: {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                    comparisonCard("Calories", thisWeek: avgMacro(\.totalCalories, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCalories, logs: lastWeekLogs), unit: "kcal", color: .orange).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                    comparisonCard("Protein", thisWeek: avgMacro(\.totalProtein, logs: thisWeekLogs), lastWeek: avgMacro(\.totalProtein, logs: lastWeekLogs), unit: "g", color: .blue).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                    comparisonCard("Carbs", thisWeek: avgMacro(\.totalCarbs, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCarbs, logs: lastWeekLogs), unit: "g", color: .green).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                    comparisonCard("Fat", thisWeek: avgMacro(\.totalFat, logs: thisWeekLogs), lastWeek: avgMacro(\.totalFat, logs: lastWeekLogs), unit: "g", color: .yellow).glassEffect(.regular.interactive(), in: .rect(cornerRadius: 12))
+                }
+                .padding(.horizontal)
             }
-            .padding(.horizontal)
+            .buttonStyle(.plain)
         }
     }
 

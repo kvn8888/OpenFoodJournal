@@ -43,6 +43,13 @@ struct ScanResultCard: View {
                                     .font(.caption)
                                     .foregroundStyle(.teal)
                             }
+
+                            // Show scan processing time if available
+                            if let ms = entry.scanDurationMs {
+                                Label("\(ms)ms", systemImage: "timer")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                         Spacer()
                         // Meal type picker

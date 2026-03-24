@@ -191,28 +191,32 @@ struct ScanCaptureView: View {
                     .frame(maxHeight: 300)
                     .padding(.horizontal, 24)
 
-                // Optional prompt
-                HStack(spacing: 8) {
-                    TextField("Add context, e.g. \"walnut shrimp\"", text: $promptText)
-                        .font(.subheadline)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .focused($isPromptFocused)
-                        .submitLabel(.done)
-                        .onSubmit { isPromptFocused = false }
-                    if !promptText.isEmpty {
-                        Button {
-                            promptText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.white.opacity(0.6))
+                // Optional prompt — only shown for food photos, not label scans.
+                // Label scans extract structured data from the nutrition facts panel;
+                // extra context would just confuse the OCR model.
+                if mode == .foodPhoto {
+                    HStack(spacing: 8) {
+                        TextField("Add context, e.g. \"walnut shrimp\"", text: $promptText)
+                            .font(.subheadline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .focused($isPromptFocused)
+                            .submitLabel(.done)
+                            .onSubmit { isPromptFocused = false }
+                        if !promptText.isEmpty {
+                            Button {
+                                promptText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 8)
                         }
-                        .buttonStyle(.plain)
-                        .padding(.trailing, 8)
                     }
+                    .glassEffect(in: .capsule)
+                    .padding(.horizontal, 32)
                 }
-                .glassEffect(in: .capsule)
-                .padding(.horizontal, 32)
 
                 // Action buttons
                 HStack(spacing: 16) {
