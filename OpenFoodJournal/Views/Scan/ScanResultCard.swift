@@ -98,7 +98,7 @@ struct ScanResultCard: View {
                 VStack(spacing: 8) {
                     // Primary action — log and save to Food Bank
                     Button(action: onConfirmAndSave) {
-                        Label("Add to Log & Save", systemImage: "plus.circle.fill")
+                        Label("Add to Journal & Food Bank", systemImage: "plus.circle.fill")
                             .font(.subheadline.weight(.semibold))
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
@@ -113,7 +113,7 @@ struct ScanResultCard: View {
 
                         // Log only — no Food Bank save
                         Button(action: onConfirm) {
-                            Text("Add to Log")
+                            Text("Add to Journal")
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.glass)

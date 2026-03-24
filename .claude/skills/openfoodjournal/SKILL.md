@@ -74,7 +74,7 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
   → Label mode: Gemini 3.1 Flash Lite (fast, low-latency OCR extraction)
   → Food photo mode: Gemini 3.1 Pro w/ thinkingLevel:HIGH (high reasoning)
   → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
-  → ScanResultCard (editable) → User taps "Add to Log"
+  → ScanResultCard (editable) → User taps "Add to Journal"
   → NutritionStore.log(entry, to: date) → SwiftData insert
   → Auto-creates SavedFood in Food Bank + syncs to Turso
   → HealthKitService.write(entry) if enabled
