@@ -16,6 +16,10 @@ struct NewContainerSheet: View {
     // ── SwiftData: all saved foods for the picker ─────────────────
     @Query(sort: \SavedFood.name) private var savedFoods: [SavedFood]
 
+    // All containers, most recent first — used to derive "recently used" foods
+    @Query(sort: \TrackedContainer.startDate, order: .reverse)
+    private var allContainers: [TrackedContainer]
+
     // ── State ─────────────────────────────────────────────────────
     @State private var selectedFood: SavedFood?
     @State private var gramsPerServingText = ""
@@ -28,6 +32,23 @@ struct NewContainerSheet: View {
         searchText.isEmpty
             ? savedFoods
             : savedFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// Up to 3 most recently used foods in containers, de-duped by savedFoodID.
+    /// Only includes foods that still exist in the Food Bank.
+    private var recentlyUsedFoods: [SavedFood] {
+        let savedFoodsByID = Dictionary(uniqueKeysWithValues: savedFoods.map { ($0.id, $0) })
+        var seen = Set<UUID>()
+        var result: [SavedFood] = []
+        for container in allContainers {
+            guard let foodID = container.savedFoodID,
+                  !seen.contains(foodID),
+                  let food = savedFoodsByID[foodID] else { continue }
+            seen.insert(foodID)
+            result.append(food)
+            if result.count >= 3 { break }
+        }
+        return result
     }
 
     var body: some View {
@@ -69,17 +90,30 @@ struct NewContainerSheet: View {
                 }
             } else {
                 List {
-                    ForEach(filteredFoods) { food in
-                        Button {
-                            selectedFood = food
-                            // Pre-fill grams per serving if the food has serving mappings with grams
-                            if let mapping = food.servingMappings.first(where: { $0.to.unit.lowercased() == "g" }) {
-                                gramsPerServingText = String(format: "%.0f", mapping.to.value)
+                    // Recently used foods from past containers (max 3)
+                    if searchText.isEmpty, !recentlyUsedFoods.isEmpty {
+                        Section("Recently Used") {
+                            ForEach(recentlyUsedFoods) { food in
+                                Button {
+                                    selectFood(food)
+                                } label: {
+                                    SavedFoodRowView(food: food)
+                                }
+                                .tint(.primary)
                             }
-                        } label: {
-                            SavedFoodRowView(food: food)
                         }
-                        .tint(.primary)
+                    }
+
+                    // All foods section
+                    Section(recentlyUsedFoods.isEmpty || !searchText.isEmpty ? "" : "All Foods") {
+                        ForEach(filteredFoods) { food in
+                            Button {
+                                selectFood(food)
+                            } label: {
+                                SavedFoodRowView(food: food)
+                            }
+                            .tint(.primary)
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -222,5 +256,15 @@ struct NewContainerSheet: View {
         guard let grams = Double(gramsPerServingText), grams > 0 else { return false }
         guard let weight = Double(startWeightText), weight > 0 else { return false }
         return true
+    }
+
+    // MARK: - Helpers
+
+    /// Selects a food and pre-fills grams per serving from its mappings if available
+    private func selectFood(_ food: SavedFood) {
+        selectedFood = food
+        if let mapping = food.servingMappings.first(where: { $0.to.unit.lowercased() == "g" }) {
+            gramsPerServingText = String(format: "%.0f", mapping.to.value)
+        }
     }
 }

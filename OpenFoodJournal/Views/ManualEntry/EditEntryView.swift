@@ -68,6 +68,7 @@ struct EditEntryView: View {
         NavigationStack {
             Form {
                 foodInfoSection
+                timeSection
                 mealSection
                 servingSection
                 servingMappingsSection
@@ -181,6 +182,13 @@ struct EditEntryView: View {
                         .tag(type)
                 }
             }
+        }
+    }
+
+    /// Time picker — lets the user adjust when the entry was logged
+    private var timeSection: some View {
+        Section {
+            DatePicker("Time", selection: $entry.timestamp, displayedComponents: .hourAndMinute)
         }
     }
 

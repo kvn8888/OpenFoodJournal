@@ -7,6 +7,14 @@ struct EntryRowView: View {
     let entry: NutritionEntry
     let onDelete: () -> Void
 
+    /// Formats the entry's timestamp as a compact time string (e.g. "2:30 PM")
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: entry.timestamp)
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             // Macro mini-summary
@@ -26,6 +34,14 @@ struct EntryRowView: View {
 
                 HStack(spacing: 6) {
                     Text("\(Int(entry.calories)) kcal")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text("·")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Text(timeString)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
