@@ -234,39 +234,53 @@ private struct MicroSlotEditSheet: View {
         NavigationStack {
             List {
                 Section("Tracked Micronutrients") {
-                    // Slot 1
-                    HStack {
-                        Image(systemName: "1.circle.fill")
-                            .foregroundStyle(.teal)
-                        if let nutrient = KnownMicronutrients.nutrient(forID: slot1) {
-                            Text(nutrient.name)
-                        } else {
-                            Text("Empty")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if !slot1.isEmpty {
-                            Button("Remove") { slot1 = "" }
-                                .font(.caption)
-                                .tint(.red)
+                    // Slot 1 — tappable to pick or change nutrient
+                    NavigationLink {
+                        InlineNutrientPicker(
+                            selectedID: $slot1,
+                            otherSlotID: slot2
+                        )
+                    } label: {
+                        HStack {
+                            Image(systemName: "1.circle.fill")
+                                .foregroundStyle(.teal)
+                            if let nutrient = KnownMicronutrients.nutrient(forID: slot1) {
+                                Text(nutrient.name)
+                            } else {
+                                Text("Empty — tap to add")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if !slot1.isEmpty {
+                                Button("Remove") { slot1 = "" }
+                                    .font(.caption)
+                                    .tint(.red)
+                            }
                         }
                     }
 
-                    // Slot 2
-                    HStack {
-                        Image(systemName: "2.circle.fill")
-                            .foregroundStyle(.purple)
-                        if let nutrient = KnownMicronutrients.nutrient(forID: slot2) {
-                            Text(nutrient.name)
-                        } else {
-                            Text("Empty")
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if !slot2.isEmpty {
-                            Button("Remove") { slot2 = "" }
-                                .font(.caption)
-                                .tint(.red)
+                    // Slot 2 — tappable to pick or change nutrient
+                    NavigationLink {
+                        InlineNutrientPicker(
+                            selectedID: $slot2,
+                            otherSlotID: slot1
+                        )
+                    } label: {
+                        HStack {
+                            Image(systemName: "2.circle.fill")
+                                .foregroundStyle(.purple)
+                            if let nutrient = KnownMicronutrients.nutrient(forID: slot2) {
+                                Text(nutrient.name)
+                            } else {
+                                Text("Empty — tap to add")
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if !slot2.isEmpty {
+                                Button("Remove") { slot2 = "" }
+                                    .font(.caption)
+                                    .tint(.red)
+                            }
                         }
                     }
                 }
@@ -292,6 +306,68 @@ private struct MicroSlotEditSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Inline Nutrient Picker (for Edit Sheet navigation)
+
+/// Nutrient picker embedded inside the MicroSlotEditSheet's NavigationStack.
+/// Selecting a nutrient automatically pops back to the edit sheet.
+private struct InlineNutrientPicker: View {
+    @Binding var selectedID: String
+    let otherSlotID: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var availableNutrients: [KnownMicronutrient] {
+        KnownMicronutrients.all.filter { nutrient in
+            nutrient.id != otherSlotID &&
+            (searchText.isEmpty || nutrient.name.localizedCaseInsensitiveContains(searchText))
+        }
+    }
+
+    var body: some View {
+        List {
+            // Clear option if already assigned
+            if !selectedID.isEmpty {
+                Button(role: .destructive) {
+                    selectedID = ""
+                    dismiss()
+                } label: {
+                    Label("Remove", systemImage: "minus.circle")
+                }
+            }
+
+            ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
+                let nutrients = availableNutrients.filter { $0.category == category }
+                if !nutrients.isEmpty {
+                    Section(category.rawValue) {
+                        ForEach(nutrients) { nutrient in
+                            Button {
+                                selectedID = nutrient.id
+                                dismiss()
+                            } label: {
+                                HStack {
+                                    Text(nutrient.name)
+                                    Spacer()
+                                    Text("\(nutrient.dailyValue, specifier: "%.0f") \(nutrient.unit)/day")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    if nutrient.id == selectedID {
+                                        Image(systemName: "checkmark")
+                                            .foregroundStyle(.blue)
+                                    }
+                                }
+                            }
+                            .tint(.primary)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Choose Nutrient")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $searchText, prompt: "Search nutrients")
     }
 }
 
