@@ -59,8 +59,12 @@ struct MacroSummaryBar: View {
         }
         .padding()
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
-        .onLongPressGesture {
-            showEditSheet = true
+        .contextMenu {
+            Button {
+                showEditSheet = true
+            } label: {
+                Label("Edit Tracked Nutrients", systemImage: "slider.horizontal.3")
+            }
         }
         .sheet(isPresented: $showEditSheet) {
             MicroSlotEditSheet(
@@ -74,7 +78,7 @@ struct MacroSummaryBar: View {
                 selectedID: slot == 1 ? $microSlot1 : $microSlot2,
                 otherSlotID: slot == 1 ? microSlot2 : microSlot1
             )
-            .presentationDetents([.medium])
+            .presentationDetents([.medium, .large])
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Daily macro summary")
