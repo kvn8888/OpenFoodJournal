@@ -31,21 +31,6 @@ struct MacroSummaryBar: View {
                     MacroRingView(value: protein, goal: goals.dailyProtein, color: .blue, label: "Protein", unit: "g")
                     MacroRingView(value: carbs, goal: goals.dailyCarbs, color: .green, label: "Carbs", unit: "g")
                     MacroRingView(value: fat, goal: goals.dailyFat, color: .yellow, label: "Fat", unit: "g")
-                    Spacer()
-
-                    // Remaining calories pill
-                    VStack(spacing: 2) {
-                        let remaining = max(goals.dailyCalories - calories, 0)
-                        Text(remaining, format: .number.precision(.fractionLength(0)))
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                            .foregroundStyle(remaining > 0 ? Color.primary : Color.orange)
-                        Text("left")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .glassEffect(in: .rect(cornerRadius: 12))
                 }
                 .padding(.horizontal, 4)
             }

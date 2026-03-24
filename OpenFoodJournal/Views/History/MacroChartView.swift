@@ -94,9 +94,8 @@ struct MacroChartView: View {
                         x: .value("Date", log.date, unit: .day),
                         y: .value(selectedMacro.rawValue, value(for: log))
                     )
-                    .foregroundStyle(
-                        value(for: log) > goalValue * 1.1 ? Color.orange : chartColor
-                    )
+                    .foregroundStyle(chartColor)
+                    .opacity(value(for: log) > goalValue * 1.1 ? 0.5 : 1.0)
                     .cornerRadius(4)
                 }
             }
