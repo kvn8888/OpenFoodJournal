@@ -104,9 +104,11 @@ struct CalendarGridView: View {
     // MARK: - Weekday Header
 
     /// Single-letter weekday labels (S, M, T, W, T, F, S)
+    /// Uses enumerated indices as IDs because veryShortWeekdaySymbols has
+    /// duplicates ("S" twice, "T" twice) — ForEach(id: \.self) would dedupe them.
     private var weekdayHeader: some View {
         LazyVGrid(columns: columns, spacing: 0) {
-            ForEach(weekdaySymbols, id: \.self) { symbol in
+            ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                 Text(symbol)
                     .font(.caption2)
                     .fontWeight(.semibold)

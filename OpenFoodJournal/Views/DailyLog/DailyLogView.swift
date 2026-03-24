@@ -64,6 +64,8 @@ struct DailyLogView: View {
                             .padding(.top, 40)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .listRowInsets(EdgeInsets())
                     }
 
                     // Spacer so the last entry is never hidden behind the radial FAB
@@ -112,13 +114,6 @@ struct DailyLogView: View {
             }
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Text(selectedDate, style: .date)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
