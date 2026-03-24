@@ -105,14 +105,18 @@ struct ScanResultCard: View {
                     .buttonStyle(.glassProminent)
 
                     HStack(spacing: 12) {
-                        Button("Retake", action: onRetake)
-                            .buttonStyle(.glass)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button(action: onRetake) {
+                            Text("Retake")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.glass)
 
                         // Log only — no Food Bank save
-                        Button("Add to Log", action: onConfirm)
-                            .buttonStyle(.glass)
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                        Button(action: onConfirm) {
+                            Text("Add to Log")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.glass)
                     }
                 }
                 .padding(.horizontal, 20)
