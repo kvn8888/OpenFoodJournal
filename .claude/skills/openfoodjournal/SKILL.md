@@ -27,7 +27,7 @@ MacrosApp (creates ModelContainer + 5 @Observable services)
   └─ ContentView (4-tab TabView)
        ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
        ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit)
-       ├─ History tab → HistoryView (date picker, MacroChartView, day detail)
+       ├─ History tab → HistoryView (CalendarGridView with progress rings, MacroChartView, macro cards → NutritionDetailView)
        └─ Settings tab → SettingsView (goals, health, data export)
 ```
 
@@ -43,7 +43,7 @@ See [references/models.md](references/models.md) for full property lists.
 
 - **`DailyLog`** — `@Model`, keyed by `@Attribute(.unique) date` normalized to midnight. Owns `[NutritionEntry]` via cascade delete.
 - **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/serving/servingCount/servingQuantity/servingUnit/servingMappings. `@Attribute(.externalStorage)` on `sourceImage`.
-- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting. Created from entries or manual input.
+- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting. Created from entries, manual input, or directly from ManualEntryView's "Add to Journal & Food Bank" action.
 - **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
 - **`UserGoals`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for each goal property to avoid property-wrapper conflicts.
 - **`MealType`** — enum: `.breakfast`, `.lunch`, `.dinner`, `.snack`
@@ -58,7 +58,7 @@ See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations. **`applySync(_ response: SyncResponse)`** merges a full server response into SwiftData — upserts DailyLogs by date, inserts missing entries/foods by UUID (skips if already local). Private helpers: `buildServingSize(type:grams:ml:) -> ServingSize?`, `parseDate(_ string:) -> Date?`.
 - **`SyncService`** — `@Observable @MainActor`. Handles all HTTP communication with the Turso-backed REST API at `/api/*`. Typed API models (`APIEntry`, `APIFood`, `APIContainer`, `APIGoals`, `SyncResponse`). Fire-and-forget pattern: local SwiftData write first, then async sync to server. Injected into views via `@Environment(SyncService.self)`.
-- **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing.
+- **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
 - **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
@@ -71,11 +71,14 @@ See [references/views.md](references/views.md) for detailed view hierarchy and n
 
 ```
 User taps Scan → CameraController (AVCaptureSession) → JPEG
+  → Prompt overlay: food photo shows text input, label scan skips prompt
   → ScanService.scan(image, mode) → multipart POST to /scan
+  → ContinuousClock measures full round-trip duration
   → Label mode: Gemini 3.1 Flash Lite (fast, low-latency OCR extraction)
   → Food photo mode: Gemini 3.1 Pro w/ thinkingLevel:HIGH (high reasoning)
   → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
-  → ScanResultCard (editable) → User taps "Add to Journal"
+  → Entry gets scanDurationMs set from ContinuousClock measurement
+  → ScanResultCard (editable, shows duration badge) → User taps "Add to Journal"
   → NutritionStore.log(entry, to: date) → SwiftData insert
   → Auto-creates SavedFood in Food Bank + syncs to Turso
   → HealthKitService.write(entry) if enabled
