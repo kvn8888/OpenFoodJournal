@@ -41,6 +41,23 @@ struct CalendarGridView: View {
         .padding()
         .glassEffect(in: .rect(cornerRadius: 20))
         .padding(.horizontal)
+        // Swipe left/right to navigate months
+        .gesture(
+            DragGesture(minimumDistance: 50, coordinateSpace: .local)
+                .onEnded { value in
+                    // Horizontal swipe: negative = swipe left = next month
+                    let horizontal = value.translation.width
+                    if horizontal < -50 && !isCurrentMonth {
+                        withAnimation(.spring(duration: 0.3)) {
+                            displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
+                        }
+                    } else if horizontal > 50 {
+                        withAnimation(.spring(duration: 0.3)) {
+                            displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth)!
+                        }
+                    }
+                }
+        )
         .onAppear {
             // Initialize displayedMonth to the month of selectedDate
             displayedMonth = startOfMonth(for: selectedDate)
