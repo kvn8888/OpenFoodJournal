@@ -7,7 +7,7 @@ import SwiftData
 // Shared focus field enum — fileprivate so MacroInputRow can access it.
 // Uses .micronutrient(String) to handle any dynamic nutrient name.
 fileprivate enum ManualEntryField: Hashable {
-    case name, calories, protein, carbs, fat
+    case name, brand, calories, protein, carbs, fat
     case micronutrient(String)  // dynamic: "Fiber", "Sugar", "Sodium", etc.
     case servingSize
 }
@@ -15,11 +15,14 @@ fileprivate enum ManualEntryField: Hashable {
 struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @Environment(SyncService.self) private var syncService
 
     let defaultDate: Date
 
     // Form state
     @State private var name = ""
+    @State private var brand = ""
     @State private var mealType: MealType = .snack
     @State private var calories = ""
     @State private var protein = ""
@@ -58,6 +61,11 @@ struct ManualEntryView: View {
                 Section("Food Info") {
                     TextField("Food name", text: $name)
                         .focused($focusedField, equals: .name)
+                        .submitLabel(.next)
+                        .onSubmit { focusedField = .brand }
+
+                    TextField("Brand (optional)", text: $brand)
+                        .focused($focusedField, equals: .brand)
                         .submitLabel(.next)
                         .onSubmit { focusedField = .calories }
 
@@ -118,9 +126,24 @@ struct ManualEntryView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { save() }
-                        .disabled(!isValid)
-                        .fontWeight(.semibold)
+                    Menu {
+                        // Primary: log + save to food bank
+                        Button {
+                            save(saveToFoodBank: true)
+                        } label: {
+                            Label("Add to Journal & Food Bank", systemImage: "plus.circle.fill")
+                        }
+                        // Secondary: log only
+                        Button {
+                            save(saveToFoodBank: false)
+                        } label: {
+                            Label("Add to Journal", systemImage: "plus.circle")
+                        }
+                    } label: {
+                        Text("Add")
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(!isValid)
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
@@ -149,7 +172,7 @@ struct ManualEntryView: View {
         }
     }
 
-    private func save() {
+    private func save(saveToFoodBank: Bool) {
         guard let caloriesVal = Double(calories),
               let proteinVal = Double(protein),
               let carbsVal = Double(carbs),
@@ -165,6 +188,8 @@ struct ManualEntryView: View {
             }
         }
 
+        let trimmedBrand = brand.trimmingCharacters(in: .whitespaces)
+
         let entry = NutritionEntry(
             name: name.trimmingCharacters(in: .whitespaces),
             mealType: mealType,
@@ -174,9 +199,19 @@ struct ManualEntryView: View {
             carbs: carbsVal,
             fat: fatVal,
             micronutrients: micronutrients,
-            servingSize: servingSize.isEmpty ? nil : servingSize
+            servingSize: servingSize.isEmpty ? nil : servingSize,
+            brand: trimmedBrand.isEmpty ? nil : trimmedBrand
         )
         nutritionStore.log(entry, to: defaultDate)
+
+        // Optionally save to Food Bank for quick re-logging
+        if saveToFoodBank {
+            let savedFood = SavedFood(from: entry)
+            modelContext.insert(savedFood)
+            try? modelContext.save()
+            Task { try? await syncService.createFood(savedFood) }
+        }
+
         dismiss()
     }
 }

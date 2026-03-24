@@ -86,6 +86,8 @@ final class ScanService {
     var error: ScanError?
     /// Holds the result of a background scan until the user confirms/dismisses it
     var pendingResult: NutritionEntry?
+    /// Duration of the last completed scan in milliseconds (upload + Gemini + decode)
+    var lastScanDurationMs: Int?
 
     // MARK: Configuration
 
@@ -125,6 +127,9 @@ final class ScanService {
         error = nil
         defer { isScanning = false }
 
+        // Start timing the full scan pipeline
+        let scanStart = ContinuousClock.now
+
         // Resize to max 2000px on longest edge before JPEG encoding.
         // A 12MP camera image (4032x3024) base64-encoded at 0.85 quality is ~4-6MB.
         // Resizing first cuts that to ~150-400KB, which dramatically reduces:
@@ -162,7 +167,14 @@ final class ScanService {
             throw ScanError.decodingError(error)
         }
 
-        return geminiResponse.toNutritionEntry(mode: mode, imageData: jpegData)
+        // Measure and log the full scan duration (upload + Gemini + decode)
+        let durationMs = Int(scanStart.duration(to: .now).components.attoseconds / 1_000_000_000_000_000)
+        lastScanDurationMs = durationMs
+        print("📸 Scan completed in \(durationMs)ms (mode: \(mode.rawValue))")
+
+        var entry = geminiResponse.toNutritionEntry(mode: mode, imageData: jpegData)
+        entry.scanDurationMs = durationMs
+        return entry
     }
 
     // MARK: - Private Helpers
