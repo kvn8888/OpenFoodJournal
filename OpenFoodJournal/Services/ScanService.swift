@@ -149,11 +149,12 @@ final class ScanService {
         // Resize to max 1200px on longest edge before JPEG encoding.
         // OCR doesn't need high resolution — 1200px captures all text on a
         // nutrition label clearly while keeping JPEG size under ~200KB.
-        // Combined with 0.80 quality, this cuts upload from ~5MB to ~150-300KB
-        // on cellular, shaving 1-2 seconds off round-trip time.
         let resized = image.resizedForOCR(maxDimension: 1200)
 
-        guard let jpegData = resized.jpegData(compressionQuality: 0.80) else {
+        // Label scans only need readable text → aggressive 50% JPEG quality (~100-200KB)
+        // Food photos need visual detail for portion estimation → 80% quality (~300-600KB)
+        let jpegQuality: CGFloat = mode == .label ? 0.50 : 0.80
+        guard let jpegData = resized.jpegData(compressionQuality: jpegQuality) else {
             throw ScanError.imageEncodingFailed
         }
 
