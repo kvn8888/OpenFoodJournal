@@ -325,6 +325,16 @@ final class NutritionStore {
             if let fat = apiGoals.fatGoal { goals.dailyFat = fat }
         }
 
+        // ── 6. Apply preferences if present ──────────────────────────────
+        if let apiPrefs = response.preferences {
+            let prefs = Preferences.current(in: modelContext)
+            if let s1 = apiPrefs.ringSlot1 { prefs.ringSlot1 = s1 }
+            if let s2 = apiPrefs.ringSlot2 { prefs.ringSlot2 = s2 }
+            if let s3 = apiPrefs.ringSlot3 { prefs.ringSlot3 = s3 }
+            if let s4 = apiPrefs.ringSlot4 { prefs.ringSlot4 = s4 }
+            if let s5 = apiPrefs.ringSlot5 { prefs.ringSlot5 = s5 }
+        }
+
         save()
     }
 
