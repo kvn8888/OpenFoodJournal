@@ -276,4 +276,23 @@ enum KnownMicronutrients {
             return nutrients.isEmpty ? nil : (category, nutrients)
         }
     }()
+
+    /// Look up a nutrient by its canonical ID (e.g. "sodium", "fiber").
+    /// Returns nil if the ID doesn't match any known nutrient or is empty.
+    static func nutrient(forID id: String) -> KnownMicronutrient? {
+        guard !id.isEmpty else { return nil }
+        return Self.byID[id]
+    }
+
+    /// Normalize a micronutrient key from entry data to a canonical ID.
+    /// Tries: exact ID match → name-based lookup → lowercase fallback.
+    static func normalize(_ key: String) -> String {
+        let lower = key.lowercased()
+        // Direct ID match
+        if Self.byID[lower] != nil { return lower }
+        // Name-based lookup
+        if let nutrient = byName[lower] { return nutrient.id }
+        // Fallback — return lowercased key as-is
+        return lower
+    }
 }
