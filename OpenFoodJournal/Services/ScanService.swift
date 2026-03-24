@@ -160,6 +160,7 @@ final class ScanService {
 
         let prepEnd = ContinuousClock.now
         let prepMs = msFrom(prepEnd.duration(to: scanStart))
+        print("📐 Image: \(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))px → \(Int(resized.size.width * resized.scale))×\(Int(resized.size.height * resized.scale))px, JPEG: \(jpegData.count / 1024)KB")
 
         let request = try buildRequest(imageData: jpegData, mode: mode, prompt: prompt)
 
@@ -354,14 +355,20 @@ private extension UIImage {
     /// Resizes the image so its longest edge is at most `maxDimension` points.
     /// Returns self unchanged if already within bounds.
     /// Uses UIGraphicsImageRenderer for memory-efficient rendering.
+    /// IMPORTANT: UIImage.size returns points, not pixels. On a 3x device a 4032×3024
+    /// photo has size 1344×1008 pts — well under 2000, so the resize would be skipped.
+    /// We must use the pixel dimensions (size × scale) for the comparison.
     func resizedForOCR(maxDimension: CGFloat) -> UIImage {
-        let longest = max(size.width, size.height)
+        // Convert to pixel dimensions (size is in points, scale gives the multiplier)
+        let pixelWidth = size.width * scale
+        let pixelHeight = size.height * scale
+        let longest = max(pixelWidth, pixelHeight)
         guard longest > maxDimension else { return self }
 
-        let scale = maxDimension / longest
+        let ratio = maxDimension / longest
         let newSize = CGSize(
-            width: (size.width * scale).rounded(),
-            height: (size.height * scale).rounded()
+            width: (pixelWidth * ratio).rounded(),
+            height: (pixelHeight * ratio).rounded()
         )
 
         let renderer = UIGraphicsImageRenderer(size: newSize)
