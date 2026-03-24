@@ -21,6 +21,7 @@ struct MacroSummaryBar: View {
     @State private var showEditSheet = false       // Long-press edit mode
 
     // ── Computed ──────────────────────────────────────────────────
+    private var calories: Double { log?.totalCalories ?? 0 }
     private var protein: Double { log?.totalProtein ?? 0 }
     private var carbs: Double { log?.totalCarbs ?? 0 }
     private var fat: Double { log?.totalFat ?? 0 }
@@ -40,9 +41,19 @@ struct MacroSummaryBar: View {
 
     var body: some View {
         VStack(spacing: 12) {
+            // Calorie headline
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(calories, format: .number.precision(.fractionLength(0)))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                Text("/ \(Int(goals.dailyCalories)) kcal")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+
             // Ring row: macros + micro slots
             GlassEffectContainer(spacing: 12) {
-                HStack(spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
                     // Fixed macro rings
                     MacroRingView(value: protein, goal: goals.dailyProtein, color: .blue, label: "Protein", unit: "g")
                     MacroRingView(value: carbs, goal: goals.dailyCarbs, color: .green, label: "Carbs", unit: "g")
@@ -119,7 +130,9 @@ struct MacroSummaryBar: View {
                         .font(.caption2)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
+                        .frame(width: 56)
                 }
+                .frame(width: 56, alignment: .top)
             }
             .buttonStyle(.plain)
         }

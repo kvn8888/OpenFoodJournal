@@ -21,6 +21,9 @@ struct MacroRingView: View {
     }
 
     var body: some View {
+        // Rings are pinned to top; labels sit below and can wrap without
+        // shifting the ring position. fixedSize(vertical: false) lets the
+        // label text wrap horizontally within the available width.
         VStack(spacing: 4) {
             ZStack {
                 // Track
@@ -53,7 +56,12 @@ struct MacroRingView: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .frame(width: 56)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(width: 56, alignment: .top)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(label): \(Int(value)) of \(Int(goal)) \(unit)")
     }
