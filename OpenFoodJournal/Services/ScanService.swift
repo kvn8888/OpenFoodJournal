@@ -146,15 +146,14 @@ final class ScanService {
         // Start timing the full scan pipeline
         let scanStart = ContinuousClock.now
 
-        // Resize to max 2000px on longest edge before JPEG encoding.
-        // A 12MP camera image (4032x3024) base64-encoded at 0.85 quality is ~4-6MB.
-        // Resizing first cuts that to ~150-400KB, which dramatically reduces:
-        //   1. Upload time (especially on cellular)
-        //   2. Gemini's base64 decode overhead
-        // OCR doesn't need more than 2000px to read a nutrition label.
-        let resized = image.resizedForOCR(maxDimension: 2000)
+        // Resize to max 1200px on longest edge before JPEG encoding.
+        // OCR doesn't need high resolution — 1200px captures all text on a
+        // nutrition label clearly while keeping JPEG size under ~200KB.
+        // Combined with 0.80 quality, this cuts upload from ~5MB to ~150-300KB
+        // on cellular, shaving 1-2 seconds off round-trip time.
+        let resized = image.resizedForOCR(maxDimension: 1200)
 
-        guard let jpegData = resized.jpegData(compressionQuality: 0.90) else {
+        guard let jpegData = resized.jpegData(compressionQuality: 0.80) else {
             throw ScanError.imageEncodingFailed
         }
 
