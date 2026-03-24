@@ -172,6 +172,8 @@ app.get("/health", (_req, res) => {
 // "mode" is either "label" (nutrition label) or "food_photo" (photo of food)
 app.post("/scan", upload.single("image"), async (req, res) => {
   try {
+    const serverStart = Date.now();
+
     // ── Validate request ──────────────────────────────────────────
     if (!req.file) {
       return res.status(400).json({ error: "No image file provided. Send as 'image' field." });
@@ -200,8 +202,12 @@ app.post("/scan", upload.single("image"), async (req, res) => {
       },
     };
 
+    const prepMs = Date.now() - serverStart;
+
     // ── Call Gemini API ───────────────────────────────────────────
+    const geminiStart = Date.now();
     const result = await activeModel.generateContent([prompt, imagePart]);
+    const geminiMs = Date.now() - geminiStart;
     const responseText = result.response.text();
 
     console.log(`[scan] Gemini responded with ${responseText.length} chars`);
@@ -231,6 +237,16 @@ app.post("/scan", upload.single("image"), async (req, res) => {
     nutritionData.name = nutritionData.name || "Unknown Food";
     nutritionData.confidence = nutritionData.confidence ?? 0.5;
     nutritionData.micronutrients = nutritionData.micronutrients || {};
+
+    const totalMs = Date.now() - serverStart;
+    console.log(`[scan] ⏱️ Server timing: total=${totalMs}ms (prep=${prepMs}ms, gemini=${geminiMs}ms, post=${totalMs - prepMs - geminiMs}ms)`);
+
+    // Include server timing in the response for client-side breakdown
+    nutritionData.server_timing = {
+      total_ms: totalMs,
+      gemini_ms: geminiMs,
+      prep_ms: prepMs,
+    };
 
     // ── Return the structured nutrition data ──────────────────────
     res.json(nutritionData);
