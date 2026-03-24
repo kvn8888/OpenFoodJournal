@@ -37,16 +37,6 @@ struct NutritionDetailView: View {
                 .listRowInsets(EdgeInsets())
             }
 
-            // Subtitle explaining the view for weekly/monthly
-            if selectedPeriod != .daily {
-                Section {
-                    Text("Showing daily average over \(selectedPeriod == .weekly ? "7" : "30") days")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .listRowBackground(Color.clear)
-                }
-            }
-
             // Macro summary cards
             macroSummarySection
 
