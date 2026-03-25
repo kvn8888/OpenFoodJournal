@@ -31,7 +31,7 @@ struct GoalsEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Protein & carbs = 4 kcal/g · Fat = 9 kcal/g. Use this as a sanity check against your calorie goal.")
+                Text("Protein & carbs = 4 kcal/g · Fat = 9 kcal/g (Atwater system). Use this as a sanity check against your calorie goal. These are general factors — individual needs vary. Consult a healthcare professional for personalized guidance.")
             }
         }
         .navigationTitle("Daily Goals")

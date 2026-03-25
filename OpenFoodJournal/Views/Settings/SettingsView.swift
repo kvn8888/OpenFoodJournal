@@ -131,6 +131,13 @@ struct SettingsView: View {
                         Label("Show Onboarding", systemImage: "hand.wave")
                     }
 
+                    // Health/nutrition citation page — satisfies App Store Guideline 1.4.1
+                    NavigationLink {
+                        HealthDisclaimerView()
+                    } label: {
+                        Label("Sources & Disclaimers", systemImage: "info.circle")
+                    }
+
                     HStack {
                         Text("Version")
                         Spacer()

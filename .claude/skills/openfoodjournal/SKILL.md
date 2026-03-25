@@ -209,8 +209,20 @@ Already configured in `OpenFoodJournal.entitlements`:
 - KeychainService for secure API key storage
 - Onboarding flow: 6 pages (Welcome → API Key → Goals → Camera → Radial Menu Tutorial → HealthKit)
 - RadialMenuDemo: pure SwiftUI phase-based animation teaching press-and-drag gesture (in onboarding page 4)
-- Settings: API key management section (save/delete/change key), "Show Onboarding" replay button
+- Settings: API key management section (save/delete/change key), "Show Onboarding" replay button, "Sources & Disclaimers" link
+- **App Store Guideline 1.4.1 compliance**: HealthDisclaimerView with FDA citations (21 CFR §101.9), AI estimation disclaimers, Atwater system citation, and general medical disclaimer. Inline citations on NutritionDetailView, ScanResultCard, and GoalsEditorView.
 - App Store audit complete: HealthKit entitlement, Privacy Policy, PrivacyInfo.xcprivacy, AGPL→MIT licensing
 - sourceImage removed from NutritionEntry and SavedFood (was stored but never displayed)
 - TursoMigrationView deleted — CloudKit replaced Turso, migration tool is dead code
 - No unit tests beyond Xcode template stubs
+
+## App Store Submission Notes
+
+**First submission rejected (Guideline 1.4.1 — Physical Harm)**: App provided health/nutrition data without citations. Fixed by adding `HealthDisclaimerView` (Settings → Sources & Disclaimers) with FDA Daily Values links, Atwater system reference, AI estimation disclaimer, and general medical disclaimer. Inline citations added to NutritionDetailView, ScanResultCard, and GoalsEditorView.
+
+**Other audit findings to address before next submission:**
+- README.md describes `main` branch architecture (Turso/Express), not `app-store` branch. Update README or add branch-specific note.
+- Reviewer notes previously contained false HealthKit claim ("data is never read") — corrected to list all read/write types.
+- `server/` directory and `render.yaml` are dead code on `app-store` branch — reviewers clicking the GitHub link may be confused.
+- AGPL-3.0 license has App Store exception in LICENSE_NOTICE.md — Apple may or may not flag this.
+- Privacy policy is web-only (GitHub link) — fails offline. Consider embedding a copy in-app.
