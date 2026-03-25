@@ -126,11 +126,19 @@ struct OnboardingView: View {
                 .padding(.horizontal, 32)
 
             // App Store 5.1.2(i) disclosure: clearly state what data goes to Google
-            Text("When you scan food, your photo is sent to Google's Gemini API for analysis. No other personal data is shared.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+            // Using footnote + primary color so it's prominent enough for App Store review
+            HStack(spacing: 6) {
+                Image(systemName: "info.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Text("When you scan food, your photo is sent to Google's Gemini API for analysis. No other personal data is shared.")
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .multilineTextAlignment(.leading)
+            }
+            .padding(.horizontal, 32)
+            .padding(.vertical, 8)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
 
             if apiKeySaved {
                 Label("API key saved", systemImage: "checkmark.circle.fill")

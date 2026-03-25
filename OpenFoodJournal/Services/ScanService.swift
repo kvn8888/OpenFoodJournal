@@ -286,7 +286,9 @@ final class ScanService {
 
         let prepEnd = ContinuousClock.now
         let prepMs = msFrom(prepEnd.duration(to: scanStart))
+        #if DEBUG
         print("📐 Image: \(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))px → \(Int(resized.size.width * resized.scale))×\(Int(resized.size.height * resized.scale))px, JPEG: \(jpegData.count / 1024)KB")
+        #endif
 
         // Pick model config and prompt based on scan mode
         let modelConfig = mode == .label ? ModelConfig.label : ModelConfig.foodPhoto
@@ -336,11 +338,12 @@ final class ScanService {
         let totalMs = msFrom(ContinuousClock.now.duration(to: scanStart))
         let decodeMs = totalMs - abs(prepMs) - abs(networkMs)
         lastScanDurationMs = totalMs
-
+        #if DEBUG
         print("📸 Scan completed in \(totalMs)ms (mode: \(mode.rawValue), model: \(usedFallback ? modelConfig.fallback : modelConfig.primary))")
         print("   ├─ Image prep (resize + JPEG): \(abs(prepMs))ms")
         print("   ├─ Gemini API round-trip: \(abs(networkMs))ms")
         print("   └─ Client decode: \(abs(decodeMs))ms")
+        #endif
 
         var entry = nutritionData.toNutritionEntry(mode: mode)
         entry.scanDurationMs = totalMs
