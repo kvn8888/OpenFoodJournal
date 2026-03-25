@@ -16,9 +16,6 @@ final class NutritionEntry {
     var scanMode: ScanMode = ScanMode.manual
     var confidence: Double?
 
-    @Attribute(.externalStorage)
-    var sourceImage: Data?
-
     // Core macros — always required
     var calories: Double = 0
     var protein: Double = 0
@@ -69,7 +66,6 @@ final class NutritionEntry {
         mealType: MealType = .snack,
         scanMode: ScanMode = .manual,
         confidence: Double? = nil,
-        sourceImage: Data? = nil,
         calories: Double,
         protein: Double,
         carbs: Double,
@@ -90,7 +86,6 @@ final class NutritionEntry {
         self.mealType = mealType
         self.scanMode = scanMode
         self.confidence = confidence
-        self.sourceImage = sourceImage
         self.calories = calories
         self.protein = protein
         self.carbs = carbs

@@ -1,7 +1,7 @@
 // OpenFoodJournal — EditFoodSheet
 // Allows editing a SavedFood's name, brand, and core macros.
 // Presented from FoodBankView via swipe action or context menu.
-// Changes are saved to SwiftData and synced to Turso.
+// Changes are saved to SwiftData.
 // AGPL-3.0 License
 
 import SwiftUI
