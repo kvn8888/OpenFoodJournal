@@ -76,9 +76,12 @@ struct OnboardingView: View {
         VStack(spacing: 32) {
             Spacer()
 
-            Image(systemName: "fork.knife.circle.fill")
-                .font(.system(size: 80))
-                .foregroundStyle(Color.accentColor)
+            Image("AppIconImage")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 120, height: 120)
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+                .shadow(radius: 8, y: 4)
 
             Text("OpenFoodJournal")
                 .font(.largeTitle.bold())

@@ -296,13 +296,13 @@ struct RadialMenuDemo: View {
         while !Task.isCancelled {
                 // Phase 1: Idle (brief pause at start)
                 phase = .idle
-                try? await Task.sleep(for: .seconds(0.8))
+                try? await Task.sleep(for: .seconds(0.3))
 
                 // Phase 2: Finger slides into view
-                withAnimation(.easeOut(duration: 0.5)) {
+                withAnimation(.easeOut(duration: 0.35)) {
                     phase = .fingerAppears
                 }
-                try? await Task.sleep(for: .seconds(0.6))
+                try? await Task.sleep(for: .seconds(0.4))
 
                 // Phase 3: Press — finger pushes down on button
                 withAnimation(.easeInOut(duration: 0.15)) {

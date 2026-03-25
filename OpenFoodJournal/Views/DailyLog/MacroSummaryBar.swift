@@ -100,7 +100,7 @@ struct MacroSummaryBar: View {
 
             // Ring row: all 5 configurable slots
             GlassEffectContainer(spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
+                HStack(alignment: .top, spacing: 8) {  // 8pt keeps 5×56pt rings within any context
                     ForEach(1...5, id: \.self) { index in
                         slotView(slotID: slotIDs[index - 1], slotIndex: index)
                     }
