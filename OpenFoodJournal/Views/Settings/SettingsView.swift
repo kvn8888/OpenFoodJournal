@@ -96,6 +96,10 @@ struct SettingsView: View {
                         Label("Source Code (AGPL-3.0)", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
 
+                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/blob/app-store/PRIVACY.md")!) {
+                        Label("Privacy Policy", systemImage: "hand.raised")
+                    }
+
                     Link(destination: URL(string: "https://www.gnu.org/licenses/agpl-3.0.html")!) {
                         Label("License", systemImage: "doc.text")
                     }
