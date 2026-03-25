@@ -18,9 +18,9 @@ struct SettingsView: View {
     /// Whether a valid API key is currently stored in Keychain.
     @State private var hasAPIKey: Bool = false
 
-    @State private var showExportSheet = false
-    @State private var csvContent: String = ""
     @State private var showOnboarding = false
+    /// Shown when the user tries to export but has logged no food yet.
+    @State private var showNoDataAlert = false
 
     var body: some View {
         NavigationStack {
@@ -112,10 +112,14 @@ struct SettingsView: View {
                 // MARK: Data
                 Section("Data") {
                     Button {
-                        csvContent = nutritionStore.exportCSV()
-                        showExportSheet = true
+                        presentCSVExport()
                     } label: {
                         Label("Export as CSV", systemImage: "square.and.arrow.up")
+                    }
+                    .alert("Nothing to export", isPresented: $showNoDataAlert) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text("Log some food first, then export your data.")
                     }
                 }
 
@@ -148,19 +152,38 @@ struct SettingsView: View {
                 hasAPIKey = KeychainService.hasGeminiAPIKey
             }
         }
-        .sheet(isPresented: $showExportSheet) {
-            if !csvContent.isEmpty {
-                ShareLink(
-                    item: csvContent,
-                    subject: Text("OpenFoodJournal Export"),
-                    message: Text("My food log exported from OpenFoodJournal.")
-                )
-                .presentationDetents([.medium])
-            }
-        }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
         }
+    }
+
+    // MARK: - CSV Export
+
+    /// Generates the CSV, writes it to a temp .csv file, and presents the
+    /// system share sheet in one tap — no intermediate sheet required.
+    /// The file gets the correct .csv extension so Numbers / Excel recognise it.
+    private func presentCSVExport() {
+        let csv = nutritionStore.exportCSV()
+        guard !csv.isEmpty else {
+            showNoDataAlert = true
+            return
+        }
+
+        // Write to a temp file so the share sheet knows the MIME type (.csv)
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("OpenFoodJournal-Export.csv")
+        guard let _ = try? csv.write(to: tmpURL, atomically: true, encoding: .utf8) else { return }
+
+        // Find the key window to present the UIKit share sheet from
+        guard let scene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene }).first,
+              let root = scene.keyWindow?.rootViewController else { return }
+
+        let activityVC = UIActivityViewController(
+            activityItems: [tmpURL],  // sharing a URL gives the file a name + extension
+            applicationActivities: nil
+        )
+        root.present(activityVC, animated: true)
     }
 }
 
