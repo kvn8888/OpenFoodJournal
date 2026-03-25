@@ -7,13 +7,13 @@ import SwiftData
 struct SettingsView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
-    @Environment(SyncService.self) private var syncService
     @Environment(UserGoals.self) private var goals
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage("retain.source.images") private var retainSourceImages: Bool = true
 
     @State private var showExportSheet = false
+    @State private var showMigrationSheet = false
     @State private var csvContent: String = ""
 
     var body: some View {
@@ -56,20 +56,6 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
-
-                    HStack {
-                        Label("Server Sync", systemImage: "arrow.triangle.2.circlepath")
-                        Spacer()
-                        if let lastSync = syncService.lastSyncDate {
-                            Text(lastSync, style: .relative)
-                                .foregroundStyle(.secondary)
-                            + Text(" ago")
-                                .foregroundStyle(.secondary)
-                        } else {
-                            Text("Never")
-                                .foregroundStyle(.secondary)
-                        }
-                    }
                 }
 
                 // MARK: Data
@@ -88,6 +74,12 @@ struct SettingsView: View {
                         showExportSheet = true
                     } label: {
                         Label("Export as CSV", systemImage: "square.and.arrow.up")
+                    }
+
+                    Button {
+                        showMigrationSheet = true
+                    } label: {
+                        Label("Import from Turso Server", systemImage: "arrow.down.circle")
                     }
                 }
 
@@ -121,6 +113,9 @@ struct SettingsView: View {
                 .presentationDetents([.medium])
             }
         }
+        .sheet(isPresented: $showMigrationSheet) {
+            TursoMigrationView()
+        }
     }
 }
 
@@ -128,6 +123,5 @@ struct SettingsView: View {
     SettingsView()
         .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
         .environment(HealthKitService())
-        .environment(SyncService())
         .environment(UserGoals())
 }

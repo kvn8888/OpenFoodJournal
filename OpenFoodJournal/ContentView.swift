@@ -6,7 +6,6 @@ import SwiftData
 
 struct ContentView: View {
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(SyncService.self) private var syncService
     @Environment(UserGoals.self) private var userGoals
 
     var body: some View {
@@ -25,27 +24,6 @@ struct ContentView: View {
             }
         }
         .tabBarMinimizeBehavior(.never)
-        // Pull from server on every launch. Uses incremental sync when possible
-        // (only fetches records changed since last sync), full fetch otherwise.
-        .task {
-            await pullFromServer()
-        }
-    }
-
-    private func pullFromServer() async {
-        do {
-            let response: SyncResponse
-            if let lastSync = syncService.lastSyncDate {
-                // Incremental sync — only records changed since last pull
-                response = try await syncService.fetchChanges(since: lastSync)
-            } else {
-                // First launch or no prior sync — pull everything
-                response = try await syncService.fetchAll()
-            }
-            nutritionStore.applySync(response, userGoals: userGoals)
-        } catch {
-            // Sync failure is non-fatal — local data still works
-        }
     }
 }
 

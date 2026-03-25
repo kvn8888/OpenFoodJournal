@@ -10,21 +10,22 @@ import SwiftData
 /// it's a reusable template that can be logged to any date/meal with one tap.
 @Model
 final class SavedFood {
-    var id: UUID
-    var name: String
+    // CloudKit requires all stored properties to have default values.
+    var id: UUID = UUID()
+    var name: String = ""
     var brand: String?             // Product brand, separate from name
-    var createdAt: Date
+    var createdAt: Date = Date()
 
     // Core macros — always required (same four as NutritionEntry)
-    var calories: Double
-    var protein: Double
-    var carbs: Double
-    var fat: Double
+    var calories: Double = 0
+    var protein: Double = 0
+    var carbs: Double = 0
+    var fat: Double = 0
 
     // Dynamic micronutrients — same flexible dictionary as NutritionEntry.
     // When a user saves a scanned label with "Vitamin A: 300 mcg",
     // that nutrient carries over to the saved food template.
-    var micronutrients: [String: MicronutrientValue]
+    var micronutrients: [String: MicronutrientValue] = [:]
 
     // Serving info
     var servingSize: String?               // Display label (backward compat)
@@ -36,18 +37,18 @@ final class SavedFood {
     // Legacy fields — kept for backward compat with old data
     var servingQuantity: Double?
     var servingUnit: String?
-    var servingMappings: [ServingMapping]
+    var servingMappings: [ServingMapping] = []
 
     // Optional photo from the original scan
     @Attribute(.externalStorage)
     var sourceImage: Data?
 
     // How this food was originally captured (label scan, food photo, or manual)
-    var originalScanMode: ScanMode
+    var originalScanMode: ScanMode = ScanMode.manual
 
     // Tracks when this food was last used (logged or saved).
     // Defaults to createdAt so newly saved foods surface to the top of "Last Used" sort.
-    var lastUsedAt: Date
+    var lastUsedAt: Date = Date()
 
     init(
         id: UUID = UUID(),

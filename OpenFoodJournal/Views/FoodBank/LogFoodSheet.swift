@@ -12,7 +12,6 @@ struct LogFoodSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(SyncService.self) private var syncService
     @Environment(UserGoals.self) private var goals
 
     // ── Input: the saved food to potentially log ──────────────────
@@ -408,12 +407,10 @@ struct LogFoodSheet: View {
         }
     }
 
-    /// Appends a new serving mapping to the food, saves to SwiftData, and syncs to Turso.
+    /// Appends a new serving mapping to the food and saves to SwiftData.
     private func addMapping(_ mapping: ServingMapping) {
         food.servingMappings.append(mapping)
         try? modelContext.save()
-        let sync = syncService
-        Task { try? await sync.updateFood(food) }
     }
 
     // MARK: - Helpers

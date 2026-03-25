@@ -11,7 +11,6 @@ struct EditFoodSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(SyncService.self) private var syncService
 
     // ── The food being edited (Bindable allows two-way binding to @Model properties)
     @Bindable var food: SavedFood
@@ -67,7 +66,6 @@ struct EditFoodSheet: View {
                     let foodId = food.id
                     modelContext.delete(food)
                     try? modelContext.save()
-                    Task { try? await syncService.deleteFood(id: foodId) }
                     dismiss()
                 }
             } message: {
@@ -122,9 +120,6 @@ struct EditFoodSheet: View {
             ? nil : servingSize.trimmingCharacters(in: .whitespaces)
 
         try? modelContext.save()
-
-        // Sync updated food to Turso
-        Task { try? await syncService.updateFood(food) }
     }
 }
 

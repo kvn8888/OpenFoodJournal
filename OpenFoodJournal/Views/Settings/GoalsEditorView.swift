@@ -5,7 +5,6 @@ import SwiftUI
 
 struct GoalsEditorView: View {
     @Environment(UserGoals.self) private var goals
-    @Environment(SyncService.self) private var syncService
     @Environment(\.dismiss) private var dismiss
 
     // Local state mirrors goals so changes are buffered until Save
@@ -44,16 +43,6 @@ struct GoalsEditorView: View {
                     goals.dailyProtein = protein
                     goals.dailyCarbs = carbs
                     goals.dailyFat = fat
-
-                    // Sync goals to Turso
-                    Task {
-                        try? await syncService.updateGoals(
-                            calories: calories,
-                            protein: protein,
-                            carbs: carbs,
-                            fat: fat
-                        )
-                    }
 
                     dismiss()
                 }

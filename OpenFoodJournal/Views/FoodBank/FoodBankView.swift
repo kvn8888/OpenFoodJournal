@@ -11,7 +11,6 @@ struct FoodBankView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(SyncService.self) private var syncService
 
     /// Date to log foods to (passed from DailyLogView when opened via radial menu)
     var logDate: Date = .now

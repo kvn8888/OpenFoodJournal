@@ -16,7 +16,6 @@ struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(SyncService.self) private var syncService
 
     let defaultDate: Date
 
@@ -209,7 +208,6 @@ struct ManualEntryView: View {
             let savedFood = SavedFood(from: entry)
             modelContext.insert(savedFood)
             try? modelContext.save()
-            Task { try? await syncService.createFood(savedFood) }
         }
 
         dismiss()

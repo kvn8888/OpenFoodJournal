@@ -22,7 +22,7 @@ extension ModelContainer {
 
         for entry in NutritionEntry.samples {
             context.insert(entry)
-            log.entries.append(entry)
+            log.entries?.append(entry)
         }
 
         // Seed food bank with one saved food
