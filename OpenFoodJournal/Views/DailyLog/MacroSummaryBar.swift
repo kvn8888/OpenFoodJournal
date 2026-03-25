@@ -100,9 +100,15 @@ struct MacroSummaryBar: View {
 
             // Ring row: all 5 configurable slots
             GlassEffectContainer(spacing: 12) {
-                HStack(alignment: .top, spacing: 8) {  // 8pt keeps 5×56pt rings within any context
-                    ForEach(1...5, id: \.self) { index in
-                        slotView(slotID: slotIDs[index - 1], slotIndex: index)
+                // Spacer(minLength: 8) between each ring instead of fixed spacing
+                // so they distribute evenly across whatever width is available —
+                // works on iPhone SE, Pro Max, and everything in between.
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(0..<5, id: \.self) { slotIdx in
+                        if slotIdx > 0 {
+                            Spacer(minLength: 8)
+                        }
+                        slotView(slotID: slotIDs[slotIdx], slotIndex: slotIdx + 1)
                     }
                 }
                 .padding(.horizontal, 4)
