@@ -102,7 +102,9 @@ final class HealthKitService {
             try await store.save(samples)
         } catch {
             // Non-fatal — HealthKit write failure doesn't block core app function
+            #if DEBUG
             print("[HealthKitService] Write failed: \(error)")
+            #endif
         }
     }
 
