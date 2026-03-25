@@ -23,8 +23,12 @@ When you use the scan feature, the App captures photos of food items or nutritio
 You provide your own Google Gemini API key to enable scanning. Your API key is stored securely in the iOS Keychain on your device — it is never transmitted to us or any third party other than Google.
 
 ### Health Data (Apple HealthKit)
-If you opt in, the App writes nutritional data (calories, protein, carbs, fat) to Apple Health. We:
-- **Never read HealthKit data** beyond what is needed for display
+If you opt in, the App:
+- **Writes** nutritional data (calories, protein, carbs, fat) to Apple Health
+- **Reads** active energy burned (`HKQuantityTypeIdentifierActiveEnergyBurned`) to calculate your net calorie balance for the day
+
+We:
+- **Never read any other HealthKit data** — only the active energy type listed above
 - **Never send HealthKit data to any server**
 - **Never use HealthKit data for advertising or marketing**
 - **Never share HealthKit data with third parties**

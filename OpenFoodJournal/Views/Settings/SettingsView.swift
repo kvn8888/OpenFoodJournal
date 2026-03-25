@@ -1,4 +1,4 @@
-// Macros — Food Journaling App
+// OpenFoodJournal — Food Journaling App
 // AGPL-3.0 License
 
 import SwiftUI
@@ -138,12 +138,8 @@ struct SettingsView: View {
                         Label("Source Code (AGPL-3.0)", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
 
-                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/blob/app-store/PRIVACY.md")!) {
+                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/blob/main/PRIVACY.md")!) {
                         Label("Privacy Policy", systemImage: "hand.raised")
-                    }
-
-                    Link(destination: URL(string: "https://www.gnu.org/licenses/agpl-3.0.html")!) {
-                        Label("License", systemImage: "doc.text")
                     }
                 }
             }
@@ -156,8 +152,8 @@ struct SettingsView: View {
             if !csvContent.isEmpty {
                 ShareLink(
                     item: csvContent,
-                    subject: Text("Macros Journal Export"),
-                    message: Text("My food log exported from Macros.")
+                    subject: Text("OpenFoodJournal Export"),
+                    message: Text("My food log exported from OpenFoodJournal.")
                 )
                 .presentationDetents([.medium])
             }
