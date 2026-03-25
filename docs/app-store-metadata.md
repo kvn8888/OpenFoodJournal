@@ -175,34 +175,34 @@ Apple allows up to 3 custom product pages (App Store Connect → App Store → P
 **Headline:** `Scan Labels. Track Macros. Own Your Data.`
 
 **Screenshot captions (in order):**
-1. `AI reads your nutrition labels instantly`
-2. `Track calories, protein, carbs, and fat daily`
-3. `Save favorites to your Food Bank`
-4. `Press and drag for quick actions`
-5. `30+ micronutrients tracked automatically`
-6. `Sync seamlessly across all your devices`
+1. `Scan any label. Get instant macros.`
+2. `Daily tracking at a glance.`
+3. `Your Food Bank. One-tap logging.`
+4. `Press, drag, done. Quick actions.`
+5. `30+ nutrients from one photo.`
+6. `Syncs everywhere via iCloud.`
 
 ### Custom Product Page A — Privacy Focus
 
 **Headline:** `No Account. No Ads. No Tracking. Just Nutrition.`
 
 **Screenshot captions:**
-1. `Your API key, your data — nothing leaves your device`
-2. `Open source — verify every line of code`
-3. `iCloud sync, zero accounts to create`
-4. `AI-powered scanning with Gemini`
-5. `Track 30+ nutrients from a single photo`
+1. `Your key. Your data. Your privacy.`
+2. `Open source. Verify every line.`
+3. `No account. Just iCloud.`
+4. `AI scanning you control.`
+5. `Every vitamin. Every mineral.`
 
 ### Custom Product Page B — AI Focus
 
 **Headline:** `AI-Powered Nutrition in Seconds`
 
 **Screenshot captions:**
-1. `Scan any nutrition label with your camera`
-2. `Photograph food — AI estimates the macros`
-3. `Powered by Google Gemini, controlled by you`
-4. `Track calories, protein, and 30+ nutrients`
-5. `Build your personal Food Bank for one-tap logging`
+1. `Point your camera. Done.`
+2. `Photo your food. AI does the rest.`
+3. `Powered by Gemini. Controlled by you.`
+4. `Calories, protein, and 30+ nutrients.`
+5. `Save favorites for one-tap logging.`
 
 ---
 
