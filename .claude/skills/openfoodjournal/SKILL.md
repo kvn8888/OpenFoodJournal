@@ -109,7 +109,7 @@ iOS App (SwiftData + CloudKit)
 
 **Entitlements**: `OpenFoodJournal.entitlements` includes iCloud (CloudKit), Push Notifications (aps-environment), background mode (remote-notification).
 
-**Data migration**: `TursoMigrationView` in Settings provides one-time import from old Turso server. Fetches `/api/sync`, inserts into local SwiftData (CloudKit picks up automatically).
+**Data migration**: TursoMigrationView was deleted — CloudKit replaced Turso and the migration tool is dead code. All data now syncs via CloudKit Private Database automatically.
 
 **Server**: Express.js on Render — exists in repo for `main` branch usage but is NOT used by the `app-store` branch at all. The iOS app calls Gemini REST API directly (BYOK). No server dependency.
 
@@ -204,11 +204,13 @@ Already configured in `OpenFoodJournal.entitlements`:
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
 - WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values
-- TursoMigrationView: one-time data import from old Turso server (in Settings)
 - Entitlements configured: iCloud (CloudKit), Push Notifications, Camera, HealthKit descriptions
 - BYOK Gemini integration: direct REST API calls, no server proxy needed
 - KeychainService for secure API key storage
-- Onboarding flow: 5 pages (Welcome → API Key → Goals → Camera → HealthKit)
-- Settings: API key management section (save/delete/change key)
+- Onboarding flow: 6 pages (Welcome → API Key → Goals → Camera → Radial Menu Tutorial → HealthKit)
+- RadialMenuDemo: pure SwiftUI phase-based animation teaching press-and-drag gesture (in onboarding page 4)
+- Settings: API key management section (save/delete/change key), "Show Onboarding" replay button
 - App Store audit complete: HealthKit entitlement, Privacy Policy, PrivacyInfo.xcprivacy, AGPL→MIT licensing
+- sourceImage removed from NutritionEntry and SavedFood (was stored but never displayed)
+- TursoMigrationView deleted — CloudKit replaced Turso, migration tool is dead code
 - No unit tests beyond Xcode template stubs
