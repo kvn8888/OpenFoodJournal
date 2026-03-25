@@ -120,6 +120,13 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
+            // App Store 5.1.2(i) disclosure: clearly state what data goes to Google
+            Text("When you scan food, your photo is sent to Google's Gemini API for analysis. No other personal data is shared.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
             if apiKeySaved {
                 Label("API key saved", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)

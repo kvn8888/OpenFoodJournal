@@ -39,10 +39,6 @@ final class SavedFood {
     var servingUnit: String?
     var servingMappings: [ServingMapping] = []
 
-    // Optional photo from the original scan
-    @Attribute(.externalStorage)
-    var sourceImage: Data?
-
     // How this food was originally captured (label scan, food photo, or manual)
     var originalScanMode: ScanMode = ScanMode.manual
 
@@ -66,7 +62,6 @@ final class SavedFood {
         servingQuantity: Double? = nil,
         servingUnit: String? = nil,
         servingMappings: [ServingMapping] = [],
-        sourceImage: Data? = nil,
         originalScanMode: ScanMode = .manual
     ) {
         self.id = id
@@ -84,7 +79,6 @@ final class SavedFood {
         self.servingQuantity = servingQuantity
         self.servingUnit = servingUnit
         self.servingMappings = servingMappings
-        self.sourceImage = sourceImage
         self.originalScanMode = originalScanMode
         self.lastUsedAt = createdAt  // New foods count as "just used" for sort ordering
     }
@@ -110,7 +104,6 @@ extension SavedFood {
             servingQuantity: entry.servingQuantity,
             servingUnit: entry.servingUnit,
             servingMappings: entry.servingMappings,
-            sourceImage: entry.sourceImage,
             originalScanMode: entry.scanMode
         )
     }
@@ -122,7 +115,6 @@ extension SavedFood {
             name: name,
             mealType: mealType,
             scanMode: originalScanMode,
-            sourceImage: sourceImage,
             calories: calories,
             protein: protein,
             carbs: carbs,

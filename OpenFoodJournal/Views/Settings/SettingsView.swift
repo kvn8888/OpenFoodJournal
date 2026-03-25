@@ -10,7 +10,6 @@ struct SettingsView: View {
     @Environment(UserGoals.self) private var goals
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
-    @AppStorage("retain.source.images") private var retainSourceImages: Bool = true
 
     /// The text field value for the API key — loaded from Keychain on appear.
     @State private var apiKeyInput: String = ""
@@ -20,7 +19,6 @@ struct SettingsView: View {
     @State private var hasAPIKey: Bool = false
 
     @State private var showExportSheet = false
-    @State private var showMigrationSheet = false
     @State private var csvContent: String = ""
 
     var body: some View {
@@ -112,26 +110,11 @@ struct SettingsView: View {
 
                 // MARK: Data
                 Section("Data") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Toggle(isOn: $retainSourceImages) {
-                            Label("Keep original scan photos", systemImage: "photo.on.rectangle")
-                        }
-                        Text("Stores the camera image on each scanned entry. Disabling saves storage but you won't be able to review the original label.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
                     Button {
                         csvContent = nutritionStore.exportCSV()
                         showExportSheet = true
                     } label: {
                         Label("Export as CSV", systemImage: "square.and.arrow.up")
-                    }
-
-                    Button {
-                        showMigrationSheet = true
-                    } label: {
-                        Label("Import from Turso Server", systemImage: "arrow.down.circle")
                     }
                 }
 
@@ -171,9 +154,6 @@ struct SettingsView: View {
                 )
                 .presentationDetents([.medium])
             }
-        }
-        .sheet(isPresented: $showMigrationSheet) {
-            TursoMigrationView()
         }
     }
 }

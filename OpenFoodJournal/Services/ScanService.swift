@@ -342,7 +342,7 @@ final class ScanService {
         print("   ├─ Gemini API round-trip: \(abs(networkMs))ms")
         print("   └─ Client decode: \(abs(decodeMs))ms")
 
-        var entry = nutritionData.toNutritionEntry(mode: mode, imageData: jpegData)
+        var entry = nutritionData.toNutritionEntry(mode: mode)
         entry.scanDurationMs = totalMs
         return entry
     }
@@ -577,7 +577,7 @@ extension ScanService {
 }
 
 private extension GeminiNutritionResponse {
-    func toNutritionEntry(mode: ScanMode, imageData: Data) -> NutritionEntry {
+    func toNutritionEntry(mode: ScanMode) -> NutritionEntry {
         // Build serving mappings if Gemini returned both a unit and gram weight
         // e.g. serving_unit = "cup", serving_weight_grams = 228
         // → mapping: { 1 cup = 228 g }
@@ -635,7 +635,6 @@ private extension GeminiNutritionResponse {
             mealType: .snack, // user selects meal type before confirming
             scanMode: mode,
             confidence: confidence,
-            sourceImage: imageData,
             calories: calories,
             protein: protein,
             carbs: carbs,

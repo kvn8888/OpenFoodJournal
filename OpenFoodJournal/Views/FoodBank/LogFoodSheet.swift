@@ -364,7 +364,7 @@ struct LogFoodSheet: View {
     // MARK: - Serving Mappings
 
     /// Shows the food's custom unit conversion mappings and lets the user add new ones.
-    /// New mappings (e.g. "1 cup = 244g") are saved to SwiftData and synced to Turso,
+    /// New mappings (e.g. "1 cup = 244g") are saved to SwiftData,
     /// and immediately appear in the unit picker above.
     private var servingMappingsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
