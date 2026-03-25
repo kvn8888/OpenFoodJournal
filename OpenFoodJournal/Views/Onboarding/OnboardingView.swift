@@ -267,24 +267,30 @@ struct OnboardingView: View {
                 Label("Camera access granted", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.headline)
-            } else {
-                Button {
-                    requestCameraAccess()
-                } label: {
-                    Text("Allow Camera Access")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.accentColor)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                }
-                .padding(.horizontal, 32)
             }
 
             Spacer()
 
-            nextButton
+            // Apple 5.1.1(iv): Button must say "Continue" or "Next", not "Allow".
+            // Tapping triggers the system permission dialog, then auto-advances.
+            // No separate "Next/Skip" button — user must go through the dialog.
+            Button {
+                if cameraGranted {
+                    withAnimation { currentPage += 1 }
+                } else {
+                    requestCameraAccess()
+                }
+            } label: {
+                Text(cameraGranted ? "Next" : "Continue")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.accentColor)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 32)
         }
         .padding()
         .onAppear {
@@ -334,21 +340,23 @@ struct OnboardingView: View {
             Text("Apple Health")
                 .font(.largeTitle.bold())
 
-            Text("Optionally write your nutrition data to Apple Health for a complete picture of your wellness.")
+            Text("Optionally sync your nutrition data with Apple Health for a complete picture of your wellness.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             Toggle(isOn: $healthKitEnabled) {
-                Label("Write to Apple Health", systemImage: "heart.circle")
+                Label("Sync with Apple Health", systemImage: "heart.circle")
                     .font(.headline)
             }
             .padding(.horizontal, 32)
 
             Spacer()
 
-            // Finish button instead of next
+            // Apple 5.1.1(iv): Use "Get Started" to proceed.
+            // HealthKit authorization is triggered during completeOnboarding()
+            // only when the user has opted in via the toggle.
             Button {
                 completeOnboarding()
             } label: {
@@ -423,11 +431,13 @@ struct OnboardingView: View {
 
     // MARK: - Actions
 
-    /// Request camera permission via the system prompt
+    /// Request camera permission via the system prompt, then auto-advance
     private func requestCameraAccess() {
         AVCaptureDevice.requestAccess(for: .video) { granted in
             Task { @MainActor in
                 cameraGranted = granted
+                // Auto-advance after the system dialog resolves (granted or denied)
+                withAnimation { currentPage += 1 }
             }
         }
     }
