@@ -123,8 +123,10 @@ struct RadialMenuDemo: View {
                 // Rotate 45° when open (becomes an "×" like the real button)
                 .rotationEffect(.degrees(showOptions ? 45 : 0))
         }
-        // Subtle scale-down on "press"
-        .scaleEffect(phase == .pressing ? 0.9 : 1.0)
+        // Subtle scale-down while finger is pressed (same duration as the real button)
+        .scaleEffect(fingerIsPressed ? 0.9 : 1.0)
+        // Follow the finger slightly during drag (mimics translation * 0.15)
+        .offset(x: plusButtonFollowOffset.x, y: plusButtonFollowOffset.y)
     }
 
     // MARK: - Option Circle
@@ -165,8 +167,8 @@ struct RadialMenuDemo: View {
             .shadow(color: .black.opacity(0.2), radius: 4, y: 2)
             .offset(x: fingerOffset.x, y: fingerOffset.y)
             .opacity(fingerOpacity)
-            // Slight scale pulse on "press"
-            .scaleEffect(phase == .pressing ? 0.85 : 1.0)
+            // Stay "pressed" (scaled down) for the entire press-through-drag sequence
+            .scaleEffect(fingerIsPressed ? 0.85 : 1.0)
     }
 
     // MARK: - Computed Properties
@@ -182,6 +184,30 @@ struct RadialMenuDemo: View {
     /// Whether we're in a phase where the target should highlight.
     private var isHighlightPhase: Bool {
         phase == .highlighted
+    }
+
+    /// Whether the finger should appear "pressed down" — stays pressed
+    /// from the initial press through the entire drag until release.
+    private var fingerIsPressed: Bool {
+        switch phase {
+        case .pressing, .menuOpen, .dragging, .highlighted: return true
+        default: return false
+        }
+    }
+
+    /// How much the plus button should follow the finger during drag.
+    /// Mimics the real RadialMenuButton's `translation * 0.15` effect.
+    private var plusButtonFollowOffset: CGPoint {
+        switch phase {
+        case .dragging:
+            let targetPos = positionForAngle(angleForIndex(targetIndex))
+            return CGPoint(x: targetPos.x * 0.5 * 0.15, y: targetPos.y * 0.5 * 0.15)
+        case .highlighted:
+            let targetPos = positionForAngle(angleForIndex(targetIndex))
+            return CGPoint(x: targetPos.x * 0.15, y: targetPos.y * 0.15)
+        default:
+            return .zero
+        }
     }
 
     /// The finger's position at each phase of the animation.
