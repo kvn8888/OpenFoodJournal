@@ -17,7 +17,7 @@ This is the single source of truth for any LLM agent working on this project. Re
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle ID | `k3vnc.OpenFoodJournal` |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
-| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini scan proxy only) |
+| AI Backend | Direct Gemini REST API (BYOK — user provides own API key, stored in Keychain) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
 ## Architecture Overview
@@ -58,7 +58,8 @@ See [references/models.md](references/models.md) for full property lists.
 See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `saveEntry()`, `exportCSV()`. Pure local operations — CloudKit sync is handled automatically by SwiftData's `ModelConfiguration(cloudKitDatabase:)`. No sync service reference, no fire-and-forget Tasks.
-- **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
+- **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before direct Gemini REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `GeminiModelConfig` static configs: `.labelScan` (gemini-3.1-flash-lite-preview, MINIMAL thinking) and `.foodPhotoScan` (gemini-3.1-pro-preview, HIGH thinking). Includes automatic fallback to gemini-2.5-flash/pro on 500/503 errors. Loads API key from `KeychainService`. User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
+- **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
 - **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
@@ -72,10 +73,14 @@ See [references/views.md](references/views.md) for detailed view hierarchy and n
 ```
 User taps Scan → CameraController (AVCaptureSession) → JPEG
   → Prompt overlay: food photo shows text input, label scan skips prompt
-  → ScanService.scan(image, mode) → multipart POST to /scan
+  → ScanService.scan(image, mode) → loads API key from KeychainService
+  → Builds JSON request with base64-encoded image + prompt
+  → POST to https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}
   → ContinuousClock measures full round-trip duration
-  → Label mode: Gemini 3.1 Flash Lite (fast, low-latency OCR extraction)
-  → Food photo mode: Gemini 3.1 Pro w/ thinkingLevel:HIGH (high reasoning)
+  → Label mode: gemini-3.1-flash-lite-preview (fast, MINIMAL thinking)
+  → Food photo mode: gemini-3.1-pro-preview (HIGH thinking for estimation)
+  → Fallback on 500/503: gemini-2.5-flash (labels) / gemini-2.5-pro (food photos)
+  → Parses last text part (skips thinking parts) → JSON → GeminiNutritionResponse
   → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
   → Entry gets scanDurationMs set from ContinuousClock measurement
   → ScanResultCard (editable, shows duration badge) → User taps "Add to Journal"
@@ -90,7 +95,8 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
 iOS App (SwiftData + CloudKit)
   ←→ iCloud Private Database (automatic, free, multi-device)
 
-  → ScanService → Express Proxy (server/index.js) → Gemini AI (scan-only, stateless)
+  → ScanService → Direct Gemini REST API (BYOK, zero server dependency)
+  → API key stored in iOS Keychain via KeychainService
 ```
 
 **Strategy**: SwiftData's `ModelConfiguration(cloudKitDatabase: .private("iCloud.k3vnc.OpenFoodJournal"))` handles all sync automatically. No sync code in the iOS app. Zero server maintenance for data operations.
@@ -105,7 +111,7 @@ iOS App (SwiftData + CloudKit)
 
 **Data migration**: `TursoMigrationView` in Settings provides one-time import from old Turso server. Fetches `/api/sync`, inserts into local SwiftData (CloudKit picks up automatically).
 
-**Server**: Express.js on Render — only `/scan` endpoint (Gemini proxy) is used by the iOS app. `/api/*` Turso CRUD routes still exist on server for `main` branch usage but are not called from the `app-store` branch.
+**Server**: Express.js on Render — exists in repo for `main` branch usage but is NOT used by the `app-store` branch at all. The iOS app calls Gemini REST API directly (BYOK). No server dependency.
 
 **Turso migration pattern** (`server/db.js`): Use `PRAGMA table_info(table_name)` to check existing columns before running `ALTER TABLE ... ADD COLUMN`. Idempotent on re-deploy. Example:
 ```javascript
@@ -200,6 +206,9 @@ Already configured in `OpenFoodJournal.entitlements`:
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values
 - TursoMigrationView: one-time data import from old Turso server (in Settings)
 - Entitlements configured: iCloud (CloudKit), Push Notifications, Camera, HealthKit descriptions
-- **App Store blockers**: Missing HealthKit entitlement, no Privacy Policy, no PrivacyInfo.xcprivacy, AGPL licensing conflict
-- **Nice-to-haves**: Onboarding flow, retry logic for scans, hide Turso migration for public release
+- BYOK Gemini integration: direct REST API calls, no server proxy needed
+- KeychainService for secure API key storage
+- Onboarding flow: 5 pages (Welcome → API Key → Goals → Camera → HealthKit)
+- Settings: API key management section (save/delete/change key)
+- App Store audit complete: HealthKit entitlement, Privacy Policy, PrivacyInfo.xcprivacy, AGPL→MIT licensing
 - No unit tests beyond Xcode template stubs
