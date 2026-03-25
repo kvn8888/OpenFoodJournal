@@ -31,8 +31,12 @@ struct OnboardingView: View {
     @State private var cameraGranted = false
     @State private var healthKitEnabled = false
 
+    // API key input during onboarding
+    @State private var onboardingAPIKey: String = ""
+    @State private var apiKeySaved = false
+
     // Total number of onboarding pages
-    private let pageCount = 4
+    private let pageCount = 5
 
     var body: some View {
         TabView(selection: $currentPage) {
@@ -40,17 +44,21 @@ struct OnboardingView: View {
             welcomePage
                 .tag(0)
 
-            // Page 1: Set macro goals
-            goalsPage
+            // Page 1: Gemini API Key
+            apiKeyPage
                 .tag(1)
 
-            // Page 2: Camera permission
-            cameraPage
+            // Page 2: Set macro goals
+            goalsPage
                 .tag(2)
 
-            // Page 3: HealthKit + finish
-            healthKitPage
+            // Page 3: Camera permission
+            cameraPage
                 .tag(3)
+
+            // Page 4: HealthKit + finish
+            healthKitPage
+                .tag(4)
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
@@ -91,7 +99,81 @@ struct OnboardingView: View {
         .padding()
     }
 
-    // MARK: - Page 1: Goals
+    // MARK: - Page 1: Gemini API Key
+
+    /// Prompts the user to enter their Gemini API key.
+    /// This is required for food scanning — without it, the app can't analyze images.
+    private var apiKeyPage: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Image(systemName: "key.fill")
+                .font(.system(size: 60))
+                .foregroundStyle(Color.accentColor)
+
+            Text("Gemini API Key")
+                .font(.largeTitle.bold())
+
+            Text("OpenFoodJournal uses Google's Gemini AI to analyze food photos and nutrition labels. You'll need a free API key.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            if apiKeySaved {
+                Label("API key saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.headline)
+            } else {
+                VStack(spacing: 12) {
+                    // Link to get an API key
+                    Link(destination: URL(string: "https://aistudio.google.com/apikey")!) {
+                        Label("Get a free API key", systemImage: "safari")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.accentColor.opacity(0.15))
+                            .foregroundStyle(Color.accentColor)
+                            .clipShape(RoundedRectangle(cornerRadius: 14))
+                    }
+                    .padding(.horizontal, 32)
+
+                    // API key text field
+                    HStack {
+                        SecureField("Paste your API key here", text: $onboardingAPIKey)
+                            .textContentType(.password)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .padding()
+                            .background(Color(.systemGray6))
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                        if !onboardingAPIKey.isEmpty {
+                            Button("Save") {
+                                let trimmed = onboardingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !trimmed.isEmpty else { return }
+                                KeychainService.save(trimmed, for: KeychainService.geminiAPIKeyAccount)
+                                apiKeySaved = true
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                    }
+                    .padding(.horizontal, 32)
+                }
+            }
+
+            Spacer()
+
+            nextButton
+        }
+        .padding()
+        .onAppear {
+            // Check if key was already saved (e.g. from a previous partial onboarding)
+            apiKeySaved = KeychainService.hasGeminiAPIKey
+        }
+    }
+
+    // MARK: - Page 2: Goals
 
     private var goalsPage: some View {
         VStack(spacing: 24) {
@@ -124,7 +206,7 @@ struct OnboardingView: View {
         .padding()
     }
 
-    // MARK: - Page 2: Camera
+    // MARK: - Page 3: Camera
 
     private var cameraPage: some View {
         VStack(spacing: 32) {
@@ -173,7 +255,7 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Page 3: HealthKit + Finish
+    // MARK: - Page 4: HealthKit + Finish
 
     private var healthKitPage: some View {
         VStack(spacing: 32) {

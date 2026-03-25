@@ -12,6 +12,13 @@ struct SettingsView: View {
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage("retain.source.images") private var retainSourceImages: Bool = true
 
+    /// The text field value for the API key — loaded from Keychain on appear.
+    @State private var apiKeyInput: String = ""
+    /// Whether the saved key is currently masked (showing dots instead of the key).
+    @State private var isKeyMasked: Bool = true
+    /// Whether a valid API key is currently stored in Keychain.
+    @State private var hasAPIKey: Bool = false
+
     @State private var showExportSheet = false
     @State private var showMigrationSheet = false
     @State private var csvContent: String = ""
@@ -37,6 +44,51 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                     }
+                }
+
+                // MARK: Gemini API Key
+                Section {
+                    if hasAPIKey && apiKeyInput.isEmpty {
+                        // Key is saved — show masked or reveal toggle
+                        HStack {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                            Text("API key saved")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Remove") {
+                                KeychainService.delete(for: KeychainService.geminiAPIKeyAccount)
+                                hasAPIKey = false
+                                apiKeyInput = ""
+                            }
+                            .foregroundStyle(.red)
+                            .font(.subheadline)
+                        }
+                    } else {
+                        // No key or user is editing — show text field
+                        HStack {
+                            SecureField("Paste your Gemini API key", text: $apiKeyInput)
+                                .textContentType(.password)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+
+                            if !apiKeyInput.isEmpty {
+                                Button("Save") {
+                                    let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !trimmed.isEmpty else { return }
+                                    KeychainService.save(trimmed, for: KeychainService.geminiAPIKeyAccount)
+                                    hasAPIKey = true
+                                    apiKeyInput = ""  // Clear the field to show "saved" state
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .font(.subheadline)
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Gemini API Key")
+                } footer: {
+                    Text("Required for food scanning. Get a free key at [aistudio.google.com](https://aistudio.google.com/apikey)")
                 }
 
                 // MARK: Integrations
@@ -106,6 +158,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .onAppear {
+                hasAPIKey = KeychainService.hasGeminiAPIKey
+            }
         }
         .sheet(isPresented: $showExportSheet) {
             if !csvContent.isEmpty {
