@@ -36,7 +36,7 @@ struct OnboardingView: View {
     @State private var apiKeySaved = false
 
     // Total number of onboarding pages
-    private let pageCount = 5
+    private let pageCount = 6
 
     var body: some View {
         TabView(selection: $currentPage) {
@@ -56,9 +56,13 @@ struct OnboardingView: View {
             cameraPage
                 .tag(3)
 
-            // Page 4: HealthKit + finish
-            healthKitPage
+            // Page 4: How to use the radial menu
+            radialMenuTutorialPage
                 .tag(4)
+
+            // Page 5: HealthKit + finish
+            healthKitPage
+                .tag(5)
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
@@ -262,7 +266,35 @@ struct OnboardingView: View {
         }
     }
 
-    // MARK: - Page 4: HealthKit + Finish
+    // MARK: - Page 4: Radial Menu Tutorial
+
+    /// Teaches the press-and-drag gesture for the floating "+" button.
+    /// Shows a looping animation of a finger pressing and dragging to the Scan option.
+    private var radialMenuTutorialPage: some View {
+        VStack(spacing: 24) {
+            Spacer()
+
+            Text("Quick Actions")
+                .font(.largeTitle.bold())
+
+            Text("Press and drag the + button to quickly select an action. Or just tap it to see your options.")
+                .font(.body)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+
+            // The animated demo of the radial menu gesture
+            RadialMenuDemo()
+                .frame(height: 260)
+
+            Spacer()
+
+            nextButton
+        }
+        .padding()
+    }
+
+    // MARK: - Page 5: HealthKit + Finish
 
     private var healthKitPage: some View {
         VStack(spacing: 32) {
