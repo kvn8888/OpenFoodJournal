@@ -14,6 +14,7 @@ import AVFoundation
 struct OnboardingView: View {
     @Environment(UserGoals.self) private var userGoals
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(\.dismiss) private var dismiss
 
     // Persists across launches — once set to true, onboarding is skipped
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
@@ -423,5 +424,8 @@ struct OnboardingView: View {
         withAnimation {
             hasCompletedOnboarding = true
         }
+
+        // Also dismiss the view (needed when opened from Settings as a sheet/fullScreenCover)
+        dismiss()
     }
 }
