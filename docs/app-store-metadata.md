@@ -135,6 +135,97 @@ The app writes to Apple HealthKit (calories, protein, carbs, fat) only when the 
 
 ---
 
+## Promotional Text (170 chars max, editable anytime — no review needed)
+
+```
+Scan any nutrition label or food photo with AI. Free, open-source, no account required. Your API key, your data, your privacy. Sync across devices with iCloud.
+```
+
+(160 chars)
+
+**Seasonal alternatives:**
+- New Year: `Start 2026 right — scan your meals, track your macros, own your data. Free AI-powered nutrition tracking with no subscriptions or accounts.`
+- Feature launch: `NEW: Press-and-drag quick actions! Scan labels, log food, and track macros faster than ever. Free, open-source, no account needed.`
+
+---
+
+## What's New (version 1.0)
+
+```
+Welcome to OpenFoodJournal! 🎉
+
+• AI-powered nutrition scanning — point your camera at a label or food photo
+• 30+ micronutrients tracked automatically
+• Personal Food Bank — save and re-log your favorite foods
+• Container tracking — weigh your food for precise logging
+• iCloud sync across all your devices
+• Apple Health integration
+• Interactive nutrition history charts
+• Bring Your Own Key — you control your AI, your data, your privacy
+```
+
+---
+
+## App Store Product Page Headlines
+
+Apple allows up to 3 custom product pages (App Store Connect → App Store → Product Page Optimization). Each needs a headline and screenshot set.
+
+### Default Product Page
+
+**Headline:** `Scan Labels. Track Macros. Own Your Data.`
+
+**Screenshot captions (in order):**
+1. `AI reads your nutrition labels instantly`
+2. `Track calories, protein, carbs, and fat daily`
+3. `Save favorites to your Food Bank`
+4. `Press and drag for quick actions`
+5. `30+ micronutrients tracked automatically`
+6. `Sync seamlessly across all your devices`
+
+### Custom Product Page A — Privacy Focus
+
+**Headline:** `No Account. No Ads. No Tracking. Just Nutrition.`
+
+**Screenshot captions:**
+1. `Your API key, your data — nothing leaves your device`
+2. `Open source — verify every line of code`
+3. `iCloud sync, zero accounts to create`
+4. `AI-powered scanning with Gemini`
+5. `Track 30+ nutrients from a single photo`
+
+### Custom Product Page B — AI Focus
+
+**Headline:** `AI-Powered Nutrition in Seconds`
+
+**Screenshot captions:**
+1. `Scan any nutrition label with your camera`
+2. `Photograph food — AI estimates the macros`
+3. `Powered by Google Gemini, controlled by you`
+4. `Track calories, protein, and 30+ nutrients`
+5. `Build your personal Food Bank for one-tap logging`
+
+---
+
+## Screenshot Strategy
+
+Apple requires screenshots for each device size. Focus on iPhone 6.7" (iPhone 15 Pro Max) — smaller sizes auto-generate.
+
+**Priority order for screenshots:**
+1. **Scan in action** — camera pointed at a nutrition label with the ScanResultCard showing parsed macros
+2. **Daily journal** — DailyLogView with macro rings filled, a few meal entries visible
+3. **Food Bank** — list of saved foods with serving info
+4. **Radial menu** — the + button with options fanned out (or the onboarding animation)
+5. **Nutrition detail** — NutrientBreakdownView showing all 30+ micronutrients
+6. **History chart** — MacroChartView with a week of data
+
+**Tips:**
+- Use populated data (not empty states)
+- Show the Liquid Glass UI — it's visually distinctive
+- Dark mode screenshots can differentiate you in search results
+- Captions should be benefit-focused, not feature-focused ("Track your progress" not "Macro ring chart")
+
+---
+
 ## Privacy Policy URL
 
 ```
