@@ -40,21 +40,32 @@ struct MacrosApp: App {
         _ = Preferences.current(in: container.mainContext)
     }
 
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .cursorAtEnd()
-                .modelContainer(modelContainer)
-                .environment(nutritionStore)
-                .environment(scanService)
-                .environment(healthKitService)
-                .environment(userGoals)
-                .task {
-                    // Request HealthKit auth on first launch if user has previously enabled it
-                    if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
-                        await healthKitService.requestAuthorization()
+            if hasCompletedOnboarding {
+                ContentView()
+                    .cursorAtEnd()
+                    .modelContainer(modelContainer)
+                    .environment(nutritionStore)
+                    .environment(scanService)
+                    .environment(healthKitService)
+                    .environment(userGoals)
+                    .task {
+                        // Request HealthKit auth on first launch if user has previously enabled it
+                        if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
+                            await healthKitService.requestAuthorization()
+                        }
                     }
-                }
+            } else {
+                OnboardingView()
+                    .modelContainer(modelContainer)
+                    .environment(nutritionStore)
+                    .environment(scanService)
+                    .environment(healthKitService)
+                    .environment(userGoals)
+            }
         }
     }
 }
