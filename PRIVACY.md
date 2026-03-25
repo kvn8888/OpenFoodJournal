@@ -16,9 +16,11 @@ This data is stored locally on your device using SwiftData and synced across you
 
 ### Camera Images
 When you use the scan feature, the App captures photos of food items or nutrition labels. These images are:
-- Sent to our proxy server for processing by **Google Gemini AI** to extract nutritional information
-- **Not stored on our servers** — images are held in memory only during processing and discarded immediately after
-- Optionally stored locally on your device (configurable in Settings)
+- Sent directly from your device to **Google's Gemini AI** via HTTPS to extract nutritional information
+- **Not stored on any server** — Google processes the image and returns structured nutrition data
+- **Not stored on your device** after processing is complete
+
+You provide your own Google Gemini API key to enable scanning. Your API key is stored securely in the iOS Keychain on your device — it is never transmitted to us or any third party other than Google.
 
 ### Health Data (Apple HealthKit)
 If you opt in, the App writes nutritional data (calories, protein, carbs, fat) to Apple Health. We:
@@ -34,14 +36,15 @@ Your daily calorie and macro goals, and UI preferences (e.g., ring display confi
 
 ## Data Processing
 
-### Gemini AI Scan Proxy
-When you scan a food item, the image is sent via HTTPS to our proxy server hosted on Render (`openfoodjournal.onrender.com`), which forwards it to Google's Gemini AI for nutritional analysis. The proxy server:
-- Does **not** store images or scan results
-- Does **not** log personally identifiable information
-- Processes images in memory only
-- Returns the AI-generated nutritional data to your device
+### Google Gemini AI (Direct API)
+When you scan a food item, the image is sent directly from your device via HTTPS to **Google's Gemini AI** (`generativelanguage.googleapis.com`) for nutritional analysis. There is no intermediary server — your device communicates with Google's API directly using your personal API key.
 
-Google's use of data sent to Gemini is governed by [Google's Privacy Policy](https://policies.google.com/privacy).
+- Images are sent as part of a single API request and are **not stored** by the App after processing
+- Google may process and temporarily retain the image per their API terms
+- No personally identifiable information is included in the request — only the food image and an analysis prompt
+- You can revoke access at any time by deleting your API key in Settings or revoking it at [Google AI Studio](https://aistudio.google.com/apikey)
+
+Google's use of data sent to Gemini is governed by [Google's Privacy Policy](https://policies.google.com/privacy) and [Google's Generative AI Terms](https://ai.google.dev/gemini-api/terms).
 
 ## Data Storage & Sync
 
@@ -84,7 +87,7 @@ We may update this privacy policy from time to time. Changes will be posted in t
 
 ## Open Source
 
-OpenFoodJournal is open-source software. You can review the complete source code to verify our privacy practices at: [https://github.com/openFoodJournal/macros](https://github.com/openFoodJournal/macros)
+OpenFoodJournal is open-source software. You can review the complete source code to verify our privacy practices at: [https://github.com/kvn8888/OpenFoodJournal](https://github.com/kvn8888/OpenFoodJournal)
 
 ## Contact
 
