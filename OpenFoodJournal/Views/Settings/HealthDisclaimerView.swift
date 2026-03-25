@@ -22,7 +22,7 @@ struct HealthDisclaimerView: View {
 
                     Text("OpenFoodJournal is a food journaling tool designed to help you track what you eat. It is not intended to diagnose, treat, cure, or prevent any disease or health condition.")
 
-                    Text("The nutrition information displayed in this app — including AI-estimated values, daily reference values, and macro calculations — is provided for informational purposes only. Always consult a qualified healthcare professional before making dietary changes, especially if you have a medical condition or specific nutritional needs.")
+                    Text("The nutrition information displayed in this app, including AI-estimated values, daily reference values, and macro calculations, is provided for informational purposes only. Always consult a qualified healthcare professional before making dietary changes, especially if you have a medical condition or specific nutritional needs.")
                 }
                 .font(.subheadline)
             }
@@ -43,7 +43,7 @@ struct HealthDisclaimerView: View {
 
                     // Secondary regulatory reference
                     Link(destination: URL(string: "https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9")!) {
-                        Label("21 CFR §101.9 — Nutrition Labeling", systemImage: "link")
+                        Label("21 CFR §101.9: Nutrition Labeling", systemImage: "link")
                     }
                 }
                 .font(.subheadline)
@@ -92,7 +92,7 @@ struct HealthDisclaimerView: View {
                         .font(.headline)
                         .foregroundStyle(.red)
 
-                    Text("When enabled, the app writes your logged nutrition data (calories, macronutrients, and select micronutrients) to Apple Health and reads your active energy burned to display your daily calorie balance. This data stays on your device and in your iCloud account. It is never sent to any external server.")
+                    Text("When enabled, the app writes your logged nutrition data (calories, macronutrients, and select micronutrients) to Apple Health. It reads your active energy burned to display your daily calorie balance. This data stays on your device and in your iCloud account and is never sent to any external server.")
                 }
                 .font(.subheadline)
             } header: {

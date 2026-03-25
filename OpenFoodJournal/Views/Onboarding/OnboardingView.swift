@@ -23,10 +23,13 @@ struct OnboardingView: View {
     @State private var currentPage = 0
 
     // Temporary goal values — written to UserGoals on completion
+    // Initialized from current UserGoals via .onAppear so re-launching
+    // onboarding from Settings pre-fills the user's existing goals.
     @State private var calorieGoal: Double = 2000
     @State private var proteinGoal: Double = 150
     @State private var carbsGoal: Double = 250
     @State private var fatGoal: Double = 65
+    @State private var goalsLoaded = false
 
     // Permission states
     @State private var cameraGranted = false
@@ -68,6 +71,18 @@ struct OnboardingView: View {
         .tabViewStyle(.page(indexDisplayMode: .always))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
         .interactiveDismissDisabled()
+        .animation(.easeInOut(duration: 0.3), value: currentPage)
+        .onAppear {
+            // Pre-fill sliders with the user's current goals when re-opening
+            // from Settings, so they don't have to re-adjust everything.
+            if !goalsLoaded {
+                calorieGoal = userGoals.dailyCalories
+                proteinGoal = userGoals.dailyProtein
+                carbsGoal = userGoals.dailyCarbs
+                fatGoal = userGoals.dailyFat
+                goalsLoaded = true
+            }
+        }
     }
 
     // MARK: - Page 0: Welcome
