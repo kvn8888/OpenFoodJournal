@@ -35,18 +35,19 @@ struct HealthDisclaimerView: View {
                         .font(.headline)
 
                     Text("Daily reference values for vitamins and minerals shown in the Nutrition tab are based on the FDA's updated Daily Values for nutrition labeling (2020), calculated for a 2,000-calorie daily diet.")
-
-                    // Clickable link to the primary FDA source
-                    Link(destination: URL(string: "https://www.fda.gov/food/nutrition-facts-label/daily-value-nutrition-and-supplement-facts-labels")!) {
-                        Label("FDA: Daily Value on Nutrition Labels", systemImage: "link")
-                    }
-
-                    // Secondary regulatory reference
-                    Link(destination: URL(string: "https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9")!) {
-                        Label("21 CFR §101.9: Nutrition Labeling", systemImage: "link")
-                    }
                 }
                 .font(.subheadline)
+
+                // Each Link gets its own list row so only that row is tappable
+                Link(destination: URL(string: "https://www.fda.gov/food/nutrition-facts-label/daily-value-nutrition-and-supplement-facts-labels")!) {
+                    Label("FDA: Daily Value on Nutrition Labels", systemImage: "link")
+                        .font(.subheadline)
+                }
+
+                Link(destination: URL(string: "https://www.ecfr.gov/current/title-21/chapter-I/subchapter-B/part-101/subpart-A/section-101.9")!) {
+                    Label("21 CFR §101.9: Nutrition Labeling", systemImage: "link")
+                        .font(.subheadline)
+                }
             } header: {
                 Text("Nutrition References")
             }
@@ -59,12 +60,13 @@ struct HealthDisclaimerView: View {
                         .font(.headline)
 
                     Text("The macro-to-calorie conversion (protein 4 kcal/g, carbohydrates 4 kcal/g, fat 9 kcal/g) follows the Atwater general factor system, the standard used on U.S. nutrition labels.")
-
-                    Link(destination: URL(string: "https://www.nal.usda.gov/programs/fnic")!) {
-                        Label("USDA Food & Nutrition Information Center", systemImage: "link")
-                    }
                 }
                 .font(.subheadline)
+
+                Link(destination: URL(string: "https://www.nal.usda.gov/programs/fnic")!) {
+                    Label("USDA Food & Nutrition Information Center", systemImage: "link")
+                        .font(.subheadline)
+                }
             }
 
             // MARK: - AI Nutrition Estimates
