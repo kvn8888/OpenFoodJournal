@@ -13,17 +13,17 @@ This is the single source of truth for any LLM agent working on this project. Re
 |-----|-------|
 | Platform | iOS 26.2+ (iPhone) |
 | UI Framework | SwiftUI + Liquid Glass (no `#available` gating needed) |
-| Data Layer | SwiftData (`@Model`) local cache, Turso (libSQL) cloud primary |
+| Data Layer | SwiftData (`@Model`) + CloudKit Private Database (`iCloud.k3vnc.OpenFoodJournal`) |
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle ID | `k3vnc.OpenFoodJournal` |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
-| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini proxy + Turso REST API) |
+| Proxy API | Render at `openfoodjournal.onrender.com` (Gemini scan proxy only) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
 ## Architecture Overview
 
 ```
-MacrosApp (creates ModelContainer + 5 @Observable services)
+MacrosApp (creates ModelContainer w/ CloudKit + 4 @Observable services)
   └─ ContentView (4-tab TabView)
        ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
        ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit)
@@ -33,7 +33,7 @@ MacrosApp (creates ModelContainer + 5 @Observable services)
 
 **Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.
 
-**Service injection**: All services (`NutritionStore`, `ScanService`, `SyncService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`.
+**Service injection**: All services (`NutritionStore`, `ScanService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`. `SyncService` was removed — CloudKit handles sync natively via `ModelConfiguration(cloudKitDatabase:)`.
 
 **Sheet management**: `DailyLogView` uses a single `DailyLogSheet` enum with `.sheet(item:)` — never multiple booleans.
 
@@ -41,7 +41,7 @@ MacrosApp (creates ModelContainer + 5 @Observable services)
 
 See [references/models.md](references/models.md) for full property lists.
 
-- **`DailyLog`** — `@Model`, keyed by `@Attribute(.unique) date` normalized to midnight. Owns `[NutritionEntry]` via cascade delete.
+- **`DailyLog`** — `@Model`, keyed by `date` normalized to midnight (no `@Attribute(.unique)` — CloudKit can't enforce uniqueness; app-level dedup in `fetchOrCreateLog(for:)`). Owns `[NutritionEntry]?` (optional for CloudKit) via cascade delete. Uses `safeEntries` computed property for reads.
 - **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/serving/servingCount/servingQuantity/servingUnit/servingMappings. `@Attribute(.externalStorage)` on `sourceImage`.
 - **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting. Created from entries, manual input, or directly from ManualEntryView's "Add to Journal & Food Bank" action.
 - **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
@@ -57,8 +57,7 @@ See [references/models.md](references/models.md) for full property lists.
 
 See [references/services.md](references/services.md) for full API contracts.
 
-- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `exportCSV()`. Has optional `syncService` reference for fire-and-forget server sync on mutations. **`applySync(_ response: SyncResponse)`** merges a full server response into SwiftData — upserts DailyLogs by date, inserts missing entries/foods by UUID (skips if already local), applies user goals and preferences from server. Private helpers: `buildServingSize(type:grams:ml:) -> ServingSize?`, `parseDate(_ string:) -> Date?`.
-- **`SyncService`** — `@Observable @MainActor`. Handles all HTTP communication with the Turso-backed REST API at `/api/*`. Typed API models (`APIEntry`, `APIFood`, `APIContainer`, `APIGoals`, `APIPreferences`, `SyncResponse`). Fire-and-forget pattern: local SwiftData write first, then async sync to server. Injected into views via `@Environment(SyncService.self)`. `updatePreferences(_:)` pushes ring slot config to server.
+- **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `saveEntry()`, `exportCSV()`. Pure local operations — CloudKit sync is handled automatically by SwiftData's `ModelConfiguration(cloudKitDatabase:)`. No sync service reference, no fire-and-forget Tasks.
 - **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before multipart POST to Render proxy → Gemini → `NutritionEntry` (not yet inserted). User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
 - **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
@@ -80,23 +79,33 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
   → GeminiNutritionResponse → NutritionEntry (NOT inserted yet)
   → Entry gets scanDurationMs set from ContinuousClock measurement
   → ScanResultCard (editable, shows duration badge) → User taps "Add to Journal"
-  → NutritionStore.log(entry, to: date) → SwiftData insert
-  → Auto-creates SavedFood in Food Bank + syncs to Turso
+  → NutritionStore.log(entry, to: date) → SwiftData insert (CloudKit syncs automatically)
+  → Auto-creates SavedFood in Food Bank
   → HealthKitService.write(entry) if enabled
 ```
 
-## Turso Sync Architecture
+## CloudKit Sync Architecture (app-store branch)
 
 ```
-iOS App (SwiftData local cache)
-  ←→ SyncService (URLSession, fire-and-forget)
-  ←→ Express Proxy (server/index.js, server/routes.js)
-  ←→ Turso (libSQL, server/db.js)
+iOS App (SwiftData + CloudKit)
+  ←→ iCloud Private Database (automatic, free, multi-device)
+
+  → ScanService → Express Proxy (server/index.js) → Gemini AI (scan-only, stateless)
 ```
 
-**Strategy**: Local-first, server sync. SwiftData writes happen immediately for UI responsiveness. SyncService fires async tasks to push changes to the server. Failures are silently caught (`try?`) — the local state is always authoritative for the current session.
+**Strategy**: SwiftData's `ModelConfiguration(cloudKitDatabase: .private("iCloud.k3vnc.OpenFoodJournal"))` handles all sync automatically. No sync code in the iOS app. Zero server maintenance for data operations.
 
-**Sync-on-launch**: `ContentView` `.task` checks `nutritionStore.fetchAllLogs().isEmpty`. If empty (first install), calls `syncService.fetchAll()` + `nutritionStore.applySync(_:)` to seed SwiftData from the server. Guard skips this on subsequent launches — local data wins.
+**CloudKit requirements enforced on all models**:
+- All stored properties have defaults (including fully qualified enum defaults: `MealType.snack` not `.snack`)
+- No `@Attribute(.unique)` (CloudKit can't enforce uniqueness)
+- Relationships are optional (`var entries: [NutritionEntry]? = []`)
+- No `.deny` delete rules
+
+**Entitlements**: `OpenFoodJournal.entitlements` includes iCloud (CloudKit), Push Notifications (aps-environment), background mode (remote-notification).
+
+**Data migration**: `TursoMigrationView` in Settings provides one-time import from old Turso server. Fetches `/api/sync`, inserts into local SwiftData (CloudKit picks up automatically).
+
+**Server**: Express.js on Render — only `/scan` endpoint (Gemini proxy) is used by the iOS app. `/api/*` Turso CRUD routes still exist on server for `main` branch usage but are not called from the `app-store` branch.
 
 **Turso migration pattern** (`server/db.js`): Use `PRAGMA table_info(table_name)` to check existing columns before running `ALTER TABLE ... ADD COLUMN`. Idempotent on re-deploy. Example:
 ```javascript
@@ -116,13 +125,7 @@ if (!cols.includes("serving_type")) {
 - `GET/PUT /api/goals`
 - Entries auto-create their parent `daily_log` on POST
 
-**Sync integration points** — every view that creates/updates/deletes data has a corresponding `syncService` call:
-- `NutritionStore`: entry log/delete/edit
-- `EditEntryView`, `ScanResultCard`: SavedFood creation
-- `FoodBankView`: SavedFood deletion
-- `ContainerListView`: container deletion
-- `NewContainerSheet`: container creation + food mapping update
-- `CompleteContainerSheet`: container completion
+**Sync integration points** — CloudKit sync is fully automatic. No per-view sync calls needed. All SwiftData mutations are automatically pushed to CloudKit.
 
 **Environment vars** (Render): `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN` (falls back to `file:local.db` for dev)
 
@@ -141,27 +144,28 @@ if (!cols.includes("serving_type")) {
 11. **Smooth tappable List rows with swipeActions: use `Button + .buttonStyle(.plain)`** — Default `Button` style causes ~150ms tap disambiguation delay. `onTapGesture + contentShape(Rectangle())` eliminates tap delay but makes swipes choppy (TapGesture blocks swipe tracking). The correct pattern is `Button { } label: { YourRowView() }.buttonStyle(.plain)` — UIKit-optimized for List swipe coexistence, smooth on both taps and swipes.
 12. **ZStack gesture priority** — in a `ZStack`, the **last** (top) view receives gestures first. Put a `Color.clear.contentShape(Rectangle()).onTapGesture { dismiss() }` layer **before** the overlay content to create an outside-tap dismiss. Views on top intercept taps; the clear layer catches everything that falls through.
 13. **`Color.clear` needs `.contentShape(Rectangle())`** — transparent views have no hit-test area by default. Without `contentShape`, taps pass through as if the view doesn't exist.
+14. **`@Model` enum defaults must be fully qualified** — `var mealType: MealType = .snack` fails during macro expansion. Use `MealType.snack`. The error message is unhelpful (just says macro expansion failed).
+15. **CloudKit optional relationships need `safeEntries` pattern** — `var entries: [NutritionEntry]? = []` requires unwrapping everywhere. Add `var safeEntries: [NutritionEntry] { entries ?? [] }` and use that for reads. Use `log.entries?.append(entry)` for writes.
 
-## Entitlements Still Needed (Xcode-only)
+## Entitlements (app-store branch)
 
-- `NSCameraUsageDescription` in Info.plist
-- `NSHealthUpdateUsageDescription` + `NSHealthShareUsageDescription`
-- HealthKit capability
-- iCloud + CloudKit capability
+Already configured in `OpenFoodJournal.entitlements`:
+- `com.apple.developer.icloud-services`: CloudKit
+- `com.apple.developer.icloud-container-identifiers`: iCloud.k3vnc.OpenFoodJournal
+- `aps-environment`: development (auto-switches to production on Archive)
+- `UIBackgroundModes`: remote-notification
 
-## Future Consideration: CloudKit Migration (App Store Branch)
+**Still needed** (must add to entitlements):
+- `com.apple.developer.healthkit` (HealthKit usage compiles but entitlement missing)
 
-When preparing an App Store release, the sync backend can optionally migrate from Turso to CloudKit Private Database. This would live on a separate branch (`app-store-version`), not `main`. The project owner personally uses Turso.
+**Still needed** (provisioning profile):
+- Enable iCloud + Push Notifications capabilities in Apple Developer portal
+- Regenerate provisioning profile
 
-**Why CloudKit**: Private Database = $0 forever (data stored in user's iCloud, not developer's servers). Auto multi-device sync. Zero app size impact (system framework). Infinite scale (per-user storage).
+## Branches
 
-**What it replaces**: `SyncService.swift`, `server/routes.js` CRUD endpoints, Turso DB, Render hosting for data routes. The Express server would remain as a thin Gemini scan proxy (1 endpoint).
-
-**Model changes required**: CloudKit mandates all properties optional or with default values (current models mostly comply). No `#Unique` constraints allowed (we don't use any). Relationships must be optional (already the case). No server-side filtering (already query locally).
-
-**What you lose**: Server-side analytics/debugging over user data, real-time sync (CloudKit is eventual, seconds-to-minutes), cross-platform potential (no Android/web with CloudKit).
-
-**Migration scope**: Adapt `ModelContainer` config to use CloudKit container, give all non-optional model properties defaults, remove `SyncService` calls from views, remove Turso REST routes from server. Keep Gemini proxy. Test with multiple devices.
+- **`main`** — Original Turso sync architecture. `SyncService.swift` present, all views have fire-and-forget sync Tasks. Used for developer's personal Turso instance.
+- **`app-store`** — CloudKit sync, no Turso dependency. `SyncService.swift` deleted, all sync Tasks removed. `TursoMigrationView` for one-time data import. This is the App Store submission branch.
 
 ## Conventions
 
@@ -179,21 +183,23 @@ When preparing an App Store release, the sync backend can optionally migrate fro
 - `FoodBankView` row: trailing (swipe left) = Edit (blue) + Delete (red, no full-swipe); leading (swipe right) = Add to journal (green)
 - `MealSectionView` row: trailing (swipe left) = Delete (in `EntryRowView`); leading (swipe right) = Edit (in `MealSectionView`'s Button wrapper)
 
-**EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). `@Environment(SyncService.self)` required. Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveAndSyncEntry(entry)`.
+**EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveEntry(entry)`.
 
-## Current State (Last Updated: 2026-03-20)
+## Current State (Last Updated: 2025-07-17)
 
+- **Branch: `app-store`** — CloudKit migration complete, all Turso sync code removed
 - App structure complete: all models, services, and views implemented
-- 5-tab layout: Journal, Food Bank, Containers, History, Settings
-- Builds successfully with `xcodebuild` (generic/platform=iOS)
-- Render proxy deployed at `openfoodjournal.onrender.com` (Gemini proxy + Turso REST API)
+- 4-tab layout: Journal, Food Bank, History, Settings (Containers accessed via RadialMenuButton)
+- Builds successfully with `xcodebuild` (generic/platform=iOS, signing disabled)
+- SwiftData + CloudKit Private Database for data persistence and sync
+- Render proxy deployed at `openfoodjournal.onrender.com` (Gemini scan proxy only)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
-- Container Tracking: create from Food Bank food (with "Recently Used" section, max 3), enter start weight, complete with final weight → derived nutrition logged
-- Serving Mappings: per-food unit conversions (e.g. "1 cup = 244g"), editable in EditEntryView
-- Entry timestamps: visible in EntryRowView (compact time format), editable via DatePicker in EditEntryView
-- WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping to week boundaries (scrollTargetLayout + scrollTargetBehavior(.viewAligned) + containerRelativeFrame). 52 weeks of history via LazyHStack of WeekID structs. Today button, progress rings per day cell.
-- Comprehensive micronutrient tracking: 30 FDA nutrients with daily values, summary view with progress bars
-- Turso DB integration: server-side schema + REST API complete, iOS SyncService with fire-and-forget mutations
-- Entitlements configured: Camera, HealthKit privacy descriptions in Info.plist
+- Container Tracking: create from Food Bank food, enter start weight, complete with final weight
+- Serving Mappings: per-food unit conversions, editable in EditEntryView
+- WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping
+- Comprehensive micronutrient tracking: 30 FDA nutrients with daily values
+- TursoMigrationView: one-time data import from old Turso server (in Settings)
+- Entitlements configured: iCloud (CloudKit), Push Notifications, Camera, HealthKit descriptions
+- **App Store blockers**: Missing HealthKit entitlement, no Privacy Policy, no PrivacyInfo.xcprivacy, AGPL licensing conflict
+- **Nice-to-haves**: Onboarding flow, retry logic for scans, hide Turso migration for public release
 - No unit tests beyond Xcode template stubs
-- **TODO**: Deploy server with Turso env vars on Render, implement full sync-on-launch to populate local cache from server

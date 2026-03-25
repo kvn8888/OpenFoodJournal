@@ -92,7 +92,7 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Link(destination: URL(string: "https://github.com/openFoodJournal/macros")!) {
+                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal")!) {
                         Label("Source Code (AGPL-3.0)", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
 
