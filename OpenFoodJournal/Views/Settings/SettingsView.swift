@@ -20,6 +20,7 @@ struct SettingsView: View {
 
     @State private var showExportSheet = false
     @State private var csvContent: String = ""
+    @State private var showOnboarding = false
 
     var body: some View {
         NavigationStack {
@@ -120,6 +121,12 @@ struct SettingsView: View {
 
                 // MARK: About
                 Section("About") {
+                    Button {
+                        showOnboarding = true
+                    } label: {
+                        Label("Show Onboarding", systemImage: "hand.wave")
+                    }
+
                     HStack {
                         Text("Version")
                         Spacer()
@@ -154,6 +161,9 @@ struct SettingsView: View {
                 )
                 .presentationDetents([.medium])
             }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView()
         }
     }
 }
