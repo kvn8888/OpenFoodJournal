@@ -128,7 +128,9 @@ For your convenience, here is a test API key you can use for review:
 
 The app works fully offline for manual food entry and browsing — the API key is only needed for AI-powered label/photo scanning.
 
-The app writes to Apple HealthKit (calories, protein, carbs, fat) only when the user explicitly enables the toggle in Settings > Integrations. HealthKit data is never read, shared, or sent to any server.
+The app writes to Apple HealthKit (calories, protein, carbs, fat, fiber, sugar, sodium, cholesterol, saturated fat, and select vitamins/minerals) only when the user explicitly enables the toggle in Settings > Integrations. The app also reads active energy burned data from HealthKit to display daily calorie balance. HealthKit data is never sent to any external server.
+
+The app provides nutrition citations and a full health disclaimer under Settings > Sources & Disclaimers, referencing FDA Daily Values (21 CFR §101.9) and noting that AI-estimated nutrition values are approximations.
 ```
 
 **Important:** Before submitting, create a dedicated Gemini API key for the reviewer and paste it in place of `[PASTE YOUR REVIEW KEY HERE BEFORE SUBMISSION]`. You can revoke it after approval.
