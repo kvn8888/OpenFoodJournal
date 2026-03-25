@@ -6,28 +6,31 @@ import SwiftData
 
 @Model
 final class NutritionEntry {
-    var id: UUID
-    var timestamp: Date
-    var name: String
-    var mealType: MealType
-    var scanMode: ScanMode
+    // CloudKit requires all stored properties to have default values.
+    // The init() still overrides these; defaults are only used when CloudKit
+    // materializes a record before all fields arrive.
+    var id: UUID = UUID()
+    var timestamp: Date = Date()
+    var name: String = ""
+    var mealType: MealType = MealType.snack
+    var scanMode: ScanMode = ScanMode.manual
     var confidence: Double?
 
     @Attribute(.externalStorage)
     var sourceImage: Data?
 
     // Core macros — always required
-    var calories: Double
-    var protein: Double
-    var carbs: Double
-    var fat: Double
+    var calories: Double = 0
+    var protein: Double = 0
+    var carbs: Double = 0
+    var fat: Double = 0
 
     // Dynamic micronutrients — flexible key-value store.
     // Keys are nutrient names (e.g. "Fiber", "Vitamin A", "Sodium").
     // Values are MicronutrientValue (amount + unit).
     // SwiftData serializes this as a JSON blob, so new nutrients from Gemini
     // are added automatically without any schema migration.
-    var micronutrients: [String: MicronutrientValue]
+    var micronutrients: [String: MicronutrientValue] = [:]
 
     // Serving info
     var servingSize: String?           // Display label (e.g. "1 cup (228g)") — legacy/display
@@ -41,7 +44,7 @@ final class NutritionEntry {
 
     // How many servings the user logged (e.g. 2.5 servings).
     // Macros on this entry = base macros × servingCount.
-    var servingCount: Double
+    var servingCount: Double = 1.0
 
     // Legacy fields — kept for backward compatibility with existing data.
     // New entries set these from the serving enum; old entries may have these only.
@@ -50,7 +53,7 @@ final class NutritionEntry {
 
     // Per-food unit mappings — e.g. [{ from: 1 cup, to: 244 g }]
     // Lets the app convert between custom units (pieces, slices, etc.)
-    var servingMappings: [ServingMapping]
+    var servingMappings: [ServingMapping] = []
 
     // How long the scan took (end-to-end from image upload to parsed result), in milliseconds.
     // Nil for manual entries. Used to track optimization progress.

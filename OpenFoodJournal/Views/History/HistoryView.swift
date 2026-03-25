@@ -152,7 +152,7 @@ struct HistoryView: View {
                 MacroSummaryBar(log: log, goals: goals)
                     .padding(.horizontal)
 
-                if !log.entries.isEmpty {
+                if !log.safeEntries.isEmpty {
                     // Entries grouped by meal — using LazyVStack for non-List context
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(MealType.allCases) { mealType in
@@ -215,7 +215,7 @@ struct DayDetailView: View {
                 MacroSummaryBar(log: log, goals: goals)
                     .padding(.horizontal)
 
-                if let log, !log.entries.isEmpty {
+                if let log, !log.safeEntries.isEmpty {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(MealType.allCases) { mealType in
                             MealSectionView(
