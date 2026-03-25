@@ -36,6 +36,8 @@ struct RadialMenuDemo: View {
 
     /// The current phase of the animation — drives all visual changes.
     @State private var phase: Phase = .idle
+    /// Holds the running animation task so it can be cancelled on disappear.
+    @State private var animationTask: Task<Void, Never>? = nil
 
     // MARK: - Layout Constants
 
@@ -80,7 +82,10 @@ struct RadialMenuDemo: View {
         }
         // Fixed frame so the demo has consistent sizing in any container
         .frame(width: 260, height: 260)
-        .onAppear { startAnimation() }
+        // Cancel any previous loop and start fresh each time the page becomes visible
+        .onAppear { resetAndStart() }
+        // Stop the loop as soon as the user swipes away (prevents double-loop on return)
+        .onDisappear { animationTask?.cancel() }
     }
 
     // MARK: - Menu Visualization
@@ -269,10 +274,26 @@ struct RadialMenuDemo: View {
 
     // MARK: - Animation Driver
 
+    /// Cancels any in-flight animation, resets to idle, and starts a fresh loop.
+    /// Called every time the view appears so the animation begins from scratch
+    /// whether it’s the first visit or a return from another page.
+    private func resetAndStart() {
+        // Cancel the old loop (if any) before starting a new one
+        animationTask?.cancel()
+        // Reset phase immediately so the view is clean before the new loop kicks in
+        phase = .idle
+        animationTask = Task {
+            // Brief settle time lets SwiftUI finish the page transition
+            // before the first animation frame fires
+            try? await Task.sleep(for: .milliseconds(150))
+            await runAnimationLoop()
+        }
+    }
+
     /// Runs the animation loop by advancing through phases with timed delays.
-    private func startAnimation() {
-        Task {
-            while !Task.isCancelled {
+    /// Checks Task.isCancelled between every sleep so cancellation is instant.
+    private func runAnimationLoop() async {
+        while !Task.isCancelled {
                 // Phase 1: Idle (brief pause at start)
                 phase = .idle
                 try? await Task.sleep(for: .seconds(0.8))
@@ -320,7 +341,6 @@ struct RadialMenuDemo: View {
                 }
                 try? await Task.sleep(for: .seconds(1.0))
             }
-        }
     }
 }
 
