@@ -199,10 +199,7 @@ struct RadialMenuDemo: View {
     /// Mimics the real RadialMenuButton's `translation * 0.15` effect.
     private var plusButtonFollowOffset: CGPoint {
         switch phase {
-        case .dragging:
-            let targetPos = positionForAngle(angleForIndex(targetIndex))
-            return CGPoint(x: targetPos.x * 0.5 * 0.15, y: targetPos.y * 0.5 * 0.15)
-        case .highlighted:
+        case .dragging, .highlighted:
             let targetPos = positionForAngle(angleForIndex(targetIndex))
             return CGPoint(x: targetPos.x * 0.15, y: targetPos.y * 0.15)
         default:
@@ -219,21 +216,11 @@ struct RadialMenuDemo: View {
         case .fingerAppears:
             // Approaching the plus button (which is at y: 60 offset)
             return CGPoint(x: 10, y: 80)
-        case .pressing:
-            // On top of the plus button
+        case .pressing, .menuOpen:
+            // On top of the plus button (stays here while menu fans out)
             return CGPoint(x: 5, y: 75)
-        case .menuOpen:
-            // Still on the button, menu just opened
-            return CGPoint(x: 5, y: 75)
-        case .dragging:
-            // Midway between button and Scan option (330° = upper-right)
-            let targetPos = positionForAngle(angleForIndex(targetIndex))
-            return CGPoint(
-                x: targetPos.x * 0.5 + 5,
-                y: 60 + targetPos.y * 0.5 + 15
-            )
-        case .highlighted:
-            // On top of the Scan option
+        case .dragging, .highlighted:
+            // Smooth continuous drag from button to Scan option — no midpoint stop
             let targetPos = positionForAngle(angleForIndex(targetIndex))
             return CGPoint(
                 x: targetPos.x + 5,
@@ -308,14 +295,15 @@ struct RadialMenuDemo: View {
                 }
                 try? await Task.sleep(for: .seconds(0.5))
 
-                // Phase 5: Drag toward Scan option
-                withAnimation(.easeInOut(duration: 0.6)) {
+                // Phase 5+6: Smooth continuous drag to Scan option — finger
+                // moves all the way in one motion, then highlight kicks in
+                withAnimation(.easeInOut(duration: 0.8)) {
                     phase = .dragging
                 }
-                try? await Task.sleep(for: .seconds(0.7))
+                try? await Task.sleep(for: .seconds(0.85))
 
-                // Phase 6: Arrive at Scan — highlight it
-                withAnimation(.easeOut(duration: 0.3)) {
+                // Highlight the Scan option now that finger has arrived
+                withAnimation(.easeOut(duration: 0.15)) {
                     phase = .highlighted
                 }
                 try? await Task.sleep(for: .seconds(0.6))
