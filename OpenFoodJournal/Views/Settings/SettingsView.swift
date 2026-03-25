@@ -152,6 +152,10 @@ struct SettingsView: View {
                     Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/blob/main/PRIVACY.md")!) {
                         Label("Privacy Policy", systemImage: "hand.raised")
                     }
+
+                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/issues")!) {
+                        Label("Report a Bug", systemImage: "ant.circle")
+                    }
                 }
             }
             .navigationTitle("Settings")

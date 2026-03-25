@@ -39,9 +39,14 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 - **Nutrition detail** — Tap any day to see full macro and micro breakdowns.
 
 ### Health & Sync
-- **Apple HealthKit** — Opt-in writes for calories, protein, carbs, and fat.
-- **Cloud sync** — Local-first SwiftData with fire-and-forget sync to a Turso (libSQL) backend.
+- **Apple HealthKit** — Opt-in writes for calories, protein, carbs, fat, and 10+ micronutrients. Reads active energy burned for net calorie display.
+- **iCloud sync** — Local-first SwiftData with automatic CloudKit sync across all your Apple devices.
 - **CSV export** — Export your entire food journal as a CSV file from Settings.
+
+### Sources & Disclaimers
+- **FDA citations** — Daily Value percentages linked to 21 CFR §101.9 and FDA guidelines.
+- **AI accuracy notes** — Inline disclaimers on scan results noting estimates may differ from actual values.
+- **Health disclaimer** — Clear "Not Medical Advice" notice with links to all data sources.
 
 ---
 
@@ -51,11 +56,11 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 ┌─────────────────────────────────────────────┐
 │  iOS App (SwiftUI + SwiftData)              │
 │                                             │
-│  MacrosApp                                  │
-│    ├─ NutritionStore (CRUD + sync)          │
-│    ├─ ScanService (camera → Gemini)         │
-│    ├─ SyncService (Turso REST)              │
+│  OpenFoodJournalApp                         │
+│    ├─ NutritionStore (CRUD + queries)       │
+│    ├─ ScanService (camera → Gemini REST)    │
 │    ├─ HealthKitService (Apple Health)       │
+│    ├─ KeychainService (API key storage)     │
 │    └─ UserGoals (@Observable + @AppStorage) │
 │                                             │
 │  ContentView (4-tab TabView)                │
@@ -64,16 +69,19 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 │    ├─ History  → HistoryView                │
 │    └─ Settings → SettingsView               │
 └──────────────┬──────────────────────────────┘
-               │ HTTPS
-┌──────────────▼──────────────────────────────┐
-│  Express Proxy (server/)                    │
-│    ├─ POST /scan → Gemini API               │
-│    ├─ REST /api/* → Turso (libSQL)          │
-│    └─ Deployed on Render                    │
-└─────────────────────────────────────────────┘
+               │
+    ┌──────────┴──────────┐
+    │ HTTPS (BYOK)        │ CloudKit (automatic)
+    ▼                     ▼
+┌────────────┐  ┌─────────────────┐
+│ Gemini API │  │ iCloud Private  │
+│ (Google)   │  │ Database        │
+└────────────┘  └─────────────────┘
 ```
 
-**Local-first**: SwiftData writes happen immediately for instant UI. Sync to the server is fire-and-forget — failures are silently caught and local state is always authoritative.
+**Local-first**: SwiftData writes happen immediately for instant UI. CloudKit sync is automatic — the private database keeps all devices in sync transparently.
+
+**BYOK (Bring Your Own Key)**: Users provide their own Gemini API key (free from aistudio.google.com). The key is stored in the iOS Keychain and API calls go directly from the device — no proxy server involved.
 
 **Service injection**: All services are created at app launch and passed through SwiftUI's `@Environment`. No singletons.
 
@@ -98,11 +106,10 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 | UI | SwiftUI + Liquid Glass (iOS 26) |
 | Local Data | SwiftData (`@Model`) |
 | State | `@Observable` + `@Environment` |
-| AI | Google Gemini 3.1 (Flash Lite for labels, Pro for food photos) |
-| Server | Express.js (Node 18+) |
-| Database | Turso (libSQL) |
+| AI | Google Gemini 3.1 (Flash Lite for labels, Pro for food photos) — BYOK |
+| Sync | CloudKit (iCloud Private Database) |
+| Security | iOS Keychain (API key storage) |
 | Health | Apple HealthKit |
-| Hosting | Render |
 
 ---
 
@@ -111,10 +118,9 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 ### Prerequisites
 
 - **Xcode 26+** (macOS)
-- **Node.js 18+** (for the server proxy)
-- A **Google Gemini API key** (for scan functionality)
+- A **Google Gemini API key** (optional, for scan functionality — get one free at [aistudio.google.com](https://aistudio.google.com/apikey))
 
-### iOS App
+### Build & Run
 
 ```bash
 # Clone the repo
@@ -130,22 +136,7 @@ xcodebuild -project OpenFoodJournal.xcodeproj \
 
 Or open `OpenFoodJournal.xcodeproj` in Xcode and run on a simulator or device.
 
-### Server (Gemini Proxy + Turso API)
-
-```bash
-cd server
-npm install
-
-# Create a .env file with your keys
-echo "GEMINI_API_KEY=your_key_here" > .env
-echo "TURSO_DATABASE_URL=your_turso_url" >> .env
-echo "TURSO_AUTH_TOKEN=your_turso_token" >> .env
-
-# Start the server
-npm run dev
-```
-
-The server runs on port 3000 by default. It falls back to a local SQLite file if Turso credentials aren't provided.
+> **Note:** The `server/` directory contains a legacy Express.js proxy from the `main` branch. The `app-store` branch uses direct Gemini API calls and CloudKit — no server required.
 
 ---
 
@@ -154,7 +145,7 @@ The server runs on port 3000 by default. It falls back to a local SQLite file if
 ```
 OpenFoodJournal/
 ├── Models/           # SwiftData models + enums + mock data
-├── Services/         # NutritionStore, ScanService, SyncService, HealthKit
+├── Services/         # NutritionStore, ScanService, HealthKitService, KeychainService
 ├── Views/
 │   ├── DailyLog/     # Journal tab — calendar strip, macro bar, meal sections
 │   ├── FoodBank/     # Saved foods — search, sort, edit, log
@@ -162,15 +153,16 @@ OpenFoodJournal/
 │   ├── History/      # Calendar grid + macro charts
 │   ├── ManualEntry/  # Manual food logging + entry editing
 │   ├── Scan/         # Camera capture + scan result review
-│   ├── Settings/     # Goals editor + app settings
+│   ├── Settings/     # Goals editor, app settings, sources & disclaimers
+│   ├── Onboarding/   # 6-page onboarding with API key setup
 │   └── Shared/       # Reusable components (MacroRingView, RadialMenuButton, etc.)
 ├── Assets.xcassets/  # App icon + accent color
 └── ContentView.swift # Root 4-tab navigation
 
-server/
-├── index.js          # Express server entry point
-├── routes.js         # API routes (/scan, /api/*)
-├── db.js             # Turso/libSQL connection + schema migrations
+server/                # Legacy — unused on app-store branch
+├── index.js
+├── routes.js
+├── db.js
 └── package.json
 ```
 
