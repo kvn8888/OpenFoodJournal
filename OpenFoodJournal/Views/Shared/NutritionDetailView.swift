@@ -48,6 +48,26 @@ struct NutritionDetailView: View {
 
             // Unknown nutrients from Gemini not in our known list
             unknownNutrientsSection
+
+            // FDA citation footer — satisfies App Store Guideline 1.4.1
+            Section {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "info.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Text("Daily values based on a 2,000-calorie diet.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Link("FDA Daily Value Guidelines", destination: URL(string: "https://www.fda.gov/food/nutrition-facts-label/daily-value-nutrition-and-supplement-facts-labels")!)
+                        .font(.caption2)
+                    Text("AI-estimated values are approximations.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .listRowBackground(Color.clear)
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Nutrition")

@@ -28,7 +28,6 @@ struct ContainerListView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(SyncService.self) private var syncService
 
     /// Date to log completed container nutrition to
     var logDate: Date = .now
@@ -81,7 +80,6 @@ struct ContainerListView: View {
                         for index in indexSet {
                             let id = activeContainers[index].id
                             modelContext.delete(activeContainers[index])
-                            Task { try? await syncService.deleteContainer(id: id) }
                         }
                         try? modelContext.save()
                     }
@@ -98,7 +96,6 @@ struct ContainerListView: View {
                         for index in indexSet {
                             let id = completedContainers[index].id
                             modelContext.delete(completedContainers[index])
-                            Task { try? await syncService.deleteContainer(id: id) }
                         }
                         try? modelContext.save()
                     }

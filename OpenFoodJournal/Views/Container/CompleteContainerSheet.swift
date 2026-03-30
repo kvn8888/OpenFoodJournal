@@ -9,7 +9,6 @@ struct CompleteContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(SyncService.self) private var syncService
 
     // ── Input ─────────────────────────────────────────────────────
     @Bindable var container: TrackedContainer
@@ -190,9 +189,6 @@ struct CompleteContainerSheet: View {
                 // Save the final weight to the container
                 container.finalWeight = finalWeight
                 container.completedDate = .now
-
-                // Sync container completion to server
-                Task { try? await syncService.completeContainer(id: container.id, finalWeight: finalWeight) }
 
                 // Create a NutritionEntry for the consumed amount and log it
                 if let entry = container.toNutritionEntry(mealType: selectedMealType) {

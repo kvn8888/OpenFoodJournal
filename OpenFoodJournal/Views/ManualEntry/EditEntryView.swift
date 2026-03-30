@@ -10,7 +10,6 @@ import SwiftData
 struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
-    @Environment(SyncService.self) private var syncService
     @Environment(\.dismiss) private var dismiss
 
     @Bindable var entry: NutritionEntry
@@ -110,7 +109,7 @@ struct EditEntryView: View {
                         entry.servingQuantity = quantity
                         entry.servingUnit = selectedUnit
 
-                        nutritionStore.saveAndSyncEntry(entry)
+                        nutritionStore.saveEntry(entry)
                         Task { await healthKit.write(entry) }
                         dismiss()
                     }
@@ -288,7 +287,7 @@ struct EditEntryView: View {
     /// Appends a new mapping to the entry, saves to SwiftData, and syncs.
     private func addMapping(_ mapping: ServingMapping) {
         entry.servingMappings.append(mapping)
-        nutritionStore.saveAndSyncEntry(entry)
+        nutritionStore.saveEntry(entry)
     }
 }
 

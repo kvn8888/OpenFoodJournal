@@ -38,6 +38,10 @@ struct ScanResultCard: View {
                                 Label("Estimated (~\(Int(confidence * 100))% confidence)", systemImage: "wand.and.sparkles")
                                     .font(.caption)
                                     .foregroundStyle(.orange)
+                                // Guideline 1.4.1 — brief accuracy disclaimer for AI estimates
+                                Text("AI estimates may differ from actual values. Verify before relying on this data for dietary decisions.")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             } else if entry.scanMode == .label {
                                 Label("From label", systemImage: "barcode.viewfinder")
                                     .font(.caption)

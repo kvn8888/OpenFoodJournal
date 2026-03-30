@@ -11,7 +11,6 @@ struct NewContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(SyncService.self) private var syncService
 
     // ── SwiftData: all saved foods for the picker ─────────────────
     @Query(sort: \SavedFood.name) private var savedFoods: [SavedFood]
@@ -200,13 +199,6 @@ struct NewContainerSheet: View {
                     }
 
                     try? modelContext.save()
-
-                    // Fire-and-forget sync: create container + update food mappings on server
-                    let sync = syncService
-                    Task {
-                        try? await sync.createContainer(container)
-                        if !hasGramMapping { try? await sync.updateFood(food) }
-                    }
 
                     dismiss()
                 } label: {

@@ -149,10 +149,12 @@ struct HistoryView: View {
             .padding(.horizontal)
 
             if let log = selectedLog {
+                // No extra .padding(.horizontal) here — MacroSummaryBar has its own internal
+                // padding and glass. The extra outer pad would crush the ring row and cause
+                // overflow that widens the entire ScrollView content.
                 MacroSummaryBar(log: log, goals: goals)
-                    .padding(.horizontal)
 
-                if !log.entries.isEmpty {
+                if !log.safeEntries.isEmpty {
                     // Entries grouped by meal — using LazyVStack for non-List context
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(MealType.allCases) { mealType in
@@ -215,7 +217,7 @@ struct DayDetailView: View {
                 MacroSummaryBar(log: log, goals: goals)
                     .padding(.horizontal)
 
-                if let log, !log.entries.isEmpty {
+                if let log, !log.safeEntries.isEmpty {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                         ForEach(MealType.allCases) { mealType in
                             MealSectionView(
