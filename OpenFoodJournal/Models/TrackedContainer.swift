@@ -20,32 +20,33 @@ import SwiftData
 /// The container weight (box/bag) cancels out since both measurements include it.
 @Model
 final class TrackedContainer {
-    var id: UUID
+    // CloudKit requires all stored properties to have default values.
+    var id: UUID = UUID()
 
     // ── Food Reference ────────────────────────────────────────────
     // Snapshot the food's nutrition at the time of tracking, so changes
     // to the SavedFood don't retroactively affect container math.
-    var foodName: String
+    var foodName: String = ""
     var foodBrand: String?
 
     // Nutrition per serving — copied from the food at tracking time
-    var caloriesPerServing: Double
-    var proteinPerServing: Double
-    var carbsPerServing: Double
-    var fatPerServing: Double
-    var micronutrientsPerServing: [String: MicronutrientValue]
+    var caloriesPerServing: Double = 0
+    var proteinPerServing: Double = 0
+    var carbsPerServing: Double = 0
+    var fatPerServing: Double = 0
+    var micronutrientsPerServing: [String: MicronutrientValue] = [:]
 
     // The serving size in grams — critical for weight-based math
     // e.g. if label says "39g per serving", this is 39.0
-    var gramsPerServing: Double
+    var gramsPerServing: Double = 0
 
     // ── Weight Tracking ───────────────────────────────────────────
     // Both weights include the container itself; it cancels out in the diff.
-    var startWeight: Double          // Weight at start (in grams), including container
+    var startWeight: Double = 0          // Weight at start (in grams), including container
     var finalWeight: Double?         // Weight when done (in grams), nil if still active
 
     // ── Dates ─────────────────────────────────────────────────────
-    var startDate: Date
+    var startDate: Date = Date()
     var completedDate: Date?         // Set when finalWeight is entered
 
     // ── Optional: link to the SavedFood for re-tracking ──────────

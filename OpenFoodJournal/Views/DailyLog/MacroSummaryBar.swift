@@ -47,7 +47,6 @@ enum MacroNutrientID: String, CaseIterable {
 struct MacroSummaryBar: View {
     let log: DailyLog?
     let goals: UserGoals
-    @Environment(SyncService.self) private var syncService
 
     // ── Preferences (SwiftData singleton) ─────────────────────────
     // Ring slot configuration persisted in the Preferences model.
@@ -76,7 +75,7 @@ struct MacroSummaryBar: View {
 
     /// Aggregated micronutrient totals for the day — sum across all entries
     private var microTotals: [String: Double] {
-        guard let entries = log?.entries else { return [:] }
+        let entries = log?.safeEntries ?? []
         var totals: [String: Double] = [:]
         for entry in entries {
             for (key, micro) in entry.micronutrients {
@@ -101,9 +100,15 @@ struct MacroSummaryBar: View {
 
             // Ring row: all 5 configurable slots
             GlassEffectContainer(spacing: 12) {
-                HStack(alignment: .top, spacing: 12) {
-                    ForEach(1...5, id: \.self) { index in
-                        slotView(slotID: slotIDs[index - 1], slotIndex: index)
+                // Spacer(minLength: 8) between each ring instead of fixed spacing
+                // so they distribute evenly across whatever width is available —
+                // works on iPhone SE, Pro Max, and everything in between.
+                HStack(alignment: .top, spacing: 0) {
+                    ForEach(0..<5, id: \.self) { slotIdx in
+                        if slotIdx > 0 {
+                            Spacer(minLength: 8)
+                        }
+                        slotView(slotID: slotIDs[slotIdx], slotIndex: slotIdx + 1)
                     }
                 }
                 .padding(.horizontal, 4)
@@ -118,13 +123,13 @@ struct MacroSummaryBar: View {
                 Label("Edit Tracked Nutrients", systemImage: "slider.horizontal.3")
             }
         }
-        .sheet(isPresented: $showEditSheet, onDismiss: syncPreferences) {
+        .sheet(isPresented: $showEditSheet) {
             if let p = prefs {
                 SlotEditSheet(preferences: p, allSlotIDs: slotIDs)
                     .presentationDetents([.medium, .large])
             }
         }
-        .sheet(item: $editingSlot, onDismiss: syncPreferences) { slot in
+        .sheet(item: $editingSlot) { slot in
             if let p = prefs {
                 NutrientPickerSheet(
                     preferences: p,
@@ -208,14 +213,6 @@ struct MacroSummaryBar: View {
     private func colorForSlot(_ index: Int) -> Color {
         let colors: [Color] = [.blue, .green, .yellow, .mint, .indigo]
         return colors[(index - 1) % colors.count]
-    }
-
-    /// Fire-and-forget push of preferences to the server after sheet dismissal
-    private func syncPreferences() {
-        guard let p = prefs else { return }
-        Task {
-            try? await syncService.updatePreferences(p)
-        }
     }
 
 }

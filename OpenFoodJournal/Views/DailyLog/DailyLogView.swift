@@ -45,7 +45,7 @@ struct DailyLogView: View {
 
                     // Meal sections — MealSectionView returns a Section{} so each
                     // meal type becomes a sticky List section with its header
-                    if let log, !log.entries.isEmpty {
+                    if let log, !log.safeEntries.isEmpty {
                         ForEach(MealType.allCases) { mealType in
                             MealSectionView(
                                 mealType: mealType,
@@ -211,8 +211,6 @@ private struct ScanResultSheet: View {
                 let saved = SavedFood(from: entry)
                 nutritionStore.modelContext.insert(saved)
                 try? nutritionStore.modelContext.save()
-                let sync = nutritionStore.syncService
-                Task { try? await sync?.createFood(saved) }
 
                 scanService.pendingResult = nil
                 dismiss()

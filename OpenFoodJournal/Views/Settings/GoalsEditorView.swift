@@ -5,7 +5,6 @@ import SwiftUI
 
 struct GoalsEditorView: View {
     @Environment(UserGoals.self) private var goals
-    @Environment(SyncService.self) private var syncService
     @Environment(\.dismiss) private var dismiss
 
     // Local state mirrors goals so changes are buffered until Save
@@ -32,7 +31,7 @@ struct GoalsEditorView: View {
                         .foregroundStyle(.secondary)
                 }
             } footer: {
-                Text("Protein & carbs = 4 kcal/g · Fat = 9 kcal/g. Use this as a sanity check against your calorie goal.")
+                Text("Protein & carbs = 4 kcal/g · Fat = 9 kcal/g (Atwater system). Use this as a sanity check against your calorie goal. These are general factors — individual needs vary. Consult a healthcare professional for personalized guidance.")
             }
         }
         .navigationTitle("Daily Goals")
@@ -44,16 +43,6 @@ struct GoalsEditorView: View {
                     goals.dailyProtein = protein
                     goals.dailyCarbs = carbs
                     goals.dailyFat = fat
-
-                    // Sync goals to Turso
-                    Task {
-                        try? await syncService.updateGoals(
-                            calories: calories,
-                            protein: protein,
-                            carbs: carbs,
-                            fat: fat
-                        )
-                    }
 
                     dismiss()
                 }

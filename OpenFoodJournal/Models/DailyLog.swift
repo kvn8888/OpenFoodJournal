@@ -6,14 +6,16 @@ import SwiftData
 
 @Model
 final class DailyLog {
-    @Attribute(.unique)
-    var date: Date  // normalized to start of day (midnight)
+    // CloudKit note: @Attribute(.unique) removed — CloudKit can't enforce uniqueness.
+    // App-level dedup via fetchOrCreateLog(for:) in NutritionStore handles this.
+    var date: Date = Date()
 
-    var id: UUID
+    var id: UUID = UUID()
     var notes: String?
 
+    // CloudKit note: relationships must be optional.
     @Relationship(deleteRule: .cascade, inverse: \NutritionEntry.dailyLog)
-    var entries: [NutritionEntry]
+    var entries: [NutritionEntry]? = []
 
     init(date: Date, id: UUID = UUID(), notes: String? = nil) {
         self.date = Calendar.current.startOfDay(for: date)
@@ -24,26 +26,29 @@ final class DailyLog {
 
     // MARK: - Computed Totals
 
+    // Convenience accessor that unwraps the optional relationship
+    var safeEntries: [NutritionEntry] { entries ?? [] }
+
     var totalCalories: Double {
-        entries.reduce(0) { $0 + $1.calories }
+        safeEntries.reduce(0) { $0 + $1.calories }
     }
 
     var totalProtein: Double {
-        entries.reduce(0) { $0 + $1.protein }
+        safeEntries.reduce(0) { $0 + $1.protein }
     }
 
     var totalCarbs: Double {
-        entries.reduce(0) { $0 + $1.carbs }
+        safeEntries.reduce(0) { $0 + $1.carbs }
     }
 
     var totalFat: Double {
-        entries.reduce(0) { $0 + $1.fat }
+        safeEntries.reduce(0) { $0 + $1.fat }
     }
 
     // MARK: - Grouped Entries
 
     func entries(for mealType: MealType) -> [NutritionEntry] {
-        entries
+        safeEntries
             .filter { $0.mealType == mealType }
             .sorted { $0.timestamp < $1.timestamp }
     }

@@ -80,22 +80,27 @@ struct RadialMenuButton: View {
                             let isHighlighted = highlightedID == item.id
 
                             optionBubble(item: item, isHighlighted: isHighlighted)
-                                .offset(x: position.x, y: position.y)
-                                .glassEffectID(item.id, in: glassNamespace)
-                                .glassEffectTransition(.matchedGeometry)
-                                .animation(.spring(duration: 0.2), value: isHighlighted)
-                                // Direct tap on a bubble — same effect as dragging to it.
-                                // The dismiss layer is behind the GlassEffectContainer, so
-                                // taps on bubbles are captured here first and never reach
-                                // the dismiss layer.
+                                // contentShape makes the full bounding box (not just rendered pixels)
+                                // tappable — important for the circle icon + label VStack layout
+                                .contentShape(Rectangle())
+                                // Attach the tap BEFORE glass and offset modifiers so
+                                // SwiftUI's hit-testing sees it at the view's content position,
+                                // preventing glassEffectTransition from confusing the touch region
                                 .onTapGesture {
                                     close()
                                     // Small delay lets the spring close animation start
-                                    // before presenting the sheet.
+                                    // before presenting the sheet
                                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                                         item.action()
                                     }
                                 }
+                                .offset(x: position.x, y: position.y)
+                                .glassEffectID(item.id, in: glassNamespace)
+                                // Scale+opacity transition instead of matchedGeometry:
+                                // matchedGeometry morphs the glass shape mid-flight, which can
+                                // place the hit region at an unpredictable position during animation
+                                .transition(.scale(scale: 0.5).combined(with: .opacity))
+                                .animation(.spring(duration: 0.2), value: isHighlighted)
                         }
                     }
 

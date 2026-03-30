@@ -129,7 +129,7 @@ enum ServingSize: Codable, Hashable, Sendable {
         }
     }
 
-    /// The dimension type as a string — useful for Turso storage and Gemini parsing
+    /// The dimension type as a string — useful for storage and Gemini parsing
     var type: String {
         switch self {
         case .mass: "mass"

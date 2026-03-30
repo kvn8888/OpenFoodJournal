@@ -233,7 +233,7 @@ struct CalendarGridView: View {
               let log = nutritionStore.fetchLog(for: date) else {
             return 0
         }
-        let totalCalories = log.entries.reduce(0.0) { $0 + $1.calories }
+        let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
         return totalCalories / goals.dailyCalories
     }
 

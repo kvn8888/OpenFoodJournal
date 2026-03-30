@@ -260,7 +260,7 @@ struct WeeklyCalendarStrip: View {
         // Calculate calorie progress for this day
         let progress: Double
         if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
-            let totalCalories = log.entries.reduce(0.0) { $0 + $1.calories }
+            let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
             progress = totalCalories / goals.dailyCalories
         } else {
             progress = 0

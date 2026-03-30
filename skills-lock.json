@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "app-store-review": {
+      "source": "safaiyeh/app-store-review-skill",
+      "sourceType": "github",
+      "computedHash": "b853ae894c4d9fbdd4a075b2130e1eeff175090bf8b94d29947742b81369f2c6"
+    }
+  }
+}
