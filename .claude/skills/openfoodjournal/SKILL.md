@@ -204,13 +204,15 @@ Already configured in `OpenFoodJournal.entitlements`:
 - **Skills**: This file is the project skill. Update it when architecture or requirements change.
 - **Commits**: Descriptive messages. Push after every significant change.
 
-**DailyLogView container**: Uses a `List` (not ScrollView+LazyVStack) with `.listStyle(.plain)` + `.scrollContentBackground(.hidden)`. `WeeklyCalendarStrip` and `MacroSummaryBar` are plain List rows with `listRowBackground(Color.clear)` + `listRowSeparator(.hidden)`. Meal sections use `MealSectionView` which returns a `Section{}` that becomes a proper sticky List section header in a List context. `.swipeActions` in `EntryRowView` (trailing delete) and `MealSectionView` (leading edit) fire correctly here.
+**DailyLogView container**: Uses a `List` (not ScrollView+LazyVStack) with `.listStyle(.plain)` + `.scrollContentBackground(.hidden)`. `WeeklyCalendarStrip` and `MacroSummaryBar` are plain List rows with `listRowBackground(Color.clear)` + `listRowSeparator(.hidden)`. Meal sections use `MealSectionView` which returns a `Section{}` that becomes a proper sticky List section header in a List context. All swipe actions are on the `MealSectionView` Button wrapper (not on `EntryRowView`).
 
-**RadialMenuButton**: Option bubbles support direct `.onTapGesture` (as well as drag-to-select). A `Color.clear.contentShape(Rectangle()).ignoresSafeArea()` layer behind `GlassEffectContainer` dismisses the menu when tapping outside. The layer is only inserted into the ZStack when `isOpen == true`.
+**RadialMenuButton**: Option bubbles support direct `.onTapGesture` (as well as drag-to-select). A `Color.clear.contentShape(Rectangle()).ignoresSafeArea()` layer behind `GlassEffectContainer` dismisses the menu when tapping outside. The layer is only inserted into the ZStack when `isOpen == true`. Option label text has a subtle drop shadow for legibility over light/glass backgrounds.
 
 **Swipe mappings**:
 - `FoodBankView` row: trailing (swipe left) = Edit (blue) + Delete (red, no full-swipe); leading (swipe right) = Add to journal (green)
-- `MealSectionView` row: trailing (swipe left) = Delete (in `EntryRowView`); leading (swipe right) = Edit (in `MealSectionView`'s Button wrapper)
+- `MealSectionView` row: trailing (swipe left) = Delete; leading (swipe right) = Edit — both on the outer Button wrapper (never on `EntryRowView` to avoid double-registration gesture lag)
+
+**FoodNutrientBreakdownView**: Inverse of `NutrientBreakdownView` — shows all nutrients (macros + micros) for a specific food across the selected period. Accessed by tapping a food row in NutrientBreakdownView's "By Food" section.
 
 **EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveEntry(entry)`.
 
@@ -228,6 +230,11 @@ Already configured in `OpenFoodJournal.entitlements`:
 - **Settings: OFF contribute toggle** (`off.contributeEnabled`, default off) in Integrations section
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
+- **NutritionDetailView macro cards**: circular progress rings (not linear ProgressView), showing value inside ring + percentage below
+- **FoodNutrientBreakdownView**: inverse of NutrientBreakdownView — food → all nutrients. NavigationLink from NutrientBreakdownView "By Food" rows
+- **LogFoodSheet editable micronutrients**: collapsible DisclosureGroup with editable text fields for each micronutrient, values applied at log time
+- **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass
+- **Swipe gesture lag fix**: swipe actions consolidated on MealSectionView Button wrapper (removed from EntryRowView), SavedFoodRowView has `.contentShape(Rectangle())`, EntryRowView uses static DateFormatter
 - WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values
 - Entitlements configured: iCloud (CloudKit), Push Notifications, Camera, HealthKit descriptions
@@ -255,24 +262,9 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 ## Planned Work (Backlog)
 
-### Bug Fixes
-
-- **Swipe gesture lag on rows without brands** — Two root causes:
-  1. `EntryRowView` has `.swipeActions(edge: .trailing)` on its inner `HStack`, *and* `MealSectionView` adds `.swipeActions(edge: .leading)` on the outer `Button` wrapper. This double-registration creates competing gesture recognizers; shorter rows (no brand = 2 lines instead of 3) have less gesture area to resolve the ambiguity quickly. Fix: move the trailing delete action out of `EntryRowView` into `MealSectionView`'s `Button` wrapper and remove it from `EntryRowView`.
-  2. `SavedFoodRowView` lacks `.contentShape(Rectangle())`. Without a brand the row is shorter, shrinking the swipe-recognizer target. Fix: add `.contentShape(Rectangle())` after `.padding(.vertical, 4)`.
-  - Bonus: `EntryRowView.timeString` allocates a new `DateFormatter` on every render — make it `static`.
-
 ### UX / Feature Improvements
 
-- **Macro cards in NutritionDetailView → circular progress rings** — Currently `macroCard()` renders a number + linear `ProgressView` bar. Replace with circular/donut progress rings (matching the aesthetic of the calendar day rings) so tapping the `MacroSummaryBar` in DailyLogView leads to a visually consistent detail view.
-
 - **Weekly/monthly view should display daily averages** — In `NutritionDetailView`, when `selectedPeriod` is `.weekly` or `.monthly`, `macroTotals` currently accumulates totals. For multi-day periods, display the **daily average** (total ÷ days in period) so "14,000 kcal this week" becomes "2,000 kcal/day avg". The period picker label should reflect this ("Weekly Avg", "Monthly Avg"). Same applies to the `comparisonCard` values in `HistoryView.weekComparisonSection` (already divides by 7 — verify `.monthly` path does the same).
-
-- **"By food" section → per-food nutrient breakdown view** — `NutrientBreakdownView` shows a donut + per-food contribution bars for a *single* nutrient. Add a new `FoodNutrientBreakdownView` (or adapt existing) reachable from a "By Food" entry in `NutritionDetailView` or from a food row tap in `NutrientBreakdownView`. This view shows *all* nutrients (macros + micros) for a specific food across the selected period — essentially the inverse axis: food → all its nutrients, rather than nutrient → all foods.
-
-- **Log food sheet → edit micronutrients before logging** — `LogFoodSheet` currently shows macros + serving size picker but no micronutrients. Add a collapsible "Micronutrients" section (similar to the one in `EditEntryView`) so users can review and adjust micro values before committing. The `SavedFood` model already stores `micronutrients: [String: MicronutrientValue]` — the values just need to be surfaced and made editable in the sheet.
-
-- **Radial menu option label text shadow** — `optionBubble()` in `RadialMenuButton` renders `Text(item.label)` with `.foregroundStyle(.secondary)`. On light backgrounds the caption labels ("Food Bank", "Containers", etc.) can be hard to read. Add a subtle drop shadow (`.shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)`) to the `Text` label, matching how Apple applies text shadows on glass-overlaid labels for legibility.
 
 ### Open Food Facts Integration
 

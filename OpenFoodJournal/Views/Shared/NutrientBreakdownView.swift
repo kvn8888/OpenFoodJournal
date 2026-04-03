@@ -128,15 +128,19 @@ struct NutrientBreakdownView: View {
                     .padding(.vertical, 8)
                 }
 
-                // Per-food breakdown
+                // Per-food breakdown — tap a row to see all nutrients for that food
                 Section("By Food") {
                     ForEach(contributions) { item in
-                        ContributionRow(
-                            item: item,
-                            total: total,
-                            dailyValue: effectiveDailyValue,
-                            unit: kind.unit
-                        )
+                        NavigationLink {
+                            FoodNutrientBreakdownView(foodName: item.foodName, period: period)
+                        } label: {
+                            ContributionRow(
+                                item: item,
+                                total: total,
+                                dailyValue: effectiveDailyValue,
+                                unit: kind.unit
+                            )
+                        }
                     }
                 }
             } else {

@@ -24,6 +24,15 @@ struct MealSectionView: View {
                         EntryRowView(entry: entry, onDelete: { onDelete(entry) })
                     }
                     .buttonStyle(.plain)
+                    // Swipe left (trailing) — Delete action (moved here from EntryRowView
+                    // to avoid double swipeActions registration which causes gesture lag)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            onDelete(entry)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
                     // Swipe right (leading) — Edit shortcut, same as tapping the row
                     .swipeActions(edge: .leading) {
                         Button {

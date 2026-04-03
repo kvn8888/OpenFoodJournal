@@ -57,5 +57,8 @@ struct SavedFoodRowView: View {
             }
         }
         .padding(.vertical, 4)
+        // Ensures the full row area is tappable/swipeable, even when brand is
+        // absent and the row is shorter — prevents swipe gesture lag on compact rows
+        .contentShape(Rectangle())
     }
 }
