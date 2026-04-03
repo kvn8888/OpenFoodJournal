@@ -202,12 +202,20 @@ private struct ModelConfig {
         thinkingLevel: "MINIMAL"
     )
 
-    /// Food photo scans: gemini-3.1-pro-preview with high thinking.
+    /// Food photo scans (Pro): gemini-3.1-pro-preview with high thinking.
     /// Needs reasoning to estimate portion sizes and nutrient content (~4-8s).
     static let foodPhoto = ModelConfig(
         primary: "gemini-3.1-pro-preview",
         fallback: "gemini-2.5-pro",
         thinkingLevel: "HIGH"
+    )
+
+    /// Food photo scans (Lite): uses flash-lite for faster, cheaper estimates.
+    /// Less accurate than Pro but still reasonable for common foods (~2-4s).
+    static let foodPhotoLite = ModelConfig(
+        primary: "gemini-3.1-flash-lite-preview",
+        fallback: "gemini-2.5-flash",
+        thinkingLevel: "MINIMAL"
     )
 }
 
@@ -241,10 +249,10 @@ final class ScanService {
 
     /// Kicks off a scan in the background. The caller can dismiss immediately.
     /// Result lands in `pendingResult`; errors land in `error`.
-    func scanInBackground(image: UIImage, mode: ScanMode, prompt: String? = nil) {
+    func scanInBackground(image: UIImage, mode: ScanMode, prompt: String? = nil, useProModel: Bool = false) {
         Task { @MainActor in
             do {
-                let entry = try await scan(image: image, mode: mode, prompt: prompt)
+                let entry = try await scan(image: image, mode: mode, prompt: prompt, useProModel: useProModel)
                 pendingResult = entry
             } catch {
                 // error is already set via the scan() method
@@ -255,7 +263,7 @@ final class ScanService {
     /// Sends a captured image directly to Gemini's REST API and returns a NutritionEntry.
     /// Requires a Gemini API key stored in Keychain.
     /// The entry is NOT inserted into SwiftData — caller should review and confirm.
-    func scan(image: UIImage, mode: ScanMode, prompt: String? = nil) async throws -> NutritionEntry {
+    func scan(image: UIImage, mode: ScanMode, prompt: String? = nil, useProModel: Bool = false) async throws -> NutritionEntry {
         isScanning = true
         error = nil
         defer { isScanning = false }
@@ -290,8 +298,16 @@ final class ScanService {
         print("📐 Image: \(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))px → \(Int(resized.size.width * resized.scale))×\(Int(resized.size.height * resized.scale))px, JPEG: \(jpegData.count / 1024)KB")
         #endif
 
-        // Pick model config and prompt based on scan mode
-        let modelConfig = mode == .label ? ModelConfig.label : ModelConfig.foodPhoto
+        // Pick model config and prompt based on scan mode.
+        // Food photos default to lite unless the user enables Pro in Settings.
+        let modelConfig: ModelConfig
+        if mode == .label {
+            modelConfig = .label
+        } else if useProModel {
+            modelConfig = .foodPhoto
+        } else {
+            modelConfig = .foodPhotoLite
+        }
         let systemPrompt = mode == .label ? Self.labelPrompt : Self.foodPhotoPrompt
 
         // If user provided additional context (e.g. "this is walnut shrimp"),

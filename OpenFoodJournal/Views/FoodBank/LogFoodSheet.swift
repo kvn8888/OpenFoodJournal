@@ -32,6 +32,9 @@ struct LogFoodSheet: View {
     @State private var showEditFood = false
     // Controls the Add Serving Mapping sheet
     @State private var showAddMapping = false
+    // Editable micronutrient values — initialized from the food template, can be
+    // adjusted by the user before logging. Scaling is applied at log time.
+    @State private var editedMicros: [String: MicronutrientValue]
 
     // Centralised unit conversion + macro scaling logic (shared with EditEntryView)
     private let converter: ServingConverter
@@ -48,6 +51,7 @@ struct LogFoodSheet: View {
         _quantityText = State(initialValue: qty.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
         _selectedUnit = State(initialValue: unit)
+        _editedMicros = State(initialValue: food.micronutrients)
         self.baseUnit = unit
         self.converter = ServingConverter(
             calories: food.calories,
@@ -83,7 +87,7 @@ struct LogFoodSheet: View {
                     macroGrid
 
                     // ── Micronutrients (if any) ──────────────────────
-                    if !food.micronutrients.isEmpty {
+                    if !editedMicros.isEmpty {
                         micronutrientSection
                     }
 
@@ -205,27 +209,33 @@ struct LogFoodSheet: View {
 
     // MARK: - Micronutrients
 
-    /// Expandable section showing all dynamic micronutrients with progress bars
+    /// Expandable section showing all dynamic micronutrients with editable fields.
+    /// Users can review and adjust micro values before committing the log.
     private var micronutrientSection: some View {
         DisclosureGroup {
             VStack(spacing: 10) {
-                let sorted = food.micronutrients.keys.sorted()
+                let sorted = editedMicros.keys.sorted()
                 ForEach(sorted, id: \.self) { name in
-                    if let micro = food.micronutrients[name] {
+                    if let micro = editedMicros[name] {
                         let scaledValue = micro.value * quantity / unitFactor / converter.baseQuantity
                         let known = KnownMicronutrients.find(name)
-                        MicronutrientProgressRow(
+                        EditableMicroRow(
                             name: known?.name ?? name,
-                            value: scaledValue,
+                            key: name,
+                            value: micro.value,
+                            scaledValue: scaledValue,
                             unit: micro.unit,
-                            dailyValue: known?.dailyValue
+                            dailyValue: known?.dailyValue,
+                            onValueChanged: { newValue in
+                                editedMicros[name] = MicronutrientValue(value: newValue, unit: micro.unit)
+                            }
                         )
                     }
                 }
             }
             .padding(.top, 4)
         } label: {
-            Label("Micronutrients (\(food.micronutrients.count))", systemImage: "list.bullet")
+            Label("Micronutrients (\(editedMicros.count))", systemImage: "list.bullet")
                 .font(.subheadline)
                 .fontWeight(.medium)
         }
@@ -258,15 +268,17 @@ struct LogFoodSheet: View {
     private var logButton: some View {
         Button {
             // Create the entry from the food template
-            var entry = food.toNutritionEntry(mealType: selectedMealType)
+            let entry = food.toNutritionEntry(mealType: selectedMealType)
             // Scale all macros by the ratio of (selected quantity / base serving size)
             let factor = quantity / unitFactor / converter.baseQuantity
             entry.calories *= factor
             entry.protein *= factor
             entry.carbs *= factor
             entry.fat *= factor
-            // Scale micronutrients by the same factor
-            for (key, micro) in entry.micronutrients {
+            // Apply edited micronutrients (user may have adjusted values),
+            // scaled by the same factor as macros
+            entry.micronutrients = [:]
+            for (key, micro) in editedMicros {
                 entry.micronutrients[key] = MicronutrientValue(
                     value: micro.value * factor,
                     unit: micro.unit
@@ -420,6 +432,7 @@ struct LogFoodSheet: View {
         switch food.originalScanMode {
         case .label: "barcode.viewfinder"
         case .foodPhoto: "fork.knife"
+        case .barcode: "barcode"
         case .manual: "pencil.circle"
         }
     }
@@ -429,6 +442,7 @@ struct LogFoodSheet: View {
         switch food.originalScanMode {
         case .label: "Label Scan"
         case .foodPhoto: "Food Photo"
+        case .barcode: "Barcode Scan"
         case .manual: "Manual Entry"
         }
     }
@@ -590,6 +604,93 @@ private struct MicronutrientProgressRow: View {
                     .monospacedDigit()
                     .frame(width: 40, alignment: .trailing)
             }
+        }
+    }
+}
+
+// MARK: - Editable Micro Row
+
+/// An editable micronutrient row: shows the nutrient name, a text field for the
+/// base value (per-serving), the scaled value for reference, and a DV% progress bar.
+/// Tapping the value opens the decimal keyboard for inline editing.
+private struct EditableMicroRow: View {
+    let name: String
+    let key: String
+    let value: Double          // Base (per-serving) value from editedMicros
+    let scaledValue: Double    // Value after quantity+unit scaling (shown as reference)
+    let unit: String
+    let dailyValue: Double?
+    let onValueChanged: (Double) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var isFocused: Bool
+
+    private var progress: Double {
+        guard let dv = dailyValue, dv > 0 else { return 0 }
+        return min(scaledValue / dv, 1.0)
+    }
+
+    private var percentText: String {
+        guard let dv = dailyValue, dv > 0 else { return "—" }
+        return "\(Int((scaledValue / dv) * 100))%"
+    }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack {
+                Text(name)
+                    .font(.subheadline)
+                Spacer()
+                // Editable value field — edits the base (per-serving) amount
+                HStack(spacing: 2) {
+                    TextField("0", text: $text)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.subheadline.monospacedDigit())
+                        .frame(width: 60)
+                        .focused($isFocused)
+                        .onChange(of: text) { _, newVal in
+                            if let d = Double(newVal), d >= 0 {
+                                onValueChanged(d)
+                            }
+                        }
+                        .onChange(of: isFocused) { _, focused in
+                            if !focused {
+                                // Re-format on blur so display stays clean
+                                text = String(format: "%.1f", value)
+                            }
+                        }
+                    Text(unit)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            // Progress bar vs daily value
+            HStack(spacing: 8) {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(.quaternary)
+                            .frame(height: 6)
+                        if dailyValue != nil && dailyValue! > 0 {
+                            Capsule()
+                                .fill(scaledValue > (dailyValue ?? 0) ? Color.orange : Color.accentColor)
+                                .frame(width: geo.size.width * progress, height: 6)
+                                .animation(.easeInOut, value: progress)
+                        }
+                    }
+                }
+                .frame(height: 6)
+
+                Text(percentText)
+                    .font(.caption2)
+                    .foregroundStyle(dailyValue == nil ? .tertiary : .secondary)
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
+        }
+        .onAppear {
+            text = String(format: "%.1f", value)
         }
     }
 }

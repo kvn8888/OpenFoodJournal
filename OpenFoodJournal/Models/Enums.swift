@@ -28,6 +28,7 @@ enum MealType: String, Codable, CaseIterable, Identifiable {
 enum ScanMode: String, Codable, CaseIterable {
     case label = "Label Scan"
     case foodPhoto = "Food Photo"
+    case barcode = "Barcode"
     case manual = "Manual"
 
     var isEstimate: Bool {

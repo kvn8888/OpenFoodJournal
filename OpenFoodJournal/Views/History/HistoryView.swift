@@ -10,26 +10,70 @@ struct HistoryView: View {
     @Environment(UserGoals.self) private var goals
 
     @State private var selectedDate: Date = .now
+    @State private var editingEntry: NutritionEntry?
+    @State private var comparisonPeriod: ComparisonPeriod = .weekly
+    @State private var comparisonDate: Date = .now
+
+    private let calendar = Calendar.current
+
+    /// Period options for the comparison section
+    enum ComparisonPeriod: String, CaseIterable {
+        case weekly = "Week"
+        case monthly = "Month"
+    }
 
     // Current selected day's log
     private var selectedLog: DailyLog? {
         nutritionStore.fetchLog(for: selectedDate)
     }
 
-    // MARK: - Week-over-week data
+    // MARK: - Period-aware comparison data
 
-    private var thisWeekLogs: [DailyLog] {
-        let calendar = Calendar.current
-        let start = calendar.date(byAdding: .day, value: -6, to: .now)!
-        return nutritionStore.fetchLogs(from: start, to: .now)
+    /// Number of days in the current comparison period
+    private var periodDays: Int {
+        comparisonPeriod == .weekly ? 7 : 30
     }
 
-    private var lastWeekLogs: [DailyLog] {
-        let calendar = Calendar.current
-        let thisWeekStart = calendar.date(byAdding: .day, value: -6, to: .now)!
-        let lastWeekStart = calendar.date(byAdding: .day, value: -7, to: thisWeekStart)!
-        let lastWeekEnd = calendar.date(byAdding: .day, value: -1, to: thisWeekStart)!
-        return nutritionStore.fetchLogs(from: lastWeekStart, to: lastWeekEnd)
+    /// Logs for the current period ending at comparisonDate
+    private var currentPeriodLogs: [DailyLog] {
+        let start = calendar.date(byAdding: .day, value: -(periodDays - 1), to: comparisonDate)!
+        return nutritionStore.fetchLogs(from: start, to: comparisonDate)
+    }
+
+    /// Logs for the previous period (same length, immediately before current)
+    private var previousPeriodLogs: [DailyLog] {
+        let currentStart = calendar.date(byAdding: .day, value: -(periodDays - 1), to: comparisonDate)!
+        let prevEnd = calendar.date(byAdding: .day, value: -1, to: currentStart)!
+        let prevStart = calendar.date(byAdding: .day, value: -(periodDays - 1), to: prevEnd)!
+        return nutritionStore.fetchLogs(from: prevStart, to: prevEnd)
+    }
+
+    /// Whether user can navigate forward (can't go past today)
+    private var canGoForward: Bool {
+        calendar.startOfDay(for: comparisonDate) < calendar.startOfDay(for: .now)
+    }
+
+    /// Formatted date label for the comparison period
+    private var comparisonDateLabel: String {
+        switch comparisonPeriod {
+        case .weekly:
+            let start = calendar.date(byAdding: .day, value: -6, to: comparisonDate)!
+            let startStr = start.formatted(.dateTime.month(.abbreviated).day())
+            let endStr = comparisonDate.formatted(.dateTime.month(.abbreviated).day())
+            return "\(startStr) – \(endStr)"
+        case .monthly:
+            return comparisonDate.formatted(.dateTime.month(.wide).year())
+        }
+    }
+
+    /// Label for current vs previous period
+    private var comparisonTitle: String {
+        comparisonPeriod == .weekly ? "Last Week vs This Week" : "Last Month vs This Month"
+    }
+
+    /// Label for the chart section
+    private var chartTitle: String {
+        comparisonPeriod == .weekly ? "This Week" : "This Month"
     }
 
     var body: some View {
@@ -39,16 +83,16 @@ struct HistoryView: View {
                     // Calendar with calorie progress rings on each day
                     CalendarGridView(selectedDate: $selectedDate)
 
-                    // Week-over-week macro comparison
-                    weekComparisonSection
+                    // Period picker + date nav + comparison
+                    comparisonSection
 
-                    // Chart for this week
+                    // Chart for current period
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("This Week")
+                        Text(chartTitle)
                             .font(.headline)
                             .padding(.horizontal)
 
-                        if thisWeekLogs.isEmpty {
+                        if currentPeriodLogs.isEmpty {
                             Text("No data yet — start logging meals!")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
@@ -57,7 +101,7 @@ struct HistoryView: View {
                                 .glassEffect(in: .rect(cornerRadius: 16))
                                 .padding(.horizontal)
                         } else {
-                            MacroChartView(logs: thisWeekLogs, goals: goals)
+                            MacroChartView(logs: currentPeriodLogs, goals: goals)
                                 .padding(.horizontal)
                         }
                     }
@@ -70,39 +114,107 @@ struct HistoryView: View {
                 .padding(.vertical)
             }
             .navigationTitle("History")
+            .sheet(item: $editingEntry) { entry in
+                EditEntryView(entry: entry)
+            }
+            .animation(.easeInOut(duration: 0.2), value: comparisonDate)
+            .animation(.easeInOut(duration: 0.2), value: comparisonPeriod)
+            .onChange(of: selectedDate) { _, newDate in
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    comparisonDate = newDate
+                }
+            }
         }
     }
 
-    // MARK: - Week-over-Week Comparison
+    // MARK: - Comparison Section
 
-    private var weekComparisonSection: some View {
+    private var comparisonSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Last Week vs This Week")
+            // Period picker
+            Picker("Period", selection: $comparisonPeriod) {
+                ForEach(ComparisonPeriod.allCases, id: \.self) { period in
+                    Text(period.rawValue).tag(period)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+
+            // Date navigation
+            GlassEffectContainer(spacing: 6) {
+                HStack(spacing: 6) {
+                    Button {
+                        navigateComparison(by: -1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+
+                    Text(comparisonDateLabel)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .glassEffect(in: .capsule)
+                        .contentTransition(.numericText())
+
+                    Button {
+                        navigateComparison(by: 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!canGoForward)
+                    .opacity(canGoForward ? 1 : 0.3)
+                }
+            }
+            .padding(.horizontal)
+
+            Text(comparisonTitle)
                 .font(.headline)
                 .padding(.horizontal)
 
-            // Each macro card navigates to the NutritionDetailView
+            // Macro comparison cards
             NavigationLink {
                 NutritionDetailView()
             } label: {
                 LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                    comparisonCard("Calories", thisWeek: avgMacro(\.totalCalories, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCalories, logs: lastWeekLogs), unit: "kcal", color: .orange)
-                    comparisonCard("Protein", thisWeek: avgMacro(\.totalProtein, logs: thisWeekLogs), lastWeek: avgMacro(\.totalProtein, logs: lastWeekLogs), unit: "g", color: .blue)
-                    comparisonCard("Carbs", thisWeek: avgMacro(\.totalCarbs, logs: thisWeekLogs), lastWeek: avgMacro(\.totalCarbs, logs: lastWeekLogs), unit: "g", color: .green)
-                    comparisonCard("Fat", thisWeek: avgMacro(\.totalFat, logs: thisWeekLogs), lastWeek: avgMacro(\.totalFat, logs: lastWeekLogs), unit: "g", color: .yellow)                }
+                    comparisonCard("Calories", current: avgMacro(\.totalCalories, logs: currentPeriodLogs), previous: avgMacro(\.totalCalories, logs: previousPeriodLogs), unit: "kcal", color: .orange)
+                    comparisonCard("Protein", current: avgMacro(\.totalProtein, logs: currentPeriodLogs), previous: avgMacro(\.totalProtein, logs: previousPeriodLogs), unit: "g", color: .blue)
+                    comparisonCard("Carbs", current: avgMacro(\.totalCarbs, logs: currentPeriodLogs), previous: avgMacro(\.totalCarbs, logs: previousPeriodLogs), unit: "g", color: .green)
+                    comparisonCard("Fat", current: avgMacro(\.totalFat, logs: currentPeriodLogs), previous: avgMacro(\.totalFat, logs: previousPeriodLogs), unit: "g", color: Color(red: 0.9, green: 0.75, blue: 0.0))
+                }
                 .padding(.horizontal)
             }
             .buttonStyle(.plain)
         }
     }
 
-    private func avgMacro(_ keyPath: KeyPath<DailyLog, Double>, logs: [DailyLog]) -> Double {
-        guard !logs.isEmpty else { return 0 }
-        return logs.map { $0[keyPath: keyPath] }.reduce(0, +) / 7.0
+    // MARK: - Navigation
+
+    private func navigateComparison(by direction: Int) {
+        let days = comparisonPeriod == .weekly ? 7 : 30
+        guard let newDate = calendar.date(byAdding: .day, value: direction * days, to: comparisonDate) else { return }
+
+        if direction > 0 && calendar.startOfDay(for: newDate) > calendar.startOfDay(for: .now) {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            comparisonDate = newDate
+        }
     }
 
-    private func comparisonCard(_ name: String, thisWeek: Double, lastWeek: Double, unit: String, color: Color) -> some View {
-        let delta = lastWeek > 0 ? ((thisWeek - lastWeek) / lastWeek) * 100 : 0
+    private func avgMacro(_ keyPath: KeyPath<DailyLog, Double>, logs: [DailyLog]) -> Double {
+        guard !logs.isEmpty else { return 0 }
+        return logs.map { $0[keyPath: keyPath] }.reduce(0, +) / Double(periodDays)
+    }
+
+    private func comparisonCard(_ name: String, current: Double, previous: Double, unit: String, color: Color) -> some View {
+        let delta = previous > 0 ? ((current - previous) / previous) * 100 : 0
         let deltaSign = delta >= 0 ? "+" : ""
 
         return VStack(spacing: 4) {
@@ -110,7 +222,7 @@ struct HistoryView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text("\(Int(thisWeek))")
+            Text("\(Int(current))")
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(color)
@@ -119,7 +231,7 @@ struct HistoryView: View {
                 .font(.caption2)
                 .foregroundStyle(.secondary)
 
-            if lastWeek > 0 {
+            if previous > 0 {
                 Text("\(deltaSign)\(Int(delta))%")
                     .font(.caption2)
                     .fontWeight(.medium)
@@ -162,10 +274,15 @@ struct HistoryView: View {
                             if !entries.isEmpty {
                                 Section {
                                     ForEach(entries) { entry in
-                                        EntryRowView(entry: entry, onDelete: {
-                                            nutritionStore.delete(entry)
-                                        })
-                                        .padding(.horizontal)
+                                        Button {
+                                            editingEntry = entry
+                                        } label: {
+                                            EntryRowView(entry: entry, onDelete: {
+                                                nutritionStore.delete(entry)
+                                            })
+                                            .padding(.horizontal)
+                                        }
+                                        .buttonStyle(.plain)
                                     }
                                 } header: {
                                     HStack {
@@ -216,6 +333,7 @@ struct DayDetailView: View {
             VStack(spacing: 16) {
                 MacroSummaryBar(log: log, goals: goals)
                     .padding(.horizontal)
+                
 
                 if let log, !log.safeEntries.isEmpty {
                     LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
