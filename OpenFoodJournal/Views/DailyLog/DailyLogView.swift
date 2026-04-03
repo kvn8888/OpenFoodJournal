@@ -150,6 +150,20 @@ struct DailyLogView: View {
                 .animation(.easeInOut(duration: 0.3), value: scanService.isScanning)
             }
         }
+        // Scan error alert — shown when a background scan fails (quota, network, etc.)
+        .alert(
+            "Scan Failed",
+            isPresented: Binding(
+                get: { scanService.error != nil && !scanService.isScanning },
+                set: { if !$0 { scanService.error = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                scanService.error = nil
+            }
+        } message: {
+            Text(scanService.error?.localizedDescription ?? "An unknown error occurred.")
+        }
         // When scan completes, show result card as a sheet
         .sheet(isPresented: Binding(
             get: { scanService.pendingResult != nil },

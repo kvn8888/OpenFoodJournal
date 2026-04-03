@@ -26,14 +26,14 @@ This is the single source of truth for any LLM agent working on this project. Re
 MacrosApp (creates ModelContainer w/ CloudKit + 4 @Observable services)
   └─ ContentView (4-tab TabView)
        ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
-       ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit)
+       ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit, "+" menu: Scan/Manual/Search OFF)
        ├─ History tab → HistoryView (CalendarGridView with progress rings, MacroChartView, macro cards → NutritionDetailView)
        └─ Settings tab → SettingsView (goals, health, data export)
 ```
 
 **Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.
 
-**Service injection**: All services (`NutritionStore`, `ScanService`, `HealthKitService`, `UserGoals`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`. `SyncService` was removed — CloudKit handles sync natively via `ModelConfiguration(cloudKitDatabase:)`.
+**Service injection**: All services (`NutritionStore`, `ScanService`, `HealthKitService`, `UserGoals`, `OpenFoodFactsService`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`. `SyncService` was removed — CloudKit handles sync natively via `ModelConfiguration(cloudKitDatabase:)`.
 
 **Sheet management**: `DailyLogView` uses a single `DailyLogSheet` enum with `.sheet(item:)` — never multiple booleans.
 
@@ -61,8 +61,7 @@ See [references/services.md](references/services.md) for full API contracts.
 - **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before direct Gemini REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `GeminiModelConfig` static configs: `.labelScan` (gemini-3.1-flash-lite-preview, MINIMAL thinking) and `.foodPhotoScan` (gemini-3.1-pro-preview, HIGH thinking). Includes automatic fallback to gemini-2.5-flash/pro on 500/503 errors. Loads API key from `KeychainService`. User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
 - **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
-- **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.
-- **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
+- **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.- **`OpenFoodFactsService`** — Text search and barcode lookup against the Open Food Facts REST API. Direct `URLSession`, no SPM dependency. Debounced search, Codable response parsing, `OFFProduct` → `NutritionEntry`/`SavedFood` conversion. Optional contribute mode (writes scanned data back to OFF).- **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
 
 ## View Map
 
@@ -191,7 +190,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 **EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveEntry(entry)`.
 
-## Current State (Last Updated: 2025-07-17)
+## Current State (Last Updated: 2026-04-02)
 
 - **Branch: `app-store`** — CloudKit migration complete, all Turso sync code removed
 - App structure complete: all models, services, and views implemented
@@ -200,6 +199,9 @@ Already configured in `OpenFoodJournal.entitlements`:
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Render proxy deployed at `openfoodjournal.onrender.com` (Gemini scan proxy only)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
+- **Open Food Facts integration**: search 4M+ products, add to journal/food bank, debounced search, per-serving nutrition
+- **Food Bank "+" toolbar menu**: Search Open Food Facts, Manual Entry (replaces empty-state-only guidance)
+- **Settings: OFF contribute toggle** (`off.contributeEnabled`, default off) in Integrations section
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
 - WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping
@@ -226,3 +228,45 @@ Already configured in `OpenFoodJournal.entitlements`:
 - `server/` directory and `render.yaml` are dead code on `app-store` branch — reviewers clicking the GitHub link may be confused.
 - AGPL-3.0 license has App Store exception in LICENSE_NOTICE.md — Apple may or may not flag this.
 - Privacy policy is web-only (GitHub link) — fails offline. Consider embedding a copy in-app.
+
+## Planned Work (Backlog)
+
+### Bug Fixes
+
+- **Swipe gesture lag on rows without brands** — Two root causes:
+  1. `EntryRowView` has `.swipeActions(edge: .trailing)` on its inner `HStack`, *and* `MealSectionView` adds `.swipeActions(edge: .leading)` on the outer `Button` wrapper. This double-registration creates competing gesture recognizers; shorter rows (no brand = 2 lines instead of 3) have less gesture area to resolve the ambiguity quickly. Fix: move the trailing delete action out of `EntryRowView` into `MealSectionView`'s `Button` wrapper and remove it from `EntryRowView`.
+  2. `SavedFoodRowView` lacks `.contentShape(Rectangle())`. Without a brand the row is shorter, shrinking the swipe-recognizer target. Fix: add `.contentShape(Rectangle())` after `.padding(.vertical, 4)`.
+  - Bonus: `EntryRowView.timeString` allocates a new `DateFormatter` on every render — make it `static`.
+
+### UX / Feature Improvements
+
+- **Macro cards in NutritionDetailView → circular progress rings** — Currently `macroCard()` renders a number + linear `ProgressView` bar. Replace with circular/donut progress rings (matching the aesthetic of the calendar day rings) so tapping the `MacroSummaryBar` in DailyLogView leads to a visually consistent detail view.
+
+- **Weekly/monthly view should display daily averages** — In `NutritionDetailView`, when `selectedPeriod` is `.weekly` or `.monthly`, `macroTotals` currently accumulates totals. For multi-day periods, display the **daily average** (total ÷ days in period) so "14,000 kcal this week" becomes "2,000 kcal/day avg". The period picker label should reflect this ("Weekly Avg", "Monthly Avg"). Same applies to the `comparisonCard` values in `HistoryView.weekComparisonSection` (already divides by 7 — verify `.monthly` path does the same).
+
+- **"By food" section → per-food nutrient breakdown view** — `NutrientBreakdownView` shows a donut + per-food contribution bars for a *single* nutrient. Add a new `FoodNutrientBreakdownView` (or adapt existing) reachable from a "By Food" entry in `NutritionDetailView` or from a food row tap in `NutrientBreakdownView`. This view shows *all* nutrients (macros + micros) for a specific food across the selected period — essentially the inverse axis: food → all its nutrients, rather than nutrient → all foods.
+
+- **Log food sheet → edit micronutrients before logging** — `LogFoodSheet` currently shows macros + serving size picker but no micronutrients. Add a collapsible "Micronutrients" section (similar to the one in `EditEntryView`) so users can review and adjust micro values before committing. The `SavedFood` model already stores `micronutrients: [String: MicronutrientValue]` — the values just need to be surfaced and made editable in the sheet.
+
+- **Radial menu option label text shadow** — `optionBubble()` in `RadialMenuButton` renders `Text(item.label)` with `.foregroundStyle(.secondary)`. On light backgrounds the caption labels ("Food Bank", "Containers", etc.) can be hard to read. Add a subtle drop shadow (`.shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)`) to the `Text` label, matching how Apple applies text shadows on glass-overlaid labels for legibility.
+
+### Open Food Facts Integration
+
+- **Open Food Facts (OFF)** is a free, open database of 4M+ food products. Integrated into the Food Bank for searching and adding foods without scanning.
+- **Service**: `OpenFoodFactsService` — `@Observable @MainActor` service for OFF REST API calls (text search + barcode lookup). Injected via `.environment()` from `MacrosApp`.
+- **API endpoints used**:
+  - **Text search (v1)**: `GET https://world.openfoodfacts.org/cgi/search.pl?search_terms={query}&search_simple=1&action=process&json=1&fields=...&page_size=25` — only v1 supports full-text search
+  - **Barcode lookup (v2)**: `GET https://world.openfoodfacts.org/api/v2/product/{barcode}?fields=...`
+  - **Fields requested**: `product_name,brands,nutriments,serving_size,serving_quantity,code`
+  - **Nutriments mapping**: `energy-kcal_100g` → calories, `proteins_100g` → protein, `carbohydrates_100g` → carbs, `fat_100g` → fat, plus micronutrients (fiber, sugar, sodium, etc.)
+  - **User-Agent**: `OpenFoodJournal/1.0 (openfoodjournal@example.com)` — required by OFF API policy
+  - **Rate limits**: 10 req/min for search, 100 req/min for product reads
+  - **No auth required** for reads; writes (contribute) require OFF account credentials
+- **UI access points**:
+  - **FoodBankView toolbar**: "+" button (leading of sort button) → Menu with 3 options: Scan, Manual Entry, Search Open Food Facts
+  - **Scan** and **Manual Entry** reuse existing sheets (`ScanView` via DailyLogSheet, `ManualEntryView`)
+  - **Search Open Food Facts** opens `OpenFoodFactsSearchView` — debounced text input, paginated results, tap to review details
+  - **Result action**: Same pattern as ManualEntryView — "Add to Journal" or "Add to Journal & Food Bank" via toolbar Menu
+- **Settings**: `@AppStorage("off.contributeEnabled")` toggle (default: `false`) in SettingsView. When enabled, scanned nutrition data is submitted back to OFF after the user logs it. Write API uses `POST /cgi/product_jqm2.pl` with user credentials.
+- **Data flow**: OFF search result → `OFFProduct` struct (Codable) → converted to `NutritionEntry` / `SavedFood` with `scanMode: .manual` and brand preserved. Nutrition values from OFF are per-100g; conversion to serving-based values uses `serving_size` field when available.
+- **No SPM dependency**: Direct `URLSession` calls, no OFF Swift SDK imported (keeps zero-dependency architecture).

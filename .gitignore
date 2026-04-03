@@ -14,3 +14,4 @@ DerivedData/
 
 # Node
 server/*.log
+.rocketride/

@@ -16,6 +16,26 @@ struct CalendarGridView: View {
     // ── Local State ───────────────────────────────────────────────
     // The month currently being displayed (first day of that month)
     @State private var displayedMonth: Date = .now
+    // Tracks swipe direction for slide transition
+    @State private var slideDirection: SlideDirection = .forward
+
+    private enum SlideDirection {
+        case forward, backward
+
+        var insertion: AnyTransition {
+            switch self {
+            case .forward:  .move(edge: .trailing)
+            case .backward: .move(edge: .leading)
+            }
+        }
+
+        var removal: AnyTransition {
+            switch self {
+            case .forward:  .move(edge: .leading)
+            case .backward: .move(edge: .trailing)
+            }
+        }
+    }
 
     private let calendar = Calendar.current
 
@@ -35,10 +55,16 @@ struct CalendarGridView: View {
             // Weekday column labels (S, M, T, W, T, F, S)
             weekdayHeader
 
-            // Day cells grid with progress rings
+            // Day cells grid with progress rings — keyed by month for slide transition
             dayGrid
+                .id(displayedMonth)
+                .transition(.asymmetric(
+                    insertion: slideDirection.insertion,
+                    removal: slideDirection.removal
+                ))
         }
         .padding()
+        .clipped()
         .glassEffect(in: .rect(cornerRadius: 20))
         .padding(.horizontal)
         // Swipe left/right to navigate months
@@ -48,13 +74,9 @@ struct CalendarGridView: View {
                     // Horizontal swipe: negative = swipe left = next month
                     let horizontal = value.translation.width
                     if horizontal < -50 && !isCurrentMonth {
-                        withAnimation(.spring(duration: 0.3)) {
-                            displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
-                        }
+                        navigateMonth(by: 1)
                     } else if horizontal > 50 {
-                        withAnimation(.spring(duration: 0.3)) {
-                            displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth)!
-                        }
+                        navigateMonth(by: -1)
                     }
                 }
         )
@@ -64,15 +86,21 @@ struct CalendarGridView: View {
         }
     }
 
+    /// Navigate forward or backward by one month with a directional slide.
+    private func navigateMonth(by value: Int) {
+        slideDirection = value > 0 ? .forward : .backward
+        withAnimation(.spring(duration: 0.3)) {
+            displayedMonth = calendar.date(byAdding: .month, value: value, to: displayedMonth)!
+        }
+    }
+
     // MARK: - Month Header
 
     /// Shows "March 2026" with left/right arrows to navigate months.
     private var monthHeader: some View {
         HStack {
             Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    displayedMonth = calendar.date(byAdding: .month, value: -1, to: displayedMonth)!
-                }
+                navigateMonth(by: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
@@ -83,14 +111,13 @@ struct CalendarGridView: View {
 
             Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
                 .font(.headline)
+                .contentTransition(.numericText())
 
             Spacer()
 
             // Disable forward nav past current month
             Button {
-                withAnimation(.spring(duration: 0.3)) {
-                    displayedMonth = calendar.date(byAdding: .month, value: 1, to: displayedMonth)!
-                }
+                navigateMonth(by: 1)
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.body.weight(.semibold))
