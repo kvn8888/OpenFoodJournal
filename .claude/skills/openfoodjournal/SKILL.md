@@ -28,7 +28,7 @@ MacrosApp (creates ModelContainer w/ CloudKit + 4 @Observable services)
        ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
        ├─ Food Bank tab → FoodBankView (searchable, sortable saved food list, swipe-to-edit, "+" menu: Scan/Manual/Search OFF)
        ├─ History tab → HistoryView (CalendarGridView with progress rings, MacroChartView, macro cards → NutritionDetailView)
-       └─ Settings tab → SettingsView (goals, health, data export, PrivacyPolicyView)
+       └─ Settings tab → SettingsView (goals, health, data export)
 ```
 
 **Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.

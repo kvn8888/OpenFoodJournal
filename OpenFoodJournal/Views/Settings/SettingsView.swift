@@ -170,9 +170,7 @@ struct SettingsView: View {
                         Label("Source Code (AGPL-3.0)", systemImage: "chevron.left.forwardslash.chevron.right")
                     }
 
-                    NavigationLink {
-                        PrivacyPolicyView()
-                    } label: {
+                    Link(destination: URL(string: "https://github.com/kvn8888/OpenFoodJournal/blob/main/PRIVACY.md")!) {
                         Label("Privacy Policy", systemImage: "hand.raised")
                     }
 
