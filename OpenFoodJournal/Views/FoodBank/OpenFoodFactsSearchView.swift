@@ -29,8 +29,10 @@ struct OpenFoodFactsSearchView: View {
     @State private var searchText = ""
     /// Debounce task — cancelled and re-created on each keystroke
     @State private var searchTask: Task<Void, Never>?
-    /// The product selected for detail view / saving
+    /// Full product loaded when user taps a search hit (triggers detail sheet)
     @State private var selectedProduct: OFFProduct?
+    /// Whether we're loading a specific product's details (separate from search loading)
+    @State private var isLoadingProduct = false
     /// Which meal type to assign when logging
     @State private var mealType: MealType = .snack
 
@@ -67,12 +69,19 @@ struct OpenFoodFactsSearchView: View {
                     mealType: mealType
                 )
             }
-            // Show loading indicator in toolbar when fetching
+            // Show loading indicator when fetching search results or product details
             .overlay {
-                if offService.isLoading {
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(.ultraThinMaterial)
+                if offService.isLoading || isLoadingProduct {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                        if isLoadingProduct {
+                            Text("Loading nutrition data…")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.ultraThinMaterial)
                 }
             }
             // Show error banner if something went wrong
@@ -126,12 +135,13 @@ struct OpenFoodFactsSearchView: View {
                     .listRowBackground(Color.clear)
             }
 
-            // Product rows
-            ForEach(offService.searchResults) { product in
+            // Product rows — each is a lightweight search hit
+            ForEach(offService.searchResults) { hit in
                 Button {
-                    selectedProduct = product
+                    // Fetch full nutrition data when user taps a result
+                    Task { await loadProduct(hit) }
                 } label: {
-                    OFFProductRow(product: product)
+                    OFFSearchHitRow(hit: hit)
                 }
                 .buttonStyle(.plain)
             }
@@ -157,7 +167,7 @@ struct OpenFoodFactsSearchView: View {
 
     /// Cancels any in-flight search and starts a new one after a short delay.
     /// The 0.5s debounce prevents firing a request on every keystroke,
-    /// which would quickly exceed OFF's 10 req/min rate limit.
+    /// which would quickly exceed OFF's rate limit.
     private func debouncedSearch(_ query: String) {
         // Cancel the previous search task if it hasn't fired yet
         searchTask?.cancel()
@@ -181,52 +191,58 @@ struct OpenFoodFactsSearchView: View {
             try? await offService.search(query: trimmed)
         }
     }
+
+    // MARK: - Product Loading
+
+    /// Fetches full nutrition details for a search hit and opens the detail sheet.
+    /// Shows a loading overlay while the barcode lookup is in progress.
+    private func loadProduct(_ hit: OFFSearchHit) async {
+        isLoadingProduct = true
+        defer { isLoadingProduct = false }
+
+        if let product = await offService.fetchProduct(for: hit) {
+            selectedProduct = product
+        } else {
+            offService.errorMessage = "Could not load nutrition data for \(hit.name)"
+        }
+    }
 }
 
-// MARK: - OFFProductRow
+// MARK: - OFFSearchHitRow
 
 /// A single row in the search results list.
-/// Shows product name, brand, calories, and macro chips.
-struct OFFProductRow: View {
-    let product: OFFProduct
+/// Shows product name and brand — nutrition data is loaded on tap.
+struct OFFSearchHitRow: View {
+    let hit: OFFSearchHit
 
     var body: some View {
         HStack(spacing: 12) {
-            // Calorie count in a rounded box (matches SavedFoodRowView pattern)
-            Text("\(Int(product.caloriesPerServing))")
-                .font(.system(size: 18, weight: .bold, design: .rounded))
-                .foregroundStyle(.primary)
-                .frame(width: 50, alignment: .center)
+            // Globe icon to indicate this is from OFF database
+            Image(systemName: "globe.americas.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .frame(width: 32, alignment: .center)
 
             VStack(alignment: .leading, spacing: 3) {
                 // Brand (if available) — shown in smaller gray text above the name
-                if let brand = product.brand {
+                if let brand = hit.brand {
                     Text(brand)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
                 // Product name
-                Text(product.name)
+                Text(hit.name)
                     .font(.subheadline.weight(.medium))
                     .lineLimit(2)
-
-                // Serving size info
-                if let serving = product.servingSize {
-                    Text(serving)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                }
             }
 
             Spacer()
 
-            // Macro chips (reuses the same component as EntryRowView)
-            VStack(alignment: .trailing, spacing: 2) {
-                MacroChip(value: product.proteinPerServing, color: .blue, label: "P")
-                MacroChip(value: product.carbsPerServing, color: .orange, label: "C")
-                MacroChip(value: product.fatPerServing, color: .red, label: "F")
-            }
+            // Chevron to indicate tappable (loads full details)
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())

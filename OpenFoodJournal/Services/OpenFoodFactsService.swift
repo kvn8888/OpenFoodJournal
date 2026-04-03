@@ -5,8 +5,10 @@
 //
 // Architecture notes:
 // - Uses URLSession directly (no SPM dependencies) to match project conventions
-// - Text search uses v1 API (/cgi/search.pl) because v2 doesn't support full-text search
-// - Barcode lookup uses v2 API (/api/v2/product/{barcode})
+// - Text search uses the dedicated search API (search.openfoodfacts.org) —
+//   the v1 CGI endpoint is deprecated/unstable and the v2 API doesn't support full-text search
+// - Search returns lightweight hits (name, brand, code); full nutrition loaded on demand
+// - Barcode/product lookup uses v2 API (/api/v2/product/{barcode})
 // - All nutrition values from OFF are per 100g; serving-based values derived from serving_size field
 // - Rate limits: 10 req/min for search, 100 req/min for product reads
 // - User-Agent header required by OFF API policy
@@ -73,6 +75,22 @@ struct OFFProduct: Identifiable, Sendable {
     }
 }
 
+// MARK: - OFFSearchHit
+
+/// Lightweight search result from the Open Food Facts search API.
+/// Contains only identification data (name, brand, barcode) — no nutrition.
+/// Full nutrition is fetched on demand via barcode lookup when the user taps a result.
+struct OFFSearchHit: Identifiable, Sendable, Hashable {
+    /// Barcode (EAN/UPC)
+    let code: String
+    /// Product name
+    let name: String
+    /// Brand name (may be nil)
+    let brand: String?
+
+    var id: String { code }
+}
+
 // MARK: - OpenFoodFactsService
 
 /// Service that communicates with the Open Food Facts REST API.
@@ -83,8 +101,8 @@ struct OFFProduct: Identifiable, Sendable {
 final class OpenFoodFactsService {
 
     // ── Published State ───────────────────────────────────────────
-    /// Results from the most recent search query
-    var searchResults: [OFFProduct] = []
+    /// Lightweight results from the most recent search query (name/brand/code only)
+    var searchResults: [OFFSearchHit] = []
     /// Whether a network request is currently in flight
     var isLoading = false
     /// User-facing error message from the last failed request
@@ -94,8 +112,11 @@ final class OpenFoodFactsService {
 
     // ── Configuration ─────────────────────────────────────────────
 
-    /// Base URL for the Open Food Facts production API
+    /// Base URL for product lookups via the main OFF API
     private let baseURL = "https://world.openfoodfacts.org"
+
+    /// Base URL for the dedicated search service (Elasticsearch-backed)
+    private let searchBaseURL = "https://search.openfoodfacts.org"
 
     /// User-Agent string required by OFF API policy.
     /// Format: AppName/Version (ContactEmail)
@@ -126,7 +147,9 @@ final class OpenFoodFactsService {
     // MARK: - Text Search
 
     /// Searches Open Food Facts for products matching a text query.
-    /// Uses the v1 search API because v2 doesn't support full-text search.
+    /// Uses the dedicated search service (search.openfoodfacts.org) which is
+    /// Elasticsearch-backed and more reliable than the legacy v1 CGI endpoint.
+    /// Returns lightweight hits (name/brand/code) — full nutrition is loaded on demand.
     ///
     /// - Parameters:
     ///   - query: The user's search text (e.g. "greek yogurt", "cheerios")
@@ -146,17 +169,13 @@ final class OpenFoodFactsService {
 
         defer { isLoading = false }
 
-        // Build the v1 search URL with query parameters
-        // search_simple=1 enables simple text matching (vs. advanced filters)
-        // action=process tells the server to actually execute the search
-        // json=1 returns JSON instead of HTML
-        var components = URLComponents(string: "\(baseURL)/cgi/search.pl")!
+        // Build the search URL using the dedicated search service
+        // q= is the search query, page/page_size for pagination
+        // fields= limits the response to just what we need for the list
+        var components = URLComponents(string: "\(searchBaseURL)/search")!
         components.queryItems = [
-            URLQueryItem(name: "search_terms", value: trimmed),
-            URLQueryItem(name: "search_simple", value: "1"),
-            URLQueryItem(name: "action", value: "process"),
-            URLQueryItem(name: "json", value: "1"),
-            URLQueryItem(name: "fields", value: requestFields),
+            URLQueryItem(name: "q", value: trimmed),
+            URLQueryItem(name: "fields", value: "product_name,brands,code"),
             URLQueryItem(name: "page_size", value: "\(pageSize)"),
             URLQueryItem(name: "page", value: "\(page)")
         ]
@@ -176,18 +195,46 @@ final class OpenFoodFactsService {
                 return
             }
 
-            // Parse the JSON response into our Codable wrapper
-            let searchResponse = try JSONDecoder().decode(OFFSearchResponse.self, from: data)
-            totalResultCount = searchResponse.count
+            // Parse the JSON response — search API uses "hits" instead of "products"
+            let searchResponse = try JSONDecoder().decode(OFFSearchResult.self, from: data)
+            totalResultCount = searchResponse.page_count
 
-            // Convert each raw product dict into our clean OFFProduct struct
-            searchResults = searchResponse.products.compactMap { parseProduct($0) }
+            // Convert each hit into our clean OFFSearchHit struct
+            searchResults = searchResponse.hits.compactMap { hit in
+                // Must have a product name to be useful
+                let name = hit.product_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !name.isEmpty else { return nil }
+
+                // Brands come as an array from the search API — take the first
+                let brand = hit.brands?.first?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                return OFFSearchHit(
+                    code: hit.code ?? "",
+                    name: name,
+                    brand: brand
+                )
+            }
         } catch let error as DecodingError {
             errorMessage = "Failed to parse response"
             print("OFF decode error: \(error)")
         } catch {
             errorMessage = "Network error: \(error.localizedDescription)"
         }
+    }
+
+    // MARK: - Product Detail Fetch
+
+    /// Fetches full product details (including nutrition) for a search hit.
+    /// Called when the user taps a search result to see the detail sheet.
+    ///
+    /// - Parameter hit: The lightweight search hit to fetch full details for
+    /// - Returns: A full OFFProduct with nutrition data, or nil if fetch failed
+    func fetchProduct(for hit: OFFSearchHit) async -> OFFProduct? {
+        guard !hit.code.isEmpty else {
+            errorMessage = "No barcode available"
+            return nil
+        }
+        return try? await lookupBarcode(hit.code)
     }
 
     // MARK: - Barcode Lookup
@@ -361,14 +408,25 @@ final class OpenFoodFactsService {
 
 // MARK: - Codable Response Types
 
-/// Wrapper for the v1 search API response.
-/// Contains pagination info and an array of raw product objects.
-private struct OFFSearchResponse: Codable {
-    let count: Int
-    let page: Int
+/// Wrapper for the search.openfoodfacts.org response.
+/// Contains pagination info and an array of lightweight hit objects.
+private struct OFFSearchResult: Codable {
+    /// Total number of matching products across all pages
     let page_count: Int
+    /// Current page number
+    let page: Int
+    /// Number of results per page
     let page_size: Int
-    let products: [OFFRawProduct]
+    /// Array of search result hits (lightweight — no nutrition data)
+    let hits: [OFFSearchRawHit]
+}
+
+/// Raw hit from the search API — just name, brands (array), and barcode.
+private struct OFFSearchRawHit: Codable {
+    let code: String?
+    let product_name: String?
+    /// Brands come as a string array from the search API (unlike the main API's comma-separated string)
+    let brands: [String]?
 }
 
 /// Wrapper for the v2 barcode lookup API response.
