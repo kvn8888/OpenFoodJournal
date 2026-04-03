@@ -101,8 +101,8 @@ struct OFFSearchHit: Identifiable, Sendable, Hashable {
 final class OpenFoodFactsService {
 
     // ── Published State ───────────────────────────────────────────
-    /// Lightweight results from the most recent search query (name/brand/code only)
-    var searchResults: [OFFSearchHit] = []
+    /// Full product results (with nutrition) from the most recent search
+    var searchResults: [OFFProduct] = []
     /// Whether a network request is currently in flight
     var isLoading = false
     /// User-facing error message from the last failed request
@@ -149,7 +149,8 @@ final class OpenFoodFactsService {
     /// Searches Open Food Facts for products matching a text query.
     /// Uses the dedicated search service (search.openfoodfacts.org) which is
     /// Elasticsearch-backed and more reliable than the legacy v1 CGI endpoint.
-    /// Returns lightweight hits (name/brand/code) — full nutrition is loaded on demand.
+    /// After getting lightweight search hits, batch-fetches full nutrition data
+    /// for each result via the v2 barcode API so the UI can show macros.
     ///
     /// - Parameters:
     ///   - query: The user's search text (e.g. "greek yogurt", "cheerios")
@@ -167,8 +168,6 @@ final class OpenFoodFactsService {
         isLoading = true
         errorMessage = nil
 
-        defer { isLoading = false }
-
         // Build the search URL using the dedicated search service
         // q= is the search query, page/page_size for pagination
         // fields= limits the response to just what we need for the list
@@ -182,6 +181,7 @@ final class OpenFoodFactsService {
 
         guard let url = components.url else {
             errorMessage = "Invalid search URL"
+            isLoading = false
             return
         }
 
@@ -192,6 +192,7 @@ final class OpenFoodFactsService {
             if let httpResponse = response as? HTTPURLResponse,
                !(200...299).contains(httpResponse.statusCode) {
                 errorMessage = "Server returned \(httpResponse.statusCode)"
+                isLoading = false
                 return
             }
 
@@ -199,58 +200,76 @@ final class OpenFoodFactsService {
             let searchResponse = try JSONDecoder().decode(OFFSearchResult.self, from: data)
             totalResultCount = searchResponse.page_count
 
-            // Convert each hit into our clean OFFSearchHit struct
-            searchResults = searchResponse.hits.compactMap { hit in
-                // Must have a product name to be useful
-                let name = hit.product_name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                guard !name.isEmpty else { return nil }
-
-                // Brands come as an array from the search API — take the first
-                let brand = hit.brands?.first?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                return OFFSearchHit(
-                    code: hit.code ?? "",
-                    name: name,
-                    brand: brand
-                )
+            // Extract barcodes from search hits, filtering out empty/missing ones
+            let barcodes: [String] = searchResponse.hits.compactMap { hit in
+                guard let code = hit.code, !code.isEmpty,
+                      let name = hit.product_name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { return nil }
+                return code
             }
+
+            // Batch-fetch full product details for each barcode using concurrent tasks.
+            // This populates nutrition data so the list can show calories and macros.
+            // OFF allows 100 req/min for product reads, so this is within limits for 25 results.
+            let products = await withTaskGroup(of: OFFProduct?.self, returning: [OFFProduct].self) { group in
+                for code in barcodes {
+                    group.addTask { [self] in
+                        await self.fetchProductByBarcode(code)
+                    }
+                }
+
+                var results: [OFFProduct] = []
+                for await product in group {
+                    if let product {
+                        results.append(product)
+                    }
+                }
+                return results
+            }
+
+            // Sort results to match the original search order (by barcode position)
+            let orderMap = Dictionary(uniqueKeysWithValues: barcodes.enumerated().map { ($1, $0) })
+            searchResults = products.sorted { a, b in
+                (orderMap[a.code] ?? Int.max) < (orderMap[b.code] ?? Int.max)
+            }
+
+            isLoading = false
         } catch let error as DecodingError {
             errorMessage = "Failed to parse response"
             print("OFF decode error: \(error)")
+            isLoading = false
         } catch {
             errorMessage = "Network error: \(error.localizedDescription)"
+            isLoading = false
         }
-    }
-
-    // MARK: - Product Detail Fetch
-
-    /// Fetches full product details (including nutrition) for a search hit.
-    /// Called when the user taps a search result to see the detail sheet.
-    ///
-    /// - Parameter hit: The lightweight search hit to fetch full details for
-    /// - Returns: A full OFFProduct with nutrition data, or nil if fetch failed
-    func fetchProduct(for hit: OFFSearchHit) async -> OFFProduct? {
-        guard !hit.code.isEmpty else {
-            errorMessage = "No barcode available"
-            return nil
-        }
-        return try? await lookupBarcode(hit.code)
     }
 
     // MARK: - Barcode Lookup
 
     /// Looks up a single product by its barcode using the v2 API.
     /// Returns nil if the product isn't in the OFF database.
+    /// Updates isLoading/errorMessage for standalone use (e.g. from scan view).
     ///
     /// - Parameter barcode: EAN-13, UPC-A, or other barcode string
     /// - Returns: The matching OFFProduct, or nil if not found
     func lookupBarcode(_ barcode: String) async throws -> OFFProduct? {
-        let trimmed = barcode.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
+
+        guard let product = await fetchProductByBarcode(barcode) else {
+            errorMessage = "Product not found"
+            return nil
+        }
+        return product
+    }
+
+    /// Internal barcode fetch — no UI state mutation.
+    /// Used by both the public lookupBarcode (for standalone use) and
+    /// the batch search flow (which manages its own loading state).
+    private func fetchProductByBarcode(_ barcode: String) async -> OFFProduct? {
+        let trimmed = barcode.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
 
         // v2 barcode endpoint — cleaner JSON structure than v1
         var components = URLComponents(string: "\(baseURL)/api/v2/product/\(trimmed)")!
@@ -258,17 +277,13 @@ final class OpenFoodFactsService {
             URLQueryItem(name: "fields", value: requestFields)
         ]
 
-        guard let url = components.url else {
-            errorMessage = "Invalid barcode URL"
-            return nil
-        }
+        guard let url = components.url else { return nil }
 
         do {
             let (data, response) = try await session.data(from: url)
 
             if let httpResponse = response as? HTTPURLResponse,
                !(200...299).contains(httpResponse.statusCode) {
-                errorMessage = "Product not found"
                 return nil
             }
 
@@ -282,7 +297,6 @@ final class OpenFoodFactsService {
 
             return parseProduct(rawProduct)
         } catch {
-            errorMessage = "Lookup failed: \(error.localizedDescription)"
             return nil
         }
     }

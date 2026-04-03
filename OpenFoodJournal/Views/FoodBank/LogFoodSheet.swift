@@ -420,6 +420,7 @@ struct LogFoodSheet: View {
         switch food.originalScanMode {
         case .label: "barcode.viewfinder"
         case .foodPhoto: "fork.knife"
+        case .barcode: "barcode"
         case .manual: "pencil.circle"
         }
     }
@@ -429,6 +430,7 @@ struct LogFoodSheet: View {
         switch food.originalScanMode {
         case .label: "Label Scan"
         case .foodPhoto: "Food Photo"
+        case .barcode: "Barcode Scan"
         case .manual: "Manual Entry"
         }
     }
