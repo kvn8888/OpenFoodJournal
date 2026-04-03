@@ -1,11 +1,24 @@
 // OpenFoodJournal — CalendarGridView
 // A custom monthly calendar grid with calorie progress rings on each day cell.
-// Replaces the system DatePicker(.graphical) in HistoryView to show at-a-glance
-// nutrition progress for each day. Supports month navigation with smooth transitions.
+// Uses a horizontal ScrollView with viewAligned snapping for native drag-to-page
+// month navigation, matching the WeeklyCalendarStrip's feel.
 // AGPL-3.0 License
 
 import SwiftUI
 import SwiftData
+
+// MARK: - Month Identifier
+
+/// A Hashable/Identifiable value for each month in the horizontal scroll.
+/// Stores the first day of the month for stable identity and date generation.
+private struct MonthID: Hashable, Identifiable {
+    /// The first day of this month (start of day)
+    let startDate: Date
+
+    var id: TimeInterval { startDate.timeIntervalSinceReferenceDate }
+}
+
+// MARK: - CalendarGridView
 
 struct CalendarGridView: View {
     // ── Bindings & Environment ────────────────────────────────────
@@ -14,30 +27,12 @@ struct CalendarGridView: View {
     @Environment(UserGoals.self) private var goals
 
     // ── Local State ───────────────────────────────────────────────
-    // The month currently being displayed (first day of that month)
-    @State private var displayedMonth: Date = .now
-    // Tracks swipe direction for slide transition
-    @State private var slideDirection: SlideDirection = .forward
-
-    private enum SlideDirection {
-        case forward, backward
-
-        var insertion: AnyTransition {
-            switch self {
-            case .forward:  .move(edge: .trailing)
-            case .backward: .move(edge: .leading)
-            }
-        }
-
-        var removal: AnyTransition {
-            switch self {
-            case .forward:  .move(edge: .leading)
-            case .backward: .move(edge: .trailing)
-            }
-        }
-    }
+    @State private var scrolledMonth: MonthID.ID?
 
     private let calendar = Calendar.current
+
+    /// Number of months of history to make scrollable
+    private let monthsOfHistory = 24
 
     // Column layout for a 7-day week grid
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 0), count: 7)
@@ -45,6 +40,31 @@ struct CalendarGridView: View {
     // Day-of-week headers matching the user's locale
     private var weekdaySymbols: [String] {
         calendar.veryShortWeekdaySymbols
+    }
+
+    /// Pre-computed array of MonthIDs from ~2 years ago to the current month.
+    private var months: [MonthID] {
+        let currentMonth = startOfMonth(for: Date.now)
+        return (-monthsOfHistory...0).compactMap { offset in
+            guard let month = calendar.date(byAdding: .month, value: offset, to: currentMonth) else {
+                return nil
+            }
+            return MonthID(startDate: calendar.startOfDay(for: month))
+        }
+    }
+
+    /// The MonthID for the currently scrolled-to month (derived from scrollPosition)
+    private var displayedMonth: Date {
+        if let scrolledMonth,
+           let match = months.first(where: { $0.id == scrolledMonth }) {
+            return match.startDate
+        }
+        return startOfMonth(for: selectedDate)
+    }
+
+    /// Whether the displayed month is the current month
+    private var isCurrentMonth: Bool {
+        calendar.isDate(displayedMonth, equalTo: .now, toGranularity: .month)
     }
 
     var body: some View {
@@ -55,42 +75,15 @@ struct CalendarGridView: View {
             // Weekday column labels (S, M, T, W, T, F, S)
             weekdayHeader
 
-            // Day cells grid with progress rings — keyed by month for slide transition
-            dayGrid
-                .id(displayedMonth)
-                .transition(.asymmetric(
-                    insertion: slideDirection.insertion,
-                    removal: slideDirection.removal
-                ))
+            // Horizontally scrollable month grids with snap-to-month
+            monthScroller
         }
         .padding()
-        .clipped()
         .glassEffect(in: .rect(cornerRadius: 20))
         .padding(.horizontal)
-        // Swipe left/right to navigate months
-        .gesture(
-            DragGesture(minimumDistance: 50, coordinateSpace: .local)
-                .onEnded { value in
-                    // Horizontal swipe: negative = swipe left = next month
-                    let horizontal = value.translation.width
-                    if horizontal < -50 && !isCurrentMonth {
-                        navigateMonth(by: 1)
-                    } else if horizontal > 50 {
-                        navigateMonth(by: -1)
-                    }
-                }
-        )
         .onAppear {
-            // Initialize displayedMonth to the month of selectedDate
-            displayedMonth = startOfMonth(for: selectedDate)
-        }
-    }
-
-    /// Navigate forward or backward by one month with a directional slide.
-    private func navigateMonth(by value: Int) {
-        slideDirection = value > 0 ? .forward : .backward
-        withAnimation(.spring(duration: 0.3)) {
-            displayedMonth = calendar.date(byAdding: .month, value: value, to: displayedMonth)!
+            let initial = startOfMonth(for: selectedDate)
+            scrolledMonth = initial.timeIntervalSinceReferenceDate
         }
     }
 
@@ -112,6 +105,7 @@ struct CalendarGridView: View {
             Text(displayedMonth.formatted(.dateTime.month(.wide).year()))
                 .font(.headline)
                 .contentTransition(.numericText())
+                .animation(.easeInOut(duration: 0.2), value: displayedMonth)
 
             Spacer()
 
@@ -131,8 +125,6 @@ struct CalendarGridView: View {
     // MARK: - Weekday Header
 
     /// Single-letter weekday labels (S, M, T, W, T, F, S)
-    /// Uses enumerated indices as IDs because veryShortWeekdaySymbols has
-    /// duplicates ("S" twice, "T" twice) — ForEach(id: \.self) would dedupe them.
     private var weekdayHeader: some View {
         LazyVGrid(columns: columns, spacing: 0) {
             ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
@@ -145,18 +137,35 @@ struct CalendarGridView: View {
         }
     }
 
-    // MARK: - Day Grid
+    // MARK: - Month Scroller
 
-    /// The main grid of day cells. Each cell shows the day number with a progress ring.
-    /// Empty cells pad the start/end to align days with correct weekday columns.
-    private var dayGrid: some View {
-        let days = daysInMonth()
+    /// Horizontal ScrollView containing all months with snap-to-page behavior.
+    private var monthScroller: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: 0) {
+                ForEach(months) { month in
+                    monthGrid(for: month.startDate)
+                        .containerRelativeFrame(.horizontal)
+                        .id(month.id)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $scrolledMonth)
+    }
+
+    // MARK: - Month Grid
+
+    /// The grid of day cells for a single month. Always renders 6 rows
+    /// so all months have consistent height and the scroll doesn't jump.
+    private func monthGrid(for monthStart: Date) -> some View {
+        let days = daysInMonth(for: monthStart)
         return LazyVGrid(columns: columns, spacing: 6) {
-            ForEach(days, id: \.self) { date in
+            ForEach(Array(days.enumerated()), id: \.offset) { _, date in
                 if let date {
                     dayCell(for: date)
                 } else {
-                    // Empty spacer for days before/after the month
                     Color.clear
                         .frame(height: 36)
                 }
@@ -220,12 +229,18 @@ struct CalendarGridView: View {
         .disabled(isFuture)
     }
 
-    // MARK: - Helpers
+    // MARK: - Navigation
 
-    /// Whether the displayed month is the current month (disables forward nav)
-    private var isCurrentMonth: Bool {
-        calendar.isDate(displayedMonth, equalTo: .now, toGranularity: .month)
+    /// Navigate forward or backward by one month via scroll position.
+    private func navigateMonth(by value: Int) {
+        guard let newMonth = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
+        let target = startOfMonth(for: newMonth)
+        withAnimation(.spring(duration: 0.3)) {
+            scrolledMonth = target.timeIntervalSinceReferenceDate
+        }
     }
+
+    // MARK: - Helpers
 
     /// Returns the first day of the month containing the given date
     private func startOfMonth(for date: Date) -> Date {
@@ -233,13 +248,14 @@ struct CalendarGridView: View {
         return calendar.date(from: components)!
     }
 
-    /// Generates an array of optional Dates for the month grid.
+    /// Generates an array of optional Dates for a month grid.
+    /// Always returns 42 cells (6 rows x 7 columns) for consistent height.
     /// `nil` entries represent empty cells before/after the month's days.
-    private func daysInMonth() -> [Date?] {
-        let start = startOfMonth(for: displayedMonth)
+    private func daysInMonth(for monthStart: Date) -> [Date?] {
+        let start = startOfMonth(for: monthStart)
         guard let range = calendar.range(of: .day, in: .month, for: start) else { return [] }
 
-        // How many empty cells before the 1st (to align with correct weekday column)
+        // How many empty cells before the 1st
         let firstWeekday = calendar.component(.weekday, from: start)
         let leadingBlanks = (firstWeekday - calendar.firstWeekday + 7) % 7
 
@@ -249,6 +265,11 @@ struct CalendarGridView: View {
             if let date = calendar.date(byAdding: .day, value: day - 1, to: start) {
                 days.append(date)
             }
+        }
+
+        // Pad to 42 cells (6 rows) for consistent height across months
+        while days.count < 42 {
+            days.append(nil)
         }
 
         return days
