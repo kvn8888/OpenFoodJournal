@@ -48,7 +48,7 @@ See [references/models.md](references/models.md) for full property lists.
 - **`UserGoals`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for each goal property to avoid property-wrapper conflicts.
 - **`Preferences`** — `@Model`, singleton row for UI customization. Stores `ringSlot1..5` (nutrient IDs for MacroSummaryBar configurable rings). `Preferences.current(in:)` static factory fetches-or-creates the singleton. Synced to Turso via `GET/PUT /api/preferences`. Added to `ModelContainer` in app init. Sheets use `@Bindable var prefs: Preferences` for direct binding.
 - **`MealType`** — enum: `.breakfast`, `.lunch`, `.dinner`, `.snack`
-- **`ScanMode`** — enum: `.label`, `.foodPhoto`, `.manual`
+- **`ScanMode`** — enum: `.label`, `.foodPhoto`, `.barcode`, `.manual`
 - **`ServingSize`** — enum: `.mass(grams:)`, `.volume(ml:)`, `.both(grams:ml:)`. Stores canonical SI values. Has `availableUnits: [String]` (dimension-appropriate unit list), `convert(_:from:to:) -> Double?` (handles same-dimension and cross-dimension via density for `.both`). Static tables: `massConversions` (g/oz/kg/lb), `volumeConversions` (mL/cup/tbsp/tsp/fl oz/L). `type: String` returns "mass"/"volume"/"both" for JSON serialization.
 - **`ServingMapping`** — Codable struct with `from: ServingAmount` / `to: ServingAmount` for per-food unit conversions (e.g. 1 cup = 244g). Legacy field kept alongside `ServingSize`.
 - **`MicronutrientValue`** — Codable struct with `value: Double` / `unit: String` for dynamic micronutrient storage
@@ -61,7 +61,7 @@ See [references/services.md](references/services.md) for full API contracts.
 - **`ScanService`** — Resizes images to max 2000px (UIGraphicsImageRenderer) then JPEG 0.90 before direct Gemini REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `GeminiModelConfig` static configs: `.labelScan` (gemini-3.1-flash-lite-preview, MINIMAL thinking) and `.foodPhotoScan` (gemini-3.1-pro-preview, HIGH thinking). Includes automatic fallback to gemini-2.5-flash/pro on 500/503 errors. Loads API key from `KeychainService`. User reviews in `ScanResultCard` before committing. Logs scan duration via `ContinuousClock` and stores it on `NutritionEntry.scanDurationMs`.
 - **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
-- **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.- **`OpenFoodFactsService`** — Text search and barcode lookup against the Open Food Facts REST API. Direct `URLSession`, no SPM dependency. Debounced search, Codable response parsing, `OFFProduct` → `NutritionEntry`/`SavedFood` conversion. Optional contribute mode (writes scanned data back to OFF).- **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
+- **`HealthKitService`** — Opt-in Apple Health writes (one `HKQuantitySample` per macro). Reads `activeEnergyBurned`.- **`OpenFoodFactsService`** — Text search and barcode lookup against the Open Food Facts REST API. Search uses `search.openfoodfacts.org` (Elasticsearch-backed, the v1 CGI endpoint returns 503). Barcode lookup uses `world.openfoodfacts.org/api/v2/product/{code}`. Batch-fetches full product details after search using `withTaskGroup`. `OFFProduct` model stores full nutrition. `lookupBarcode()` manages UI state (isLoading/errorMessage); internal `fetchProductByBarcode()` is stateless for batch use. Used by both `OpenFoodFactsSearchView` (text search) and `ScanCaptureView` (barcode camera scan).- **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
 
 ## View Map
 
@@ -86,6 +86,30 @@ User taps Scan → CameraController (AVCaptureSession) → JPEG
   → NutritionStore.log(entry, to: date) → SwiftData insert (CloudKit syncs automatically)
   → Auto-creates SavedFood in Food Bank
   → HealthKitService.write(entry) if enabled
+```
+
+## Barcode Scan Flow
+
+```
+User taps "Scan Barcode" card → CameraController (AVCaptureSession) → JPEG
+  → promptOverlay: "Look Up" button (no text prompt for barcode mode)
+  → Vision VNDetectBarcodesRequest detects barcode from photo
+  → OpenFoodFactsService.lookupBarcode(barcodeValue)
+  → GET https://world.openfoodfacts.org/api/v2/product/{code}?fields=...
+  → OFFProduct → ManualEntryView(defaultDate:, prefillProduct:)
+  → User reviews/edits pre-filled nutrition data → saves to journal
+```
+
+## Open Food Facts Search Flow
+
+```
+User taps "Search Open Food Facts" in Food Bank "+" menu
+  → OpenFoodFactsSearchView (searchable, Enter-only via .onSubmit)
+  → GET https://search.openfoodfacts.org/search?q={query}&fields=...&page_size=25
+  → Returns barcodes → batch-fetch full products via withTaskGroup
+  → OFFProductRow (styled like SavedFoodRowView — macros, calories, serving)
+  → Tap row → ManualEntryView(defaultDate:, prefillProduct: product)
+  → User reviews/edits pre-filled data → saves to journal
 ```
 
 ## CloudKit Sync Architecture (app-store branch)
