@@ -136,7 +136,7 @@ xcodebuild -project OpenFoodJournal.xcodeproj \
 
 Or open `OpenFoodJournal.xcodeproj` in Xcode and run on a simulator or device.
 
-> **Note:** The `server/` directory contains a legacy Express.js proxy from the `main` branch. The `app-store` branch uses direct Gemini API calls and CloudKit — no server required.
+> **Note:** The `server/` directory contains a legacy Express.js proxy from an earlier architecture. It is **not used** by the app. The current app communicates directly with the Gemini API and uses CloudKit for data sync — no server is required to build, run, or use OpenFoodJournal.
 
 ---
 
@@ -158,12 +158,6 @@ OpenFoodJournal/
 │   └── Shared/       # Reusable components (MacroRingView, RadialMenuButton, etc.)
 ├── Assets.xcassets/  # App icon + accent color
 └── ContentView.swift # Root 4-tab navigation
-
-server/                # Legacy — unused on app-store branch
-├── index.js
-├── routes.js
-├── db.js
-└── package.json
 ```
 
 ---
