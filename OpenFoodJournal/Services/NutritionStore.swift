@@ -133,9 +133,9 @@ final class NutritionStore {
 
     /// The time period for aggregating micronutrient data
     enum TimePeriod: String, CaseIterable {
-        case daily = "Today"
-        case weekly = "This Week"
-        case monthly = "This Month"
+        case daily = "Day"
+        case weekly = "Week"
+        case monthly = "Month"
     }
 
     /// Aggregates all micronutrient values across entries in the given time period.

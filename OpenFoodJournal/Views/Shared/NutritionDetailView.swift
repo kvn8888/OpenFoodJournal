@@ -18,14 +18,45 @@ struct NutritionDetailView: View {
 
     // ── State ─────────────────────────────────────────────────────
     @State private var selectedPeriod: NutritionStore.TimePeriod = .daily
+    @State private var selectedDate: Date = .now
     @State private var showUncommon = false     // Toggle for less-common nutrients
     @State private var aggregated: [String: MicronutrientValue] = [:]
     @State private var macroTotals: (cal: Double, protein: Double, carbs: Double, fat: Double) = (0, 0, 0, 0)
     @State private var selectedMacro: NutrientKind.MacroType?
 
+    private let calendar = Calendar.current
+
+    /// Whether the user can navigate forward (can't go past today/current period)
+    private var canGoForward: Bool {
+        let today = calendar.startOfDay(for: .now)
+        let current = calendar.startOfDay(for: selectedDate)
+        return current < today
+    }
+
+    /// Formatted date label based on the selected period
+    private var dateLabel: String {
+        switch selectedPeriod {
+        case .daily:
+            if calendar.isDateInToday(selectedDate) {
+                return "Today"
+            } else if calendar.isDateInYesterday(selectedDate) {
+                return "Yesterday"
+            }
+            return selectedDate.formatted(.dateTime.month(.abbreviated).day())
+        case .weekly:
+            let weekStart = calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? selectedDate
+            let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart)!
+            let startStr = weekStart.formatted(.dateTime.month(.abbreviated).day())
+            let endStr = weekEnd.formatted(.dateTime.month(.abbreviated).day())
+            return "\(startStr) – \(endStr)"
+        case .monthly:
+            return selectedDate.formatted(.dateTime.month(.wide).year())
+        }
+    }
+
     var body: some View {
         List {
-            // Time period picker at the top
+            // Period picker + date navigation
             Section {
                 Picker("Period", selection: $selectedPeriod) {
                     ForEach(NutritionStore.TimePeriod.allCases, id: \.self) { period in
@@ -34,7 +65,52 @@ struct NutritionDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+
+                // Daily average hint for week/month
+                if selectedPeriod != .daily {
+                    Text("Showing daily averages")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+
+                // Date nav: ◀ Date Label ▶
+                GlassEffectContainer(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Button {
+                            navigate(by: -1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+
+                        Text(dateLabel)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .glassEffect(in: .capsule)
+                            .contentTransition(.numericText())
+
+                        Button {
+                            navigate(by: 1)
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!canGoForward)
+                        .opacity(canGoForward ? 1 : 0.3)
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
             }
 
             // Macro summary cards
@@ -77,8 +153,35 @@ struct NutritionDetailView: View {
         .onChange(of: selectedPeriod) { _, _ in
             refreshData()
         }
+        .onChange(of: selectedDate) { _, _ in
+            refreshData()
+        }
         .onAppear {
             refreshData()
+        }
+        .animation(.easeInOut(duration: 0.2), value: selectedDate)
+        .animation(.easeInOut(duration: 0.2), value: selectedPeriod)
+    }
+
+    // MARK: - Navigation
+
+    /// Moves the selected date forward or backward by one period unit.
+    private func navigate(by direction: Int) {
+        let component: Calendar.Component
+        switch selectedPeriod {
+        case .daily:   component = .day
+        case .weekly:  component = .weekOfYear
+        case .monthly: component = .month
+        }
+        guard let newDate = calendar.date(byAdding: component, value: direction, to: selectedDate) else { return }
+
+        // Don't navigate past today
+        if direction > 0 && calendar.startOfDay(for: newDate) > calendar.startOfDay(for: .now) {
+            return
+        }
+
+        withAnimation(.easeInOut(duration: 0.2)) {
+            selectedDate = newDate
         }
     }
 
@@ -90,7 +193,7 @@ struct NutritionDetailView: View {
                 macroCard(.calories, value: macroTotals.cal, goal: Double(goals.dailyCalories), color: .orange)
                 macroCard(.protein, value: macroTotals.protein, goal: Double(goals.dailyProtein), color: .blue)
                 macroCard(.carbs, value: macroTotals.carbs, goal: Double(goals.dailyCarbs), color: .green)
-                macroCard(.fat, value: macroTotals.fat, goal: Double(goals.dailyFat), color: .yellow)
+                macroCard(.fat, value: macroTotals.fat, goal: Double(goals.dailyFat), color: Color(red: 0.9, green: 0.75, blue: 0.0))
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
             .listRowBackground(Color.clear)
@@ -98,23 +201,45 @@ struct NutritionDetailView: View {
     }
 
     private func macroCard(_ macro: NutrientKind.MacroType, value: Double, goal: Double, color: Color) -> some View {
-        Button {
+        let fraction = goal > 0 ? min(value / goal, 1.5) : 0
+        let displayFraction = min(fraction, 1.0) // Cap ring fill at 100%
+
+        return Button {
             selectedMacro = macro
         } label: {
             VStack(spacing: 4) {
-                Text("\(Int(value))")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundStyle(color)
-                Text(macro.unit)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // Circular progress ring replaces the linear ProgressView
+                ZStack {
+                    // Background track
+                    Circle()
+                        .stroke(color.opacity(0.15), lineWidth: 5)
+                    // Filled arc — trims from 0 to fraction of circumference
+                    Circle()
+                        .trim(from: 0, to: displayFraction)
+                        .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
+                        .rotationEffect(.degrees(-90)) // Start from 12 o'clock
+                    // Value label inside the ring
+                    VStack(spacing: 0) {
+                        Text("\(Int(value))")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundStyle(color)
+                        Text(macro.unit)
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 100, height: 100)
+
                 Text(macro.rawValue)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                // Percentage label below the name (e.g. "85%")
                 if goal > 0 {
-                    ProgressView(value: min(value / goal, 1.0))
-                        .tint(color)
+                    Text("\(Int(fraction * 100))%")
+                        .font(.caption2)
+                        .foregroundStyle(fraction >= 1.0 ? color : .secondary)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -209,8 +334,8 @@ struct NutritionDetailView: View {
     // MARK: - Data Refresh
 
     private func refreshData() {
-        aggregated = nutritionStore.aggregateMicronutrients(period: selectedPeriod)
-        macroTotals = nutritionStore.aggregateMacros(period: selectedPeriod)
+        aggregated = nutritionStore.aggregateMicronutrients(period: selectedPeriod, referenceDate: selectedDate)
+        macroTotals = nutritionStore.aggregateMacros(period: selectedPeriod, referenceDate: selectedDate)
     }
 }
 

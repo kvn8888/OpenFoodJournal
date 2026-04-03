@@ -11,6 +11,7 @@ struct MacrosApp: App {
     @State private var scanService = ScanService()
     @State private var healthKitService = HealthKitService()
     @State private var userGoals = UserGoals()
+    @State private var offService = OpenFoodFactsService()
 
     init() {
         let isTest = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -52,6 +53,7 @@ struct MacrosApp: App {
                     .environment(scanService)
                     .environment(healthKitService)
                     .environment(userGoals)
+                    .environment(offService)
                     .task {
                         // Request HealthKit auth on first launch if user has previously enabled it
                         if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
@@ -65,6 +67,7 @@ struct MacrosApp: App {
                     .environment(scanService)
                     .environment(healthKitService)
                     .environment(userGoals)
+                    .environment(offService)
             }
         }
     }

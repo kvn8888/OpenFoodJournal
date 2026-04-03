@@ -161,7 +161,7 @@ struct RadialMenuButton: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
-        }
+            }
         .animation(.spring(duration: 0.2), value: isHighlighted)
     }
 
@@ -269,6 +269,7 @@ struct RadialMenuButton: View {
     // MARK: - Open / Close
 
     private func open() {
+        didTrigger = false
         withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
             isOpen = true
         }

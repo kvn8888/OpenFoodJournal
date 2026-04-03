@@ -24,6 +24,8 @@ struct FoodBankView: View {
     @State private var sortOrder: SortOrder = .lastUsed
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
     @State private var foodToEdit: SavedFood?          // For the edit sheet
+    @State private var showOFFSearch = false            // For Open Food Facts search sheet
+    @State private var showManualEntry = false          // For manual entry sheet
 
     // ── Computed: filter + sort the foods based on search text ────
     // Filters by name and brand (case-insensitive) so users can quickly find a food.
@@ -63,6 +65,10 @@ struct FoodBankView: View {
             .navigationTitle("Food Bank")
             .searchable(text: $searchText, prompt: "Search saved foods")
             .toolbar {
+                // "+" menu for adding new foods — to the left of the sort button
+                ToolbarItem(placement: .topBarTrailing) {
+                    addMenu
+                }
                 // Sort picker in the toolbar
                 ToolbarItem(placement: .topBarTrailing) {
                     sortMenu
@@ -75,6 +81,14 @@ struct FoodBankView: View {
             // Sheet to edit a food's name, brand, macros
             .sheet(item: $foodToEdit) { food in
                 EditFoodSheet(food: food)
+            }
+            // Sheet for Open Food Facts search
+            .sheet(isPresented: $showOFFSearch) {
+                OpenFoodFactsSearchView(logDate: logDate)
+            }
+            // Sheet for manual food entry
+            .sheet(isPresented: $showManualEntry) {
+                ManualEntryView(defaultDate: logDate)
             }
         }
     }
@@ -143,6 +157,29 @@ struct FoodBankView: View {
             Label("No Saved Foods", systemImage: "refrigerator")
         } description: {
             Text("Foods you save from scans or manual entries will appear here for quick re-logging.")
+        }
+    }
+
+    // MARK: - Add Menu
+
+    /// "+" toolbar menu with options to add foods via different methods:
+    /// scan a label, enter manually, or search the Open Food Facts database.
+    private var addMenu: some View {
+        Menu {
+            // Search Open Food Facts — opens the OFF search sheet
+            Button {
+                showOFFSearch = true
+            } label: {
+                Label("Search Open Food Facts", systemImage: "globe.americas")
+            }
+            // Manual entry — opens the same ManualEntryView used from the radial menu
+            Button {
+                showManualEntry = true
+            } label: {
+                Label("Manual Entry", systemImage: "square.and.pencil")
+            }
+        } label: {
+            Image(systemName: "plus")
         }
     }
 

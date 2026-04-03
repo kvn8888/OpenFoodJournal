@@ -10,6 +10,8 @@ struct SettingsView: View {
     @Environment(UserGoals.self) private var goals
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
+    @AppStorage("scan.useProModel") private var useProModel: Bool = false
+    @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
 
     /// The text field value for the API key — loaded from Keychain on appear.
     @State private var apiKeyInput: String = ""
@@ -90,8 +92,19 @@ struct SettingsView: View {
                     Text("Required for food scanning. Get a free key at [aistudio.google.com](https://aistudio.google.com/apikey)")
                 }
 
+                // MARK: Scanning
+                Section {
+                    Toggle(isOn: $useProModel) {
+                        Label("Use Gemini Pro for Food Photos", systemImage: "sparkles")
+                    }
+                } header: {
+                    Text("Scanning")
+                } footer: {
+                    Text("When enabled, food photo scans use Gemini Pro for more accurate estimates. Lite mode is faster and uses less API quota.")
+                }
+
                 // MARK: Integrations
-                Section("Integrations") {
+                Section {
                     Toggle(isOn: $healthKitEnabled) {
                         Label("Write to Apple Health", systemImage: "heart.fill")
                             .foregroundStyle(.red)
@@ -107,6 +120,14 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.orange)
                     }
+
+                    Toggle(isOn: $offContributeEnabled) {
+                        Label("Contribute to Open Food Facts", systemImage: "globe.americas")
+                    }
+                } header: {
+                    Text("Integrations")
+                } footer: {
+                    Text("When \"Contribute\" is on, scanned nutrition data is shared with the Open Food Facts open database to help others.")
                 }
 
                 // MARK: Data

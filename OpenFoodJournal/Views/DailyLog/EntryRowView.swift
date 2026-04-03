@@ -7,12 +7,17 @@ struct EntryRowView: View {
     let entry: NutritionEntry
     let onDelete: () -> Void
 
+    /// Shared formatter — static so it's created once, not on every render
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
     /// Formats the entry's timestamp as a compact time string (e.g. "2:30 PM")
     private var timeString: String {
-        let formatter = DateFormatter()
-        formatter.timeStyle = .short
-        formatter.dateStyle = .none
-        return formatter.string(from: entry.timestamp)
+        Self.timeFormatter.string(from: entry.timestamp)
     }
 
     var body: some View {
@@ -64,11 +69,6 @@ struct EntryRowView: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.name), \(Int(entry.calories)) kilocalories, protein \(Int(entry.protein))g, carbs \(Int(entry.carbs))g, fat \(Int(entry.fat))g")
-        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-            Button(role: .destructive, action: onDelete) {
-                Label("Delete", systemImage: "trash")
-            }
-        }
     }
 }
 

@@ -19,6 +19,11 @@ struct ManualEntryView: View {
 
     let defaultDate: Date
 
+    /// Optional OFF product to pre-fill the form with.
+    /// When set, all fields are populated from the product's nutrition data
+    /// and the user can review/edit before saving.
+    let prefillProduct: OFFProduct?
+
     // Form state
     @State private var name = ""
     @State private var brand = ""
@@ -45,6 +50,18 @@ struct ManualEntryView: View {
     @State private var newMicroUnit = "g"
 
     @FocusState private var focusedField: ManualEntryField?
+
+    /// Convenience initializer without pre-fill (backwards compatible)
+    init(defaultDate: Date) {
+        self.defaultDate = defaultDate
+        self.prefillProduct = nil
+    }
+
+    /// Initializer with an OFF product to pre-fill the form
+    init(defaultDate: Date, prefillProduct: OFFProduct) {
+        self.defaultDate = defaultDate
+        self.prefillProduct = prefillProduct
+    }
 
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
@@ -150,7 +167,39 @@ struct ManualEntryView: View {
                 }
             }
             .onAppear {
-                focusedField = .name
+                // Pre-fill form from OFF product if provided
+                if let product = prefillProduct {
+                    name = product.name
+                    brand = product.brand ?? ""
+                    calories = formatValue(product.caloriesPerServing)
+                    protein = formatValue(product.proteinPerServing)
+                    carbs = formatValue(product.carbsPerServing)
+                    fat = formatValue(product.fatPerServing)
+                    servingSize = product.servingSize ?? ""
+
+                    // Pre-fill micronutrients from OFF data
+                    // Replace default values with OFF values, add any extras
+                    for i in micronutrientTexts.indices {
+                        let microName = micronutrientTexts[i].name
+                        if let offValue = product.micronutrients[microName] {
+                            micronutrientTexts[i].text = formatValue(offValue.value)
+                        }
+                    }
+                    // Add any OFF micronutrients not in the default set
+                    let existingNames = Set(micronutrientTexts.map(\.name))
+                    for (nutrientName, value) in product.micronutrients where !existingNames.contains(nutrientName) {
+                        micronutrientTexts.append((name: nutrientName, unit: value.unit, text: formatValue(value.value)))
+                    }
+
+                    if !product.micronutrients.isEmpty {
+                        showExtended = true
+                    }
+
+                    // Don't auto-focus name since it's already filled
+                    focusedField = nil
+                } else {
+                    focusedField = .name
+                }
             }
             .alert("Add Micronutrient", isPresented: $showAddMicro) {
                 TextField("Name (e.g. Vitamin A)", text: $newMicroName)
@@ -169,6 +218,13 @@ struct ManualEntryView: View {
                 }
             }
         }
+    }
+
+    /// Formats a Double for display in text fields — drops ".0" for whole numbers
+    private func formatValue(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0
+            ? String(Int(value))
+            : String(format: "%.1f", value)
     }
 
     private func save(saveToFoodBank: Bool) {
