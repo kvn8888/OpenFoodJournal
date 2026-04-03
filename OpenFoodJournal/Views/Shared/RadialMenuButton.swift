@@ -161,6 +161,8 @@ struct RadialMenuButton: View {
                 .font(.caption2)
                 .fontWeight(.medium)
                 .foregroundStyle(isHighlighted ? item.color : .secondary)
+                // Drop shadow improves legibility over light/glass backgrounds
+                .shadow(color: .black.opacity(0.35), radius: 2, x: 0, y: 1)
         }
         .animation(.spring(duration: 0.2), value: isHighlighted)
     }
@@ -269,6 +271,7 @@ struct RadialMenuButton: View {
     // MARK: - Open / Close
 
     private func open() {
+        didTrigger = false
         withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
             isOpen = true
         }
