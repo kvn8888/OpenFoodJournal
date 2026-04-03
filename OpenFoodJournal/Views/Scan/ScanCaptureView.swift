@@ -14,6 +14,8 @@ struct ScanCaptureView: View {
     /// The date the scanned entry will be logged to (passed from DailyLogView)
     var logDate: Date = .now
 
+    @AppStorage("scan.useProModel") private var useProModel: Bool = false
+
     @State private var mode: ScanMode = .label
     @State private var cameraPermissionDenied = false
     @State private var showPhotoPicker = false
@@ -236,7 +238,7 @@ struct ScanCaptureView: View {
                     Button {
                         isPromptFocused = false
                         let prompt = promptText.isEmpty ? nil : promptText
-                        scanService.scanInBackground(image: image, mode: mode, prompt: prompt)
+                        scanService.scanInBackground(image: image, mode: mode, prompt: prompt, useProModel: useProModel)
                         dismiss()
                     } label: {
                         Label("Analyze", systemImage: "wand.and.sparkles")

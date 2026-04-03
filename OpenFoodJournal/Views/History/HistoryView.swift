@@ -10,6 +10,7 @@ struct HistoryView: View {
     @Environment(UserGoals.self) private var goals
 
     @State private var selectedDate: Date = .now
+    @State private var editingEntry: NutritionEntry?
 
     // Current selected day's log
     private var selectedLog: DailyLog? {
