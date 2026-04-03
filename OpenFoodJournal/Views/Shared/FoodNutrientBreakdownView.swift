@@ -50,7 +50,7 @@ struct FoodNutrientBreakdownView: View {
                     macroRing("Calories", value: macros.cal, goal: Double(goals.dailyCalories), unit: "kcal", color: .orange)
                     macroRing("Protein", value: macros.protein, goal: Double(goals.dailyProtein), unit: "g", color: .blue)
                     macroRing("Carbs", value: macros.carbs, goal: Double(goals.dailyCarbs), unit: "g", color: .green)
-                    macroRing("Fat", value: macros.fat, goal: Double(goals.dailyFat), unit: "g", color: .yellow)
+                    macroRing("Fat", value: macros.fat, goal: Double(goals.dailyFat), unit: "g", color: Color(red: 0.9, green: 0.75, blue: 0.0))
                 }
                 .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                 .listRowBackground(Color.clear)
@@ -104,7 +104,7 @@ struct FoodNutrientBreakdownView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 64, height: 64)
+            .frame(width: 80, height: 80)
 
             Text(name)
                 .font(.caption)

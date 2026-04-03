@@ -56,7 +56,7 @@ struct NutritionDetailView: View {
 
     var body: some View {
         List {
-            // Period picker
+            // Period picker + date navigation
             Section {
                 Picker("Period", selection: $selectedPeriod) {
                     ForEach(NutritionStore.TimePeriod.allCases, id: \.self) { period in
@@ -65,7 +65,8 @@ struct NutritionDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 4, trailing: 16))
+                .listRowSeparator(.hidden)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
 
                 // Daily average hint for week/month
                 if selectedPeriod != .daily {
@@ -76,6 +77,40 @@ struct NutritionDetailView: View {
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
+
+                // Date nav: ◀ Date Label ▶
+                GlassEffectContainer(spacing: 6) {
+                    HStack(spacing: 6) {
+                        Button {
+                            navigate(by: -1)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+
+                        Text(dateLabel)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .glassEffect(in: .capsule)
+                            .contentTransition(.numericText())
+
+                        Button {
+                            navigate(by: 1)
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 14, weight: .semibold))
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(!canGoForward)
+                        .opacity(canGoForward ? 1 : 0.3)
+                    }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 8, trailing: 16))
             }
 
             // Macro summary cards
@@ -112,40 +147,6 @@ struct NutritionDetailView: View {
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Nutrition")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 6) {
-                    Button {
-                        navigate(by: -1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.glass)
-
-                    Text(dateLabel)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .lineLimit(1)
-                        .padding(.horizontal, 8)
-                        .frame(height: 32)
-                        .glassEffect(in: .capsule)
-                        .contentTransition(.numericText())
-
-                    Button {
-                        navigate(by: 1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .frame(width: 32, height: 32)
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(!canGoForward)
-                    .opacity(canGoForward ? 1 : 0.3)
-                }
-            }
-        }
         .navigationDestination(item: $selectedMacro) { macro in
             NutrientBreakdownView(macro: macro, period: selectedPeriod)
         }
@@ -192,7 +193,7 @@ struct NutritionDetailView: View {
                 macroCard(.calories, value: macroTotals.cal, goal: Double(goals.dailyCalories), color: .orange)
                 macroCard(.protein, value: macroTotals.protein, goal: Double(goals.dailyProtein), color: .blue)
                 macroCard(.carbs, value: macroTotals.carbs, goal: Double(goals.dailyCarbs), color: .green)
-                macroCard(.fat, value: macroTotals.fat, goal: Double(goals.dailyFat), color: .yellow)
+                macroCard(.fat, value: macroTotals.fat, goal: Double(goals.dailyFat), color: Color(red: 0.9, green: 0.75, blue: 0.0))
             }
             .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
             .listRowBackground(Color.clear)
@@ -211,11 +212,11 @@ struct NutritionDetailView: View {
                 ZStack {
                     // Background track
                     Circle()
-                        .stroke(color.opacity(0.15), lineWidth: 6)
+                        .stroke(color.opacity(0.15), lineWidth: 5)
                     // Filled arc — trims from 0 to fraction of circumference
                     Circle()
                         .trim(from: 0, to: displayFraction)
-                        .stroke(color, style: StrokeStyle(lineWidth: 6, lineCap: .round))
+                        .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90)) // Start from 12 o'clock
                     // Value label inside the ring
                     VStack(spacing: 0) {
@@ -228,7 +229,7 @@ struct NutritionDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                .frame(width: 64, height: 64)
+                .frame(width: 100, height: 100)
 
                 Text(macro.rawValue)
                     .font(.caption)
