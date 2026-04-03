@@ -255,9 +255,10 @@ Already configured in `OpenFoodJournal.entitlements`:
 - **Open Food Facts (OFF)** is a free, open database of 4M+ food products. Integrated into the Food Bank for searching and adding foods without scanning.
 - **Service**: `OpenFoodFactsService` — `@Observable @MainActor` service for OFF REST API calls (text search + barcode lookup). Injected via `.environment()` from `MacrosApp`.
 - **API endpoints used**:
-  - **Text search (v1)**: `GET https://world.openfoodfacts.org/cgi/search.pl?search_terms={query}&search_simple=1&action=process&json=1&fields=...&page_size=25` — only v1 supports full-text search
-  - **Barcode lookup (v2)**: `GET https://world.openfoodfacts.org/api/v2/product/{barcode}?fields=...`
-  - **Fields requested**: `product_name,brands,nutriments,serving_size,serving_quantity,code`
+  - **Text search**: `GET https://search.openfoodfacts.org/search?q={query}&fields=product_name,brands,code&page_size=25` — dedicated Elasticsearch-backed search service (the legacy v1 CGI endpoint returns 503)
+  - **Barcode/product lookup (v2)**: `GET https://world.openfoodfacts.org/api/v2/product/{barcode}?fields=...` — full nutrition data
+  - **Two-step flow**: Search returns lightweight hits (name, brand, code via `OFFSearchHit`); tapping a result fetches full nutrition via barcode lookup → `OFFProduct`
+  - **Fields requested** (for product detail): `product_name,brands,nutriments,serving_size,serving_quantity,code`
   - **Nutriments mapping**: `energy-kcal_100g` → calories, `proteins_100g` → protein, `carbohydrates_100g` → carbs, `fat_100g` → fat, plus micronutrients (fiber, sugar, sodium, etc.)
   - **User-Agent**: `OpenFoodJournal/1.0 (openfoodjournal@example.com)` — required by OFF API policy
   - **Rate limits**: 10 req/min for search, 100 req/min for product reads
