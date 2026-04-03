@@ -149,8 +149,8 @@ final class OpenFoodFactsService {
     /// Searches Open Food Facts for products matching a text query.
     /// Uses the dedicated search service (search.openfoodfacts.org) which is
     /// Elasticsearch-backed and more reliable than the legacy v1 CGI endpoint.
-    /// After getting lightweight search hits, batch-fetches full nutrition data
-    /// for each result via the v2 barcode API so the UI can show macros.
+    /// Requests nutrition data directly from the search API to avoid
+    /// batch-fetching each product individually by barcode.
     ///
     /// - Parameters:
     ///   - query: The user's search text (e.g. "greek yogurt", "cheerios")
@@ -168,13 +168,12 @@ final class OpenFoodFactsService {
         isLoading = true
         errorMessage = nil
 
-        // Build the search URL using the dedicated search service
-        // q= is the search query, page/page_size for pagination
-        // fields= limits the response to just what we need for the list
+        // Build the search URL — request nutrition fields directly so we
+        // don't need to batch-fetch each product by barcode
         var components = URLComponents(string: "\(searchBaseURL)/search")!
         components.queryItems = [
             URLQueryItem(name: "q", value: trimmed),
-            URLQueryItem(name: "fields", value: "product_name,brands,code"),
+            URLQueryItem(name: "fields", value: "product_name,brands,code,nutriments,serving_size,serving_quantity"),
             URLQueryItem(name: "page_size", value: "\(pageSize)"),
             URLQueryItem(name: "page", value: "\(page)")
         ]
@@ -200,37 +199,36 @@ final class OpenFoodFactsService {
             let searchResponse = try JSONDecoder().decode(OFFSearchResult.self, from: data)
             totalResultCount = searchResponse.page_count
 
-            // Extract barcodes from search hits, filtering out empty/missing ones
-            let barcodes: [String] = searchResponse.hits.compactMap { hit in
+            // Convert search hits directly to OFFProduct — no batch fetch needed.
+            // Products without nutrition data still appear but with zero macros.
+            searchResults = searchResponse.hits.compactMap { hit -> OFFProduct? in
                 guard let code = hit.code, !code.isEmpty,
-                      let name = hit.product_name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                      let name = hit.product_name,
+                      !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { return nil }
-                return code
-            }
 
-            // Batch-fetch full product details for each barcode using concurrent tasks.
-            // This populates nutrition data so the list can show calories and macros.
-            // OFF allows 100 req/min for product reads, so this is within limits for 25 results.
-            let products = await withTaskGroup(of: OFFProduct?.self, returning: [OFFProduct].self) { group in
-                for code in barcodes {
-                    group.addTask { [self] in
-                        await self.fetchProductByBarcode(code)
-                    }
-                }
+                let brand = hit.brands?.first?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let nutriments = hit.nutriments ?? [:]
+                let calories = nutriments["energy-kcal_100g"] ?? 0
+                let protein = nutriments["proteins_100g"] ?? 0
+                let carbs = nutriments["carbohydrates_100g"] ?? 0
+                let fat = nutriments["fat_100g"] ?? 0
 
-                var results: [OFFProduct] = []
-                for await product in group {
-                    if let product {
-                        results.append(product)
-                    }
-                }
-                return results
-            }
+                // Parse micronutrients from the search hit's nutriments
+                let micros = parseMicronutrients(from: nutriments)
 
-            // Sort results to match the original search order (by barcode position)
-            let orderMap = Dictionary(uniqueKeysWithValues: barcodes.enumerated().map { ($1, $0) })
-            searchResults = products.sorted { a, b in
-                (orderMap[a.code] ?? Int.max) < (orderMap[b.code] ?? Int.max)
+                return OFFProduct(
+                    code: code,
+                    name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                    brand: brand,
+                    caloriesPer100g: calories,
+                    proteinPer100g: protein,
+                    carbsPer100g: carbs,
+                    fatPer100g: fat,
+                    servingSize: hit.serving_size,
+                    servingQuantityGrams: hit.serving_quantity,
+                    micronutrients: micros
+                )
             }
 
             isLoading = false
@@ -435,12 +433,44 @@ private struct OFFSearchResult: Codable {
     let hits: [OFFSearchRawHit]
 }
 
-/// Raw hit from the search API — just name, brands (array), and barcode.
+/// Raw hit from the search API — includes name, brands, barcode, and optionally nutrition.
+/// Brands come as a string array from the Elasticsearch search API
+/// (unlike the main v2 API which uses a comma-separated string).
 private struct OFFSearchRawHit: Codable {
     let code: String?
     let product_name: String?
-    /// Brands come as a string array from the search API (unlike the main API's comma-separated string)
     let brands: [String]?
+    let serving_size: String?
+    let serving_quantity: Double?
+    /// Nutriments dict — contains mixed types (strings and numbers) in the raw API.
+    /// We decode only numeric values using custom decoding.
+    let nutriments: [String: Double]?
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decodeIfPresent(String.self, forKey: .code)
+        product_name = try container.decodeIfPresent(String.self, forKey: .product_name)
+        brands = try container.decodeIfPresent([String].self, forKey: .brands)
+        serving_size = try container.decodeIfPresent(String.self, forKey: .serving_size)
+        serving_quantity = try container.decodeIfPresent(Double.self, forKey: .serving_quantity)
+
+        // Decode nutriments — the dict has mixed String/Number values from OFF
+        if let rawNutriments = try container.decodeIfPresent([String: AnyCodableValue].self, forKey: .nutriments) {
+            var nums: [String: Double] = [:]
+            for (key, val) in rawNutriments {
+                if let num = val.doubleValue {
+                    nums[key] = num
+                }
+            }
+            nutriments = nums
+        } else {
+            nutriments = nil
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case code, product_name, brands, serving_size, serving_quantity, nutriments
+    }
 }
 
 /// Wrapper for the v2 barcode lookup API response.
