@@ -132,7 +132,7 @@ struct RadialMenuButton: View {
             .glassEffectID("plus", in: glassNamespace)
             .offset(dragOffset)
             .gesture(dragGesture)
-            .simultaneousGesture(tapGesture)
+            .simultaneousGesture(longPressToggle)
             .sensoryFeedback(.impact(flexibility: .soft), trigger: isOpen)
             .sensoryFeedback(.selection, trigger: highlightedID)
     }
@@ -167,10 +167,12 @@ struct RadialMenuButton: View {
 
     // MARK: - Gestures
 
-    /// Tap gesture: toggles menu open/closed
-    private var tapGesture: some Gesture {
-        TapGesture()
-            .onEnded {
+    /// Toggle gesture: fires on any press duration (tap or long press).
+    /// Uses a near-zero minimum duration so it catches holds that don't
+    /// travel far enough to trigger the drag gesture.
+    private var longPressToggle: some Gesture {
+        LongPressGesture(minimumDuration: 0.01)
+            .onEnded { _ in
                 if isOpen {
                     close()
                 } else {

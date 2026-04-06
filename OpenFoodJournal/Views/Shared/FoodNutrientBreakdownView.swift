@@ -156,19 +156,28 @@ struct FoodNutrientBreakdownView: View {
 
     // MARK: - Data Loading
 
-    /// Collects all entries matching this food name in the period, then aggregates nutrients
+    /// Collects all entries matching this food name in the period, then aggregates nutrients.
+    /// For weekly/monthly, values are daily averages (consistent with NutritionDetailView).
     private func loadData() {
         // Get all entries for the period, filter to this food
         let allEntries = nutritionStore.entriesForPeriod(period)
         entries = allEntries.filter { $0.name == foodName }
 
-        // Sum macros across all matching entries
-        macros = entries.reduce(into: (cal: 0.0, protein: 0.0, carbs: 0.0, fat: 0.0)) { result, entry in
+        // For weekly/monthly, show daily averages
+        let divisor: Double = switch period {
+        case .daily:  1
+        case .weekly: 7
+        case .monthly: 30
+        }
+
+        // Sum macros across all matching entries, then average
+        let rawMacros = entries.reduce(into: (cal: 0.0, protein: 0.0, carbs: 0.0, fat: 0.0)) { result, entry in
             result.cal += entry.calories
             result.protein += entry.protein
             result.carbs += entry.carbs
             result.fat += entry.fat
         }
+        macros = (rawMacros.cal / divisor, rawMacros.protein / divisor, rawMacros.carbs / divisor, rawMacros.fat / divisor)
 
         // Aggregate micronutrients: sum each nutrient across all entries
         var microTotals: [String: Double] = [:]
@@ -182,13 +191,15 @@ struct FoodNutrientBreakdownView: View {
         }
 
         // Map to MicroRow using known nutrients for daily value / category info
+        // Apply daily averaging for multi-day periods
         var rows: [MicroRow] = []
         for (key, total) in microTotals {
+            let averaged = total / divisor
             let known = KnownMicronutrients.all.first { $0.id == key }
             rows.append(MicroRow(
                 id: key,
                 name: known?.name ?? key.replacingOccurrences(of: "_", with: " ").capitalized,
-                value: total,
+                value: averaged,
                 unit: microUnits[key] ?? known?.unit ?? "",
                 dailyValue: known?.dailyValue ?? 0,
                 category: known?.category ?? .other

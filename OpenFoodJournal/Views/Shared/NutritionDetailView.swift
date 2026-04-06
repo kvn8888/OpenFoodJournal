@@ -33,7 +33,8 @@ struct NutritionDetailView: View {
         return current < today
     }
 
-    /// Formatted date label based on the selected period
+    /// Formatted date label based on the selected period.
+    /// Weekly/monthly show a trailing window ending on selectedDate.
     private var dateLabel: String {
         switch selectedPeriod {
         case .daily:
@@ -44,13 +45,15 @@ struct NutritionDetailView: View {
             }
             return selectedDate.formatted(.dateTime.month(.abbreviated).day())
         case .weekly:
-            let weekStart = calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? selectedDate
-            let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart)!
-            let startStr = weekStart.formatted(.dateTime.month(.abbreviated).day())
-            let endStr = weekEnd.formatted(.dateTime.month(.abbreviated).day())
+            let start = calendar.date(byAdding: .day, value: -6, to: selectedDate)!
+            let startStr = start.formatted(.dateTime.month(.abbreviated).day())
+            let endStr = selectedDate.formatted(.dateTime.month(.abbreviated).day())
             return "\(startStr) – \(endStr)"
         case .monthly:
-            return selectedDate.formatted(.dateTime.month(.wide).year())
+            let start = calendar.date(byAdding: .day, value: -29, to: selectedDate)!
+            let startStr = start.formatted(.dateTime.month(.abbreviated).day())
+            let endStr = selectedDate.formatted(.dateTime.month(.abbreviated).day())
+            return "\(startStr) – \(endStr)"
         }
     }
 
@@ -166,17 +169,25 @@ struct NutritionDetailView: View {
     // MARK: - Navigation
 
     /// Moves the selected date forward or backward by one period unit.
+    /// Weekly/monthly step by 7/30 days to match the trailing-window aggregation.
     private func navigate(by direction: Int) {
-        let component: Calendar.Component
+        let dayStep: Int
         switch selectedPeriod {
-        case .daily:   component = .day
-        case .weekly:  component = .weekOfYear
-        case .monthly: component = .month
+        case .daily:   dayStep = 1
+        case .weekly:  dayStep = 7
+        case .monthly: dayStep = 30
         }
-        guard let newDate = calendar.date(byAdding: component, value: direction, to: selectedDate) else { return }
+        guard let newDate = calendar.date(byAdding: .day, value: dayStep * direction, to: selectedDate) else { return }
 
         // Don't navigate past today
-        if direction > 0 && calendar.startOfDay(for: newDate) > calendar.startOfDay(for: .now) {
+        let today = calendar.startOfDay(for: .now)
+        if direction > 0 && calendar.startOfDay(for: newDate) > today {
+            // Snap to today instead of overshooting
+            if calendar.startOfDay(for: selectedDate) < today {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    selectedDate = .now
+                }
+            }
             return
         }
 

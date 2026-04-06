@@ -196,6 +196,13 @@ struct NutrientBreakdownView: View {
     private func loadData() {
         let entries = nutritionStore.entriesForPeriod(period)
 
+        // For weekly/monthly, show daily averages (consistent with NutritionDetailView)
+        let divisor: Double = switch period {
+        case .daily:  1
+        case .weekly: 7
+        case .monthly: 30
+        }
+
         // Group by food name and sum the nutrient value
         var byFood: [String: Double] = [:]
         for entry in entries {
@@ -210,8 +217,9 @@ struct NutrientBreakdownView: View {
             byFood[entry.name, default: 0] += value
         }
 
-        // Filter out zero-value foods and sort by contribution (largest first)
-        let sorted = byFood.filter { $0.value > 0 }.sorted { $0.value > $1.value }
+        // Apply daily averaging for multi-day periods, then filter and sort
+        let averaged = byFood.mapValues { $0 / divisor }
+        let sorted = averaged.filter { $0.value > 0 }.sorted { $0.value > $1.value }
         let palette: [Color] = [.blue, .green, .orange, .purple, .pink, .cyan, .yellow, .red, .mint, .indigo]
 
         contributions = sorted.enumerated().map { index, pair in

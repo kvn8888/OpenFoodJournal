@@ -32,6 +32,9 @@ struct LogFoodSheet: View {
     @State private var showEditFood = false
     // Controls the Add Serving Mapping sheet
     @State private var showAddMapping = false
+    // When true, the onChange(of: selectedUnit) handler skips auto-conversion
+    // (used by the "last used" button which sets quantity and unit together)
+    @State private var suppressUnitConversion = false
     // Editable micronutrient values — initialized from the food template, can be
     // adjusted by the user before logging. Scaling is applied at log time.
     @State private var editedMicros: [String: MicronutrientValue]
@@ -310,10 +313,32 @@ struct LogFoodSheet: View {
     /// Mirrors the serving editor in EditEntryView.
     private var servingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Quantity")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Quantity")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if let last = nutritionStore.lastUsedServing(forFoodNamed: food.name, brand: food.brand) {
+                    Button {
+                        suppressUnitConversion = true
+                        quantity = last.quantity
+                        quantityText = last.quantity.truncatingRemainder(dividingBy: 1) == 0
+                            ? String(format: "%.0f", last.quantity)
+                            : String(format: "%.2f", last.quantity)
+                        if availableUnits.contains(last.unit) {
+                            selectedUnit = last.unit
+                        }
+                    } label: {
+                        let qtyLabel = last.quantity.truncatingRemainder(dividingBy: 1) == 0
+                            ? String(format: "%.0f", last.quantity) : String(format: "%.1f", last.quantity)
+                        Label("Last: \(qtyLabel) \(last.unit)", systemImage: "clock.arrow.circlepath")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+            }
 
             HStack(spacing: 12) {
                 // Quantity input — decimal keyboard, live-updates macros
@@ -346,6 +371,10 @@ struct LogFoodSheet: View {
                     // Auto-convert quantity when the user switches units
                     // e.g. "1 cup" → "240 g" so the macros stay equivalent
                     .onChange(of: selectedUnit) { oldUnit, newUnit in
+                        if suppressUnitConversion {
+                            suppressUnitConversion = false
+                            return
+                        }
                         let oldFactor = converter.factorFor(oldUnit)
                         let newFactor = converter.factorFor(newUnit)
                         guard oldFactor > 0, newFactor > 0 else { return }
