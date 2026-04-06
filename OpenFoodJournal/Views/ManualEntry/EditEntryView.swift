@@ -17,6 +17,9 @@ struct EditEntryView: View {
     @State private var showDeleteConfirm = false
     // Controls the AddServingMappingSheet for adding custom unit conversions
     @State private var showAddMapping = false
+    // Tracks the entry's original date so we can move it between DailyLogs on save
+    @State private var selectedDate: Date
+    private let originalDate: Date
 
     // Editable serving quantity — initialized from the entry's current value
     @State private var quantity: Double
@@ -35,6 +38,11 @@ struct EditEntryView: View {
 
     init(entry: NutritionEntry) {
         self.entry = entry
+        // Use the dailyLog's date (which day it counts toward), not
+        // entry.timestamp (which may be the actual creation time on a different day)
+        let logDate = entry.dailyLog?.date ?? entry.timestamp
+        _selectedDate = State(initialValue: logDate)
+        self.originalDate = logDate
         let qty = entry.servingQuantity ?? 1.0
         let unit = entry.servingUnit ?? "serving"
         _quantity = State(initialValue: qty)
@@ -109,7 +117,22 @@ struct EditEntryView: View {
                         entry.servingQuantity = quantity
                         entry.servingUnit = selectedUnit
 
-                        nutritionStore.saveEntry(entry)
+                        // If the user changed the date, move entry to the new day's log
+                        let cal = Calendar.current
+                        if !cal.isDate(selectedDate, inSameDayAs: originalDate) {
+                            // Combine the new date with the existing time
+                            let timeComponents = cal.dateComponents([.hour, .minute, .second], from: entry.timestamp)
+                            if let combined = cal.date(bySettingHour: timeComponents.hour ?? 0,
+                                                       minute: timeComponents.minute ?? 0,
+                                                       second: timeComponents.second ?? 0,
+                                                       of: selectedDate) {
+                                entry.timestamp = combined
+                            }
+                            nutritionStore.moveEntry(entry, to: selectedDate)
+                        } else {
+                            nutritionStore.saveEntry(entry)
+                        }
+
                         Task { await healthKit.write(entry) }
                         dismiss()
                     }
@@ -184,9 +207,10 @@ struct EditEntryView: View {
         }
     }
 
-    /// Time picker — lets the user adjust when the entry was logged
+    /// Date and time pickers — lets the user adjust when the entry was logged
     private var timeSection: some View {
         Section {
+            DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
             DatePicker("Time", selection: $entry.timestamp, displayedComponents: .hourAndMinute)
         }
     }

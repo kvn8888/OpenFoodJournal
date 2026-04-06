@@ -45,6 +45,11 @@ final class DailyLog {
         safeEntries.reduce(0) { $0 + $1.fat }
     }
 
+    /// Sum of a specific micronutrient across all entries for this day
+    func totalMicronutrient(id: String) -> Double {
+        safeEntries.reduce(0) { $0 + ($1.micronutrients[id]?.value ?? 0) }
+    }
+
     // MARK: - Grouped Entries
 
     func entries(for mealType: MealType) -> [NutritionEntry] {

@@ -71,11 +71,6 @@ struct HistoryView: View {
         comparisonPeriod == .weekly ? "Last Week vs This Week" : "Last Month vs This Month"
     }
 
-    /// Label for the chart section
-    private var chartTitle: String {
-        comparisonPeriod == .weekly ? "This Week" : "This Month"
-    }
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -88,10 +83,6 @@ struct HistoryView: View {
 
                     // Chart for current period
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(chartTitle)
-                            .font(.headline)
-                            .padding(.horizontal)
-
                         if currentPeriodLogs.isEmpty {
                             Text("No data yet — start logging meals!")
                                 .font(.subheadline)

@@ -17,7 +17,10 @@ struct DailyLogView: View {
     @State private var scanDate: Date = .now
 
     private var log: DailyLog? {
-        nutritionStore.fetchLog(for: selectedDate)
+        // Reading changeCount ensures SwiftUI re-evaluates this property
+        // after any NutritionStore write (e.g. entry moved to a different day)
+        _ = nutritionStore.changeCount
+        return nutritionStore.fetchLog(for: selectedDate)
     }
 
     var body: some View {

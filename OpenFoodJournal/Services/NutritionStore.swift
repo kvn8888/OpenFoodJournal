@@ -9,6 +9,8 @@ import Observation
 @MainActor
 final class NutritionStore {
     let modelContext: ModelContext
+    /// Bumped on every write so SwiftUI views that read it re-evaluate their computed properties
+    private(set) var changeCount = 0
 
     init(modelContext: ModelContext) {
         self.modelContext = modelContext
@@ -68,51 +70,62 @@ final class NutritionStore {
 
     /// Exports all logged entries as CSV. Core macros are always columns;
     /// micronutrients are collected across all entries and added as dynamic columns.
+    /// Data comes from the local SwiftData store which CloudKit keeps in sync with iCloud.
     func exportCSV() -> String {
-        let logs = fetchAllLogs()
+        // Fetch all entries directly — avoids missing orphaned entries not linked to a log
+        var entryDescriptor = FetchDescriptor<NutritionEntry>(
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+        )
+        let allEntries = (try? modelContext.fetch(entryDescriptor)) ?? []
+        guard !allEntries.isEmpty else { return "" }
 
         // Collect all unique micronutrient names across every entry
         var allMicroNames = Set<String>()
-        for log in logs {
-            for entry in log.safeEntries {
-                allMicroNames.formUnion(entry.micronutrients.keys)
-            }
+        for entry in allEntries {
+            allMicroNames.formUnion(entry.micronutrients.keys)
         }
         let sortedMicroNames = allMicroNames.sorted()
 
         // Build header: fixed columns + dynamic micro columns
-        var header = ["Date", "Meal", "Name", "Scan Mode", "Confidence",
-                      "Calories", "Protein (g)", "Carbs (g)", "Fat (g)"]
+        var header = ["Date", "Time", "Meal", "Name", "Brand", "Scan Mode", "Confidence",
+                      "Calories", "Protein (g)", "Carbs (g)", "Fat (g)",
+                      "Serving Qty", "Serving Unit"]
         header.append(contentsOf: sortedMicroNames)
         var rows: [String] = [header.map { "\"\($0)\"" }.joined(separator: ",")]
 
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .short
 
-        for log in logs {
-            for entry in log.safeEntries.sorted(by: { $0.timestamp < $1.timestamp }) {
-                let confidence = entry.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? ""
-                var fields = [
-                    dateFormatter.string(from: log.date),
-                    entry.mealType.rawValue,
-                    entry.name,
-                    entry.scanMode.rawValue,
-                    confidence,
-                    String(format: "%.1f", entry.calories),
-                    String(format: "%.1f", entry.protein),
-                    String(format: "%.1f", entry.carbs),
-                    String(format: "%.1f", entry.fat),
-                ]
-                // Append each micronutrient value (or empty if entry doesn't have it)
-                for microName in sortedMicroNames {
-                    if let micro = entry.micronutrients[microName] {
-                        fields.append(String(format: "%.1f %@", micro.value, micro.unit))
-                    } else {
-                        fields.append("")
-                    }
+        let timeFormatter = DateFormatter()
+        timeFormatter.timeStyle = .short
+
+        for entry in allEntries {
+            let logDate = entry.dailyLog?.date ?? entry.timestamp
+            let confidence = entry.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? ""
+            var fields = [
+                dateFormatter.string(from: logDate),
+                timeFormatter.string(from: entry.timestamp),
+                entry.mealType.rawValue,
+                entry.name,
+                entry.brand ?? "",
+                entry.scanMode.rawValue,
+                confidence,
+                String(format: "%.1f", entry.calories),
+                String(format: "%.1f", entry.protein),
+                String(format: "%.1f", entry.carbs),
+                String(format: "%.1f", entry.fat),
+                entry.servingQuantity.map { String(format: "%.2f", $0) } ?? "",
+                entry.servingUnit ?? "",
+            ]
+            // Append each micronutrient value (or empty if entry doesn't have it)
+            for microName in sortedMicroNames {
+                if let micro = entry.micronutrients[microName] {
+                    fields.append(String(format: "%.1f %@", micro.value, micro.unit))
+                } else {
+                    fields.append("")
                 }
-                rows.append(fields.map { "\"\($0)\"" }.joined(separator: ","))
             }
+            rows.append(fields.map { "\"\($0)\"" }.joined(separator: ","))
         }
 
         return rows.joined(separator: "\n")
@@ -124,8 +137,37 @@ final class NutritionStore {
         save()
     }
 
+    /// Find the most recent journal entry for a food by name (and optionally brand).
+    /// Returns the (quantity, unit) the user last used when logging this food.
+    func lastUsedServing(forFoodNamed name: String, brand: String?) -> (quantity: Double, unit: String)? {
+        var descriptor = FetchDescriptor<NutritionEntry>(
+            predicate: #Predicate { $0.name == name },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        guard let entry = try? modelContext.fetch(descriptor).first,
+              let qty = entry.servingQuantity, qty > 0,
+              let unit = entry.servingUnit, !unit.isEmpty else {
+            return nil
+        }
+        return (qty, unit)
+    }
+
     /// Save an entry's edits locally
     func saveEntry(_ entry: NutritionEntry) {
+        save()
+    }
+
+    /// Move an entry to a different day's log (used when the user changes the date in EditEntryView)
+    func moveEntry(_ entry: NutritionEntry, to newDate: Date) {
+        // Remove from old log
+        if let oldLog = entry.dailyLog {
+            oldLog.entries?.removeAll { $0.id == entry.id }
+        }
+        // Attach to new (or existing) log
+        let newLog = fetchOrCreateLog(for: newDate)
+        entry.dailyLog = newLog
+        newLog.entries?.append(entry)
         save()
     }
 
@@ -271,5 +313,6 @@ final class NutritionStore {
 
     private func save() {
         try? modelContext.save()
+        changeCount += 1
     }
 }
