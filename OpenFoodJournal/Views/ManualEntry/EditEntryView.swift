@@ -15,8 +15,10 @@ struct EditEntryView: View {
     @Bindable var entry: NutritionEntry
 
     @State private var showDeleteConfirm = false
-    // Controls the AddServingMappingSheet for adding custom unit conversions
+    // Controls the AddServingMappingSheet for adding/editing custom unit conversions
     @State private var showAddMapping = false
+    // Index of mapping being edited (nil = adding new)
+    @State private var editingMappingIndex: Int?
     // Tracks the entry's original date so we can move it between DailyLogs on save
     @State private var selectedDate: Date
     private let originalDate: Date
@@ -86,11 +88,14 @@ struct EditEntryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .scrollDismissesKeyboard(.interactively)
             .sheet(isPresented: $showAddMapping) {
-                // Reuses the same AddServingMappingSheet from LogFoodSheet.swift.
-                // The onAdd callback mutates entry.servingMappings and saves to
-                // SwiftData, making the new unit appear in the unit picker above.
-                AddServingMappingSheet { mapping in
-                    addMapping(mapping)
+                if let index = editingMappingIndex {
+                    AddServingMappingSheet(existing: entry.servingMappings[index]) { mapping in
+                        updateMapping(at: index, with: mapping)
+                    }
+                } else {
+                    AddServingMappingSheet { mapping in
+                        addMapping(mapping)
+                    }
                 }
             }
             .toolbar {
@@ -284,21 +289,31 @@ struct EditEntryView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(entry.servingMappings, id: \.self) { mapping in
-                    HStack(spacing: 6) {
-                        Text(mapping.from.displayString)
-                            .fontWeight(.medium)
-                        Image(systemName: "arrow.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(mapping.to.displayString)
-                        Spacer()
+                ForEach(Array(entry.servingMappings.enumerated()), id: \.offset) { index, mapping in
+                    Button {
+                        editingMappingIndex = index
+                        showAddMapping = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(mapping.from.displayString)
+                                .fontWeight(.medium)
+                            Image(systemName: "arrow.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(mapping.to.displayString)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
                     }
-                    .font(.subheadline)
                 }
             }
 
             Button {
+                editingMappingIndex = nil
                 showAddMapping = true
             } label: {
                 Label("Add Unit Mapping", systemImage: "plus")
@@ -308,10 +323,14 @@ struct EditEntryView: View {
         }
     }
 
-    /// Appends a new mapping to the entry, saves to SwiftData, and syncs.
+    /// Appends a new mapping to the entry and propagates to SavedFood + siblings.
     private func addMapping(_ mapping: ServingMapping) {
-        entry.servingMappings.append(mapping)
-        nutritionStore.saveEntry(entry)
+        nutritionStore.addMapping(mapping, to: entry)
+    }
+
+    /// Replaces an existing mapping and propagates to SavedFood + siblings.
+    private func updateMapping(at index: Int, with mapping: ServingMapping) {
+        nutritionStore.replaceMapping(at: index, with: mapping, on: entry)
     }
 }
 

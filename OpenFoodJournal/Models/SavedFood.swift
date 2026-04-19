@@ -126,7 +126,8 @@ extension SavedFood {
             serving: serving,
             servingQuantity: servingQuantity,
             servingUnit: servingUnit,
-            servingMappings: servingMappings
+            servingMappings: servingMappings,
+            savedFoodID: id
         )
     }
 }

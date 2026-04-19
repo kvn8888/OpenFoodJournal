@@ -42,6 +42,7 @@ struct MacrosApp: App {
     }
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("hasRetrolinkedMappings") private var hasRetrolinkedMappings = false
 
     var body: some Scene {
         WindowGroup {
@@ -58,6 +59,12 @@ struct MacrosApp: App {
                         // Request HealthKit auth on first launch if user has previously enabled it
                         if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
                             await healthKitService.requestAuthorization()
+                        }
+                        // One-time migration: link old entries to SavedFoods and dedup mappings
+                        if !hasRetrolinkedMappings {
+                            nutritionStore.deduplicateAllMappings()
+                            nutritionStore.retrolinkOrphanedEntries()
+                            hasRetrolinkedMappings = true
                         }
                     }
             } else {

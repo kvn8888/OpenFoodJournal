@@ -30,8 +30,10 @@ struct LogFoodSheet: View {
     @State private var selectedUnit: String
     // Controls the nested Edit Food sheet
     @State private var showEditFood = false
-    // Controls the Add Serving Mapping sheet
+    // Controls the Add/Edit Serving Mapping sheet
     @State private var showAddMapping = false
+    // Index of mapping being edited (nil = adding new)
+    @State private var editingMappingIndex: Int?
     // When true, the onChange(of: selectedUnit) handler skips auto-conversion
     // (used by the "last used" button which sets quantity and unit together)
     @State private var suppressUnitConversion = false
@@ -147,10 +149,16 @@ struct LogFoodSheet: View {
             .sheet(isPresented: $showEditFood) {
                 EditFoodSheet(food: food)
             }
-            // Nested sheet for defining a new unit conversion mapping
+            // Nested sheet for defining a new or editing an existing unit conversion mapping
             .sheet(isPresented: $showAddMapping) {
-                AddServingMappingSheet { mapping in
-                    addMapping(mapping)
+                if let index = editingMappingIndex {
+                    AddServingMappingSheet(existing: food.servingMappings[index]) { mapping in
+                        updateMapping(at: index, with: mapping)
+                    }
+                } else {
+                    AddServingMappingSheet { mapping in
+                        addMapping(mapping)
+                    }
                 }
             }
         }
@@ -417,6 +425,7 @@ struct LogFoodSheet: View {
                 Spacer()
                 // Opens the AddServingMappingSheet for a new from→to conversion
                 Button {
+                    editingMappingIndex = nil
                     showAddMapping = true
                 } label: {
                     Label("Add", systemImage: "plus.circle")
@@ -431,27 +440,40 @@ struct LogFoodSheet: View {
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
-                // Show each existing mapping as a simple arrow expression
-                ForEach(food.servingMappings, id: \.self) { mapping in
-                    HStack(spacing: 6) {
-                        Text(mapping.from.displayString)
-                            .fontWeight(.medium)
-                        Image(systemName: "arrow.right")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(mapping.to.displayString)
-                        Spacer()
+                // Show each existing mapping — tap to edit, swipe to delete
+                ForEach(Array(food.servingMappings.enumerated()), id: \.offset) { index, mapping in
+                    Button {
+                        editingMappingIndex = index
+                        showAddMapping = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text(mapping.from.displayString)
+                                .fontWeight(.medium)
+                            Image(systemName: "arrow.right")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(mapping.to.displayString)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
                     }
-                    .font(.subheadline)
                 }
             }
         }
     }
 
-    /// Appends a new serving mapping to the food and saves to SwiftData.
+    /// Appends a new serving mapping to the food and propagates to all linked entries.
     private func addMapping(_ mapping: ServingMapping) {
-        food.servingMappings.append(mapping)
-        try? modelContext.save()
+        nutritionStore.addMapping(mapping, to: food)
+    }
+
+    /// Replaces an existing mapping and propagates to all linked entries.
+    private func updateMapping(at index: Int, with mapping: ServingMapping) {
+        nutritionStore.replaceMapping(at: index, with: mapping, on: food)
     }
 
     // MARK: - Helpers
@@ -481,24 +503,53 @@ struct LogFoodSheet: View {
 
 // MARK: - Add Serving Mapping Sheet
 
-/// A compact form for defining a new unit conversion for a food.
+/// A compact form for defining or editing a unit conversion for a food.
 /// For example: "1 cup → 244 g" means the user can later enter "1 cup"
 /// in the quantity picker and the app will scale macros accordingly.
-/// The caller receives the completed `ServingMapping` via the `onAdd` closure.
+/// The caller receives the completed `ServingMapping` via the `onSave` closure.
 /// Internal (not private) so EditEntryView can reuse the same sheet.
 struct AddServingMappingSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    // Callback — parent (LogFoodSheet) handles the actual model mutation
-    let onAdd: (ServingMapping) -> Void
+    // Callback — parent handles the actual model mutation
+    let onSave: (ServingMapping) -> Void
+
+    /// Optional existing mapping to edit. When nil, the sheet is in "add" mode.
+    let existing: ServingMapping?
 
     // ── From side ─────────────────────────────────────────────────
-    @State private var fromValue: String = "1"
-    @State private var fromUnit: String = "serving"
+    @State private var fromValue: String
+    @State private var fromUnit: String
 
     // ── To side ───────────────────────────────────────────────────
-    @State private var toValue: String = ""
-    @State private var toUnit: String = "g"
+    @State private var toValue: String
+    @State private var toUnit: String
+
+    /// Convenience init for adding a new mapping (backward-compatible call site)
+    init(onAdd: @escaping (ServingMapping) -> Void) {
+        self.onSave = onAdd
+        self.existing = nil
+        _fromValue = State(initialValue: "1")
+        _fromUnit = State(initialValue: "serving")
+        _toValue = State(initialValue: "")
+        _toUnit = State(initialValue: "g")
+    }
+
+    /// Init for editing an existing mapping — pre-fills fields
+    init(existing: ServingMapping, onSave: @escaping (ServingMapping) -> Void) {
+        self.onSave = onSave
+        self.existing = existing
+        let fv = existing.from.value
+        _fromValue = State(initialValue: fv.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", fv) : String(format: "%.2f", fv))
+        _fromUnit = State(initialValue: existing.from.unit)
+        let tv = existing.to.value
+        _toValue = State(initialValue: tv.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", tv) : String(format: "%.2f", tv))
+        _toUnit = State(initialValue: existing.to.unit)
+    }
+
+    private var isEditing: Bool { existing != nil }
 
     /// True when both sides have a valid positive number (enables Save button)
     private var isValid: Bool {
@@ -556,7 +607,7 @@ struct AddServingMappingSheet: View {
                     }
                 }
             }
-            .navigationTitle("Add Unit Mapping")
+            .navigationTitle(isEditing ? "Edit Unit Mapping" : "Add Unit Mapping")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -564,12 +615,11 @@ struct AddServingMappingSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        // Build and pass the mapping back to LogFoodSheet
                         let mapping = ServingMapping(
                             from: ServingAmount(value: Double(fromValue) ?? 1, unit: fromUnit.trimmingCharacters(in: .whitespaces)),
                             to: ServingAmount(value: Double(toValue) ?? 0, unit: toUnit.trimmingCharacters(in: .whitespaces))
                         )
-                        onAdd(mapping)
+                        onSave(mapping)
                         dismiss()
                     }
                     .fontWeight(.semibold)
