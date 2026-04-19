@@ -50,7 +50,14 @@ final class NutritionEntry {
 
     // Per-food unit mappings — e.g. [{ from: 1 cup, to: 244 g }]
     // Lets the app convert between custom units (pieces, slices, etc.)
+    // SavedFood is the canonical owner; entries keep a copy for display.
+    // Changes propagate bidirectionally via NutritionStore.
     var servingMappings: [ServingMapping] = []
+
+    // Links this entry back to the SavedFood it was logged from.
+    // Used to propagate mapping changes bidirectionally.
+    // Nil for entries that predate this field or were created without a SavedFood.
+    var savedFoodID: UUID?
 
     // How long the scan took (end-to-end from image upload to parsed result), in milliseconds.
     // Nil for manual entries. Used to track optimization progress.
@@ -78,7 +85,8 @@ final class NutritionEntry {
         servingCount: Double = 1.0,
         servingQuantity: Double? = nil,
         servingUnit: String? = nil,
-        servingMappings: [ServingMapping] = []
+        servingMappings: [ServingMapping] = [],
+        savedFoodID: UUID? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -99,6 +107,7 @@ final class NutritionEntry {
         self.servingQuantity = servingQuantity
         self.servingUnit = servingUnit
         self.servingMappings = servingMappings
+        self.savedFoodID = savedFoodID
     }
 }
 

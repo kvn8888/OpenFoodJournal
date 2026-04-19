@@ -158,6 +158,177 @@ final class NutritionStore {
         save()
     }
 
+    // MARK: - Serving Mapping Propagation
+
+    /// Deduplicates a mappings array so there's at most one mapping per `from.unit`.
+    /// When duplicates exist, the last one wins (most recently added/edited).
+    static func dedupMappings(_ mappings: [ServingMapping]) -> [ServingMapping] {
+        var seen: [String: Int] = [:]  // from.unit → index in result
+        var result: [ServingMapping] = []
+        for mapping in mappings {
+            let key = mapping.from.unit.lowercased().trimmingCharacters(in: .whitespaces)
+            if let existingIndex = seen[key] {
+                // Replace the earlier mapping with this newer one
+                result[existingIndex] = mapping
+            } else {
+                seen[key] = result.count
+                result.append(mapping)
+            }
+        }
+        return result
+    }
+
+    /// Updates a SavedFood's mappings and propagates to all linked NutritionEntries.
+    /// Call this when the user edits mappings on a SavedFood (e.g. in LogFoodSheet).
+    func updateMappings(on food: SavedFood, to newMappings: [ServingMapping]) {
+        let deduped = Self.dedupMappings(newMappings)
+        food.servingMappings = deduped
+
+        // Propagate to all entries linked to this food
+        let foodID = food.id
+        let descriptor = FetchDescriptor<NutritionEntry>(
+            predicate: #Predicate { $0.savedFoodID == foodID }
+        )
+        if let entries = try? modelContext.fetch(descriptor) {
+            for entry in entries {
+                entry.servingMappings = deduped
+            }
+        }
+        save()
+    }
+
+    /// Updates an entry's mappings and propagates back to its SavedFood + sibling entries.
+    /// Call this when the user edits mappings on a NutritionEntry (e.g. in EditEntryView).
+    func updateMappings(on entry: NutritionEntry, to newMappings: [ServingMapping]) {
+        let deduped = Self.dedupMappings(newMappings)
+        entry.servingMappings = deduped
+
+        // Propagate back to the SavedFood and all sibling entries
+        guard let foodID = entry.savedFoodID else {
+            save()
+            return
+        }
+
+        // Find and update the parent SavedFood
+        let foodDescriptor = FetchDescriptor<SavedFood>(
+            predicate: #Predicate { $0.id == foodID }
+        )
+        if let food = try? modelContext.fetch(foodDescriptor).first {
+            food.servingMappings = deduped
+        }
+
+        // Update all sibling entries (same savedFoodID, different id)
+        let entryID = entry.id
+        let entryDescriptor = FetchDescriptor<NutritionEntry>(
+            predicate: #Predicate { $0.savedFoodID == foodID && $0.id != entryID }
+        )
+        if let siblings = try? modelContext.fetch(entryDescriptor) {
+            for sibling in siblings {
+                sibling.servingMappings = deduped
+            }
+        }
+        save()
+    }
+
+    /// Adds a new mapping (or replaces an existing one with the same from.unit)
+    /// on a SavedFood and propagates to all linked entries.
+    func addMapping(_ mapping: ServingMapping, to food: SavedFood) {
+        var current = food.servingMappings
+        current.append(mapping)
+        updateMappings(on: food, to: current)
+    }
+
+    /// Adds a new mapping (or replaces an existing one with the same from.unit)
+    /// on an entry and propagates to SavedFood + siblings.
+    func addMapping(_ mapping: ServingMapping, to entry: NutritionEntry) {
+        var current = entry.servingMappings
+        current.append(mapping)
+        updateMappings(on: entry, to: current)
+    }
+
+    /// Replaces a mapping at a specific index on a SavedFood and propagates.
+    func replaceMapping(at index: Int, with mapping: ServingMapping, on food: SavedFood) {
+        guard index < food.servingMappings.count else { return }
+        var current = food.servingMappings
+        current[index] = mapping
+        updateMappings(on: food, to: current)
+    }
+
+    /// Replaces a mapping at a specific index on an entry and propagates.
+    func replaceMapping(at index: Int, with mapping: ServingMapping, on entry: NutritionEntry) {
+        guard index < entry.servingMappings.count else { return }
+        var current = entry.servingMappings
+        current[index] = mapping
+        updateMappings(on: entry, to: current)
+    }
+
+    // MARK: - Retrolink Old Entries
+
+    /// One-time migration: links existing NutritionEntries that have no savedFoodID
+    /// to their matching SavedFood by name + brand. Call once on app launch.
+    func retrolinkOrphanedEntries() {
+        // Fetch all entries without a savedFoodID
+        let entryDescriptor = FetchDescriptor<NutritionEntry>(
+            predicate: #Predicate { $0.savedFoodID == nil }
+        )
+        guard let orphans = try? modelContext.fetch(entryDescriptor), !orphans.isEmpty else { return }
+
+        // Build a lookup table of SavedFoods by (lowercased name, lowercased brand)
+        let foodDescriptor = FetchDescriptor<SavedFood>()
+        guard let foods = try? modelContext.fetch(foodDescriptor) else { return }
+
+        // Key: "name|brand" (both lowercased)
+        var foodLookup: [String: SavedFood] = [:]
+        for food in foods {
+            let key = "\(food.name.lowercased())|\(food.brand?.lowercased() ?? "")"
+            foodLookup[key] = food
+        }
+
+        var linked = 0
+        for entry in orphans {
+            let key = "\(entry.name.lowercased())|\(entry.brand?.lowercased() ?? "")"
+            if let food = foodLookup[key] {
+                entry.savedFoodID = food.id
+                // Also sync mappings from the SavedFood (source of truth)
+                entry.servingMappings = food.servingMappings
+                linked += 1
+            }
+        }
+
+        if linked > 0 {
+            save()
+        }
+    }
+
+    /// One-time migration: deduplicates serving mappings on all SavedFoods and their
+    /// linked entries. Ensures only one mapping per from.unit exists.
+    func deduplicateAllMappings() {
+        let foodDescriptor = FetchDescriptor<SavedFood>()
+        guard let foods = try? modelContext.fetch(foodDescriptor) else { return }
+
+        var changed = false
+        for food in foods where food.servingMappings.count > 1 {
+            let deduped = Self.dedupMappings(food.servingMappings)
+            if deduped.count != food.servingMappings.count {
+                food.servingMappings = deduped
+                changed = true
+            }
+        }
+
+        let entryDescriptor = FetchDescriptor<NutritionEntry>()
+        if let entries = try? modelContext.fetch(entryDescriptor) {
+            for entry in entries where entry.servingMappings.count > 1 {
+                let deduped = Self.dedupMappings(entry.servingMappings)
+                if deduped.count != entry.servingMappings.count {
+                    entry.servingMappings = deduped
+                    changed = true
+                }
+            }
+        }
+
+        if changed { save() }
+    }
+
     /// Move an entry to a different day's log (used when the user changes the date in EditEntryView)
     func moveEntry(_ entry: NutritionEntry, to newDate: Date) {
         // Remove from old log

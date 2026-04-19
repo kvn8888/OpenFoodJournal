@@ -17,6 +17,8 @@ This is the single source of truth for any LLM agent working on this project. Re
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle ID | `k3vnc.OpenFoodJournal` |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
+| Build Verify Command | `xcodebuild -project OpenFoodJournal.xcodeproj -scheme OpenFoodJournal -destination generic/platform=iOS build` |
+| Build Notes | No iOS simulators installed. Use `generic/platform=iOS` for compile-only verification. Physical device (iPhone 18,3) available when connected. Device support symbols at `/Volumes/DevDisk/Developer/Xcode/iOS DeviceSupport/`. |
 | AI Backend | Direct Gemini REST API (BYOK — user provides own API key, stored in Keychain) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
@@ -228,7 +230,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 - **Branch: `app-store`** — CloudKit migration complete, all Turso sync code removed
 - App structure complete: all models, services, and views implemented
 - 4-tab layout: Journal, Food Bank, History, Settings (Containers accessed via RadialMenuButton)
-- Builds successfully with `xcodebuild` (generic/platform=iOS, signing disabled)
+- Builds successfully with `xcodebuild -destination generic/platform=iOS` (no simulators installed; compile-only verification)
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Render proxy deployed at `openfoodjournal.onrender.com` (Gemini scan proxy only)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
