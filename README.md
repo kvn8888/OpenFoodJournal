@@ -26,7 +26,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 
 ### Container Tracking
 - **Weight-based tracking** — For bulk items like protein tubs or cereal boxes. Enter start weight, weigh when done, and the app derives exact consumption.
-- **Recently used** — Quick access to the last 3 foods you've tracked in containers.
+- **Recently used** — Quick access to the last 8 foods you've tracked in containers.
 
 ### Micronutrient Tracking
 - **30 FDA-recognized nutrients** — Vitamins A through K, minerals, fiber, cholesterol, and more, each with daily value targets.

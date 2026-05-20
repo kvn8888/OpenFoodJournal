@@ -25,15 +25,50 @@ struct NewContainerSheet: View {
     @State private var startWeightText = ""
     @State private var searchText = ""
     @FocusState private var focusedField: Bool
+    private let recentlyUsedLimit = 8
 
-    // Filtered foods based on search
-    private var filteredFoods: [SavedFood] {
-        searchText.isEmpty
-            ? savedFoods
-            : savedFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    // Foods sorted by recent container activity first, then alphabetically.
+    private var sortedFoods: [SavedFood] {
+        let lastTrackedDates = foodLastTrackedDates
+        return savedFoods.sorted { lhs, rhs in
+            let lhsDate = lastTrackedDates[lhs.id]
+            let rhsDate = lastTrackedDates[rhs.id]
+
+            switch (lhsDate, rhsDate) {
+            case let (lhsDate?, rhsDate?):
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            case (nil, nil):
+                break
+            }
+
+            return lhs.name.localizedStandardCompare(rhs.name) == .orderedAscending
+        }
     }
 
-    /// Up to 3 most recently used foods in containers, de-duped by savedFoodID.
+    private var foodLastTrackedDates: [UUID: Date] {
+        var result: [UUID: Date] = [:]
+        for container in allContainers {
+            guard let foodID = container.savedFoodID else { continue }
+            let activityDate = container.completedDate ?? container.startDate
+            if result[foodID].map({ activityDate > $0 }) ?? true {
+                result[foodID] = activityDate
+            }
+        }
+        return result
+    }
+
+    // Filtered foods based on search, preserving recent-use ordering.
+    private var filteredFoods: [SavedFood] {
+        searchText.isEmpty
+            ? sortedFoods
+            : sortedFoods.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// Up to 8 most recently used foods in containers, de-duped by savedFoodID.
     /// Only includes foods that still exist in the Food Bank.
     private var recentlyUsedFoods: [SavedFood] {
         let savedFoodsByID = Dictionary(uniqueKeysWithValues: savedFoods.map { ($0.id, $0) })
@@ -45,9 +80,22 @@ struct NewContainerSheet: View {
                   let food = savedFoodsByID[foodID] else { continue }
             seen.insert(foodID)
             result.append(food)
-            if result.count >= 3 { break }
+            if result.count >= recentlyUsedLimit { break }
         }
         return result
+    }
+
+    /// The latest completed end weight for the selected food, used as the next
+    /// container weight placeholder when continuing the same physical container.
+    private var selectedFoodLastEndWeight: Double? {
+        guard let selectedFood,
+              let container = lastCompletedContainer(for: selectedFood) else { return nil }
+        return container.finalWeight
+    }
+
+    private var startWeightPlaceholder: String {
+        guard let selectedFoodLastEndWeight else { return "e.g. 500" }
+        return formatWeight(selectedFoodLastEndWeight)
     }
 
     var body: some View {
@@ -89,7 +137,7 @@ struct NewContainerSheet: View {
                 }
             } else {
                 List {
-                    // Recently used foods from past containers (max 3)
+                    // Recently used foods from past containers
                     if searchText.isEmpty, !recentlyUsedFoods.isEmpty {
                         Section("Recently Used") {
                             ForEach(recentlyUsedFoods) { food in
@@ -159,12 +207,12 @@ struct NewContainerSheet: View {
                     Text("Container weight")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text("Place the full container on a scale. Include the container itself.")
+                    Text("Place the container on a scale. Include the container itself.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
                     HStack {
-                        TextField("e.g. 500", text: $startWeightText)
+                        TextField(startWeightPlaceholder, text: $startWeightText)
                             .keyboardType(.decimalPad)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .focused($focusedField)
@@ -174,6 +222,12 @@ struct NewContainerSheet: View {
                     }
                     .padding()
                     .background(.quaternary, in: .rect(cornerRadius: 12))
+
+                    if let selectedFoodLastEndWeight {
+                        Text("Last end weight: \(formatWeight(selectedFoodLastEndWeight))g")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 // Start tracking button
@@ -258,5 +312,20 @@ struct NewContainerSheet: View {
         if let mapping = food.servingMappings.first(where: { $0.to.unit.lowercased() == "g" }) {
             gramsPerServingText = String(format: "%.0f", mapping.to.value)
         }
+    }
+
+    private func lastCompletedContainer(for food: SavedFood) -> TrackedContainer? {
+        allContainers
+            .filter { $0.savedFoodID == food.id && $0.finalWeight != nil }
+            .max {
+                ($0.completedDate ?? $0.startDate) < ($1.completedDate ?? $1.startDate)
+            }
+    }
+
+    private func formatWeight(_ weight: Double) -> String {
+        if weight.rounded() == weight {
+            return String(format: "%.0f", weight)
+        }
+        return String(format: "%.1f", weight)
     }
 }
