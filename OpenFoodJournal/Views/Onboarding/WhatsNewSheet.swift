@@ -1,4 +1,4 @@
-// OpenFoodJournal — What's New Sheet (v1.1)
+// OpenFoodJournal — What's New Sheet (v1.2)
 // Shown once after updating to a new version. Highlights new features
 // so users discover what's changed. Dismissed with a single button.
 // AGPL-3.0 License
@@ -21,38 +21,24 @@ struct WhatsNewSheet: View {
                     // Feature list — one FeatureRow per new capability
                     VStack(spacing: 24) {
                         FeatureRow(
-                            icon: "magnifyingglass",
+                            icon: "scalemass",
                             color: .green,
-                            title: "Open Food Facts Search",
-                            description: "Search over 3 million products from the Open Food Facts database. Find nutrition info for packaged foods instantly."
+                            title: "Smarter Container Tracking",
+                            description: "When tracking a container again, the start weight field now suggests the last ending weight for that food."
                         )
 
                         FeatureRow(
-                            icon: "barcode.viewfinder",
+                            icon: "clock.arrow.circlepath",
                             color: .orange,
-                            title: "Barcode Scanning",
-                            description: "Scan a product barcode with your camera to look up nutrition data automatically from Open Food Facts."
+                            title: "More Recent Foods",
+                            description: "The container picker now shows up to eight recently tracked foods and sorts all foods by recent container use."
                         )
 
                         FeatureRow(
                             icon: "bolt",
                             color: .blue,
-                            title: "Faster Food Photo Scans",
-                            description: "Food photo scans now use a lighter AI model by default for faster results. Enable Gemini Pro in Settings for more accuracy."
-                        )
-
-                        FeatureRow(
-                            icon: "arrow.up.arrow.down",
-                            color: .purple,
-                            title: "Reorderable Nutrient Rings",
-                            description: "Drag to reorder the nutrient rings on your daily summary. Prioritize the nutrients that matter most to you."
-                        )
-
-                        FeatureRow(
-                            icon: "calendar.badge.clock",
-                            color: .teal,
-                            title: "Nutrition History Navigation",
-                            description: "Browse your nutrition history by day, week, or month. Navigate forward and backward to compare trends over time."
+                            title: "Latest Gemini Models",
+                            description: "Food and label scans now use Google's latest Gemini endpoints instead of pinned preview model versions."
                         )
                     }
                     .padding(.horizontal, 24)
@@ -77,7 +63,7 @@ struct WhatsNewSheet: View {
     private var headerSection: some View {
         VStack(spacing: 12) {
             // Version pill — shows the current release number
-            Text("Version 1.1")
+            Text("Version 1.2")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
