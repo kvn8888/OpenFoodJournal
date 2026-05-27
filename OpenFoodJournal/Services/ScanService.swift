@@ -194,27 +194,33 @@ private struct ModelConfig {
     let fallback: String      // Fallback if primary returns 500/503
     let thinkingLevel: String // "MINIMAL" for speed, "HIGH" for accuracy
 
-    /// Label scans: gemini-3.1-flash-lite-preview with minimal thinking.
+    // Keep these on Google's latest aliases. Do not replace them with concrete
+    // dated, preview, or versioned Gemini model slugs unless Google removes the
+    // latest endpoints entirely.
+    private static let flashLatest = "gemini-flash-latest"
+    private static let proLatest = "gemini-pro-latest"
+
+    /// Label scans: latest Flash with minimal thinking.
     /// Optimized for OCR — reads text accurately with low latency (~2-4s).
     static let label = ModelConfig(
-        primary: "gemini-3.1-flash-lite-preview",
-        fallback: "gemini-2.5-flash",
+        primary: flashLatest,
+        fallback: flashLatest,
         thinkingLevel: "MINIMAL"
     )
 
-    /// Food photo scans (Pro): gemini-3.1-pro-preview with high thinking.
+    /// Food photo scans (Pro): latest Pro with high thinking.
     /// Needs reasoning to estimate portion sizes and nutrient content (~4-8s).
     static let foodPhoto = ModelConfig(
-        primary: "gemini-3.1-pro-preview",
-        fallback: "gemini-2.5-pro",
+        primary: proLatest,
+        fallback: flashLatest,
         thinkingLevel: "HIGH"
     )
 
-    /// Food photo scans (Lite): uses flash-lite for faster, cheaper estimates.
+    /// Food photo scans (Lite): uses latest Flash for faster, cheaper estimates.
     /// Less accurate than Pro but still reasonable for common foods (~2-4s).
     static let foodPhotoLite = ModelConfig(
-        primary: "gemini-3.1-flash-lite-preview",
-        fallback: "gemini-2.5-flash",
+        primary: flashLatest,
+        fallback: flashLatest,
         thinkingLevel: "MINIMAL"
     )
 }
