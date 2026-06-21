@@ -4,11 +4,15 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import SwiftData
 
 struct CompleteContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(HealthKitService.self) private var healthKit
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     // ── Input ─────────────────────────────────────────────────────
     @Bindable var container: TrackedContainer
@@ -193,6 +197,7 @@ struct CompleteContainerSheet: View {
                 // Create a NutritionEntry for the consumed amount and log it
                 if let entry = container.toNutritionEntry(mealType: selectedMealType) {
                     nutritionStore.log(entry, to: logDate)
+                    syncToHealthKitIfNeeded(entry)
                 }
 
                 dismiss()
@@ -205,6 +210,13 @@ struct CompleteContainerSheet: View {
             .buttonStyle(.borderedProminent)
         }
         .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
+        guard healthKitEnabled else { return }
+        Task {
+            await healthKit.sync(entry, in: modelContext)
+        }
     }
 }
 

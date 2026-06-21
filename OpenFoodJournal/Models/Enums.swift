@@ -36,6 +36,15 @@ enum ScanMode: String, Codable, CaseIterable {
     }
 }
 
+// MARK: - HealthKitSyncStatus
+
+enum HealthKitSyncStatus: String, Codable, CaseIterable {
+    case notSynced
+    case synced
+    case failed
+    case skipped
+}
+
 // MARK: - MicronutrientValue
 
 /// A single micronutrient measurement with its numeric value and unit.

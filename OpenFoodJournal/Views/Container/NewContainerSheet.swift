@@ -11,6 +11,7 @@ struct NewContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(TursoMirrorService.self) private var tursoMirror
 
     // ── SwiftData: all saved foods for the picker ─────────────────
     @Query(sort: \SavedFood.name) private var savedFoods: [SavedFood]
@@ -253,6 +254,7 @@ struct NewContainerSheet: View {
                     }
 
                     try? modelContext.save()
+                    tursoMirror.scheduleMirror(reason: "container_created")
 
                     dismiss()
                 } label: {

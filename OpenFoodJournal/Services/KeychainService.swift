@@ -23,6 +23,11 @@ enum KeychainService {
     /// Think of (service, account) as a composite key in a database.
     static let geminiAPIKeyAccount = "gemini-api-key"
 
+    /// Optional Turso mirror credentials. These are user-owned debugging
+    /// database secrets and must never be copied into UserDefaults or logs.
+    static let tursoDatabaseURLAccount = "turso-database-url"
+    static let tursoAuthTokenAccount = "turso-auth-token"
+
     // MARK: - Public API
 
     /// Saves a string value to the Keychain under the given account name.
@@ -106,5 +111,20 @@ enum KeychainService {
     /// Retrieves the stored Gemini API key, if any.
     static var geminiAPIKey: String? {
         load(for: geminiAPIKeyAccount)
+    }
+
+    /// Quick check: does the user have both Turso mirror credential fields saved?
+    static var hasTursoCredentials: Bool {
+        tursoDatabaseURL != nil && tursoAuthToken != nil
+    }
+
+    /// Retrieves the stored Turso database URL, if any.
+    static var tursoDatabaseURL: String? {
+        load(for: tursoDatabaseURLAccount)
+    }
+
+    /// Retrieves the stored Turso database token, if any.
+    static var tursoAuthToken: String? {
+        load(for: tursoAuthTokenAccount)
     }
 }

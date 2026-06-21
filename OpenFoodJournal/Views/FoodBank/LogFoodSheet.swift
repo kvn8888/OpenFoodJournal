@@ -12,7 +12,9 @@ struct LogFoodSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     // ── Input: the saved food to potentially log ──────────────────
     let food: SavedFood
@@ -101,12 +103,14 @@ struct LogFoodSheet: View {
                     // ── Serving quantity adjustment ────────────────────
                     servingSection
 
-                    Divider()
+                    if food.kind != .composite {
+                        Divider()
 
-                    // ── Custom unit mappings ──────────────────────────
-                    // Lets the user define conversions like "1 cup = 244g" so
-                    // those units appear in the unit picker above.
-                    servingMappingsSection
+                        // ── Custom unit mappings ──────────────────────────
+                        // Lets the user define conversions like "1 cup = 244g" so
+                        // those units appear in the unit picker above.
+                        servingMappingsSection
+                    }
 
                     Divider()
 
@@ -147,7 +151,13 @@ struct LogFoodSheet: View {
             }
             // Nested sheet for editing the food's name, brand, and macros
             .sheet(isPresented: $showEditFood) {
-                EditFoodSheet(food: food)
+                if food.kind == .calculator {
+                    NutritionCalculatorEditorView(calculator: food)
+                } else if food.kind == .composite {
+                    CompositeFoodBuilderView(food: food)
+                } else {
+                    EditFoodSheet(food: food)
+                }
             }
             // Nested sheet for defining a new or editing an existing unit conversion mapping
             .sheet(isPresented: $showAddMapping) {
@@ -301,9 +311,9 @@ struct LogFoodSheet: View {
             // were scaled for a different amount (e.g. "250 g").
             entry.servingQuantity = quantity
             entry.servingUnit = selectedUnit
-            // Update lastUsedAt so this food surfaces to the top of "Last Used" sort
-            food.lastUsedAt = .now
+            // NutritionStore refreshes the linked SavedFood's usage via entry.savedFoodID.
             nutritionStore.log(entry, to: logDate)
+            syncToHealthKitIfNeeded(entry)
             dismiss()
         } label: {
             Text("Add to Journal")
@@ -410,6 +420,13 @@ struct LogFoodSheet: View {
         }
     }
 
+    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
+        guard healthKitEnabled else { return }
+        Task {
+            await healthKit.sync(entry, in: modelContext)
+        }
+    }
+
     // MARK: - Serving Mappings
 
     /// Shows the food's custom unit conversion mappings and lets the user add new ones.
@@ -480,7 +497,11 @@ struct LogFoodSheet: View {
 
     /// SF Symbol for the food's original capture method
     private var sourceIcon: String {
-        switch food.originalScanMode {
+        if food.kind == .composite {
+            return "square.stack.3d.up"
+        }
+
+        return switch food.originalScanMode {
         case .label: "barcode.viewfinder"
         case .foodPhoto: "fork.knife"
         case .barcode: "barcode"
@@ -490,7 +511,11 @@ struct LogFoodSheet: View {
 
     /// Human-readable label for the food's origin
     private var sourceLabel: String {
-        switch food.originalScanMode {
+        if food.kind == .composite {
+            return "Composite Food"
+        }
+
+        return switch food.originalScanMode {
         case .label: "Label Scan"
         case .foodPhoto: "Food Photo"
         case .barcode: "Barcode Scan"

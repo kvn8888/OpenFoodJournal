@@ -11,6 +11,7 @@ struct EditFoodSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(TursoMirrorService.self) private var tursoMirror
 
     // ── The food being edited (Bindable allows two-way binding to @Model properties)
     @Bindable var food: SavedFood
@@ -66,6 +67,7 @@ struct EditFoodSheet: View {
                     let foodId = food.id
                     modelContext.delete(food)
                     try? modelContext.save()
+                    tursoMirror.scheduleMirror(reason: "saved_food_deleted")
                     dismiss()
                 }
             } message: {
@@ -120,6 +122,7 @@ struct EditFoodSheet: View {
             ? nil : servingSize.trimmingCharacters(in: .whitespaces)
 
         try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "saved_food_updated")
     }
 }
 

@@ -11,7 +11,7 @@ extension ModelContainer {
     static var preview: ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         let container = try! ModelContainer(
-            for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self,
+            for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self, GeminiScanLog.self, GeminiCostAccumulator.self,
             configurations: config
         )
 

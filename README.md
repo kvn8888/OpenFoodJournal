@@ -9,8 +9,9 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 ## Features
 
 ### AI-Powered Scanning
-- **Nutrition label scan** — Snap a photo of any nutrition label. Gemini 3.1 Flash Lite extracts all macros and micronutrients in under 2 seconds.
-- **Food photo recognition** — Take a picture of your meal. Gemini 3.1 Pro with high reasoning estimates calories, protein, carbs, fat, and common micros.
+- **Nutrition label scan** — Capture up to 4 angles of a product label. Gemini Flash combines the photos to extract macros and micronutrients.
+- **Food photo recognition** — Capture up to 4 angles of one meal portion. Gemini combines the photos to estimate calories, protein, carbs, fat, and common micros.
+- **AI food search** — Search by text from the Food Bank. Gemini uses Google Search grounding to find nutrition data, then opens the editable review form.
 - **Review before logging** — Every scan result is editable before committing to your journal.
 
 ### Daily Journal
@@ -21,7 +22,10 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 
 ### Food Bank
 - **Save foods for reuse** — Any scanned or manually entered food can be saved to your personal library.
+- **Composite foods** — Combine saved foods into one reusable portion while keeping ingredient snapshots independent from future source-food edits.
+- **Nutrition calculators** — Build restaurant or brand calculators with runtime groups, user-defined portion labels, Gemini OCR import from screenshots, reusable presets, and journal logs that snapshot the selected nutrition.
 - **Search, sort, log** — Find saved foods by name, sort by last used or alphabetical, swipe right to log directly.
+- **Cosmetic archive** — Foods not logged in over two weeks hide from the main list, but stay searchable and available from the Archive menu.
 - **Serving mappings** — Define per-food unit conversions (e.g., "1 cup = 244g") for accurate re-logging in different portions.
 
 ### Container Tracking
@@ -39,9 +43,13 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 - **Nutrition detail** — Tap any day to see full macro and micro breakdowns.
 
 ### Health & Sync
-- **Apple HealthKit** — Opt-in writes for calories, protein, carbs, fat, and 10+ micronutrients. Reads active energy burned for net calorie display.
+- **Apple HealthKit** — Opt-in idempotent sync for calories, protein, carbs, fat, and 10+ micronutrients. Writes use deterministic sample identifiers so edits replace OpenFoodJournal-owned samples instead of duplicating them. Reads active energy burned for net calorie display.
 - **iCloud sync** — Local-first SwiftData with automatic CloudKit sync across all your Apple devices.
-- **CSV export** — Export your entire food journal as a CSV file from Settings.
+- **Optional Turso mirror** — Push a debuggable copy of local/iCloud data to your own Turso database for SQL inspection. SwiftData remains the source of truth.
+- **Spreadsheet CSV export** — Export journal entries with stable IDs, ISO dates, macros, serving basics, and micronutrient columns for analysis.
+- **Backup export/import** — Versioned JSON backup restores journal entries, Food Bank foods, containers, preferences, and goals by UUID without duplicating repeated imports.
+- **Gemini log export** — Export the last 30 days of Gemini scan and AI Search diagnostics, including request/response metadata, without API keys or raw photos.
+- **Gemini usage total** — Settings shows a local running estimate of Gemini token cost and token usage, with reset controls.
 
 ### Sources & Disclaimers
 - **FDA citations** — Daily Value percentages linked to 21 CFR §101.9 and FDA guidelines.
@@ -59,6 +67,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 │  OpenFoodJournalApp                         │
 │    ├─ NutritionStore (CRUD + queries)       │
 │    ├─ ScanService (camera → Gemini REST)    │
+│    ├─ TursoMirrorService (optional mirror)  │
 │    ├─ HealthKitService (Apple Health)       │
 │    ├─ KeychainService (API key storage)     │
 │    └─ UserGoals (@Observable + @AppStorage) │
@@ -71,17 +80,19 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 └──────────────┬──────────────────────────────┘
                │
     ┌──────────┴──────────┐
-    │ HTTPS (BYOK)        │ CloudKit (automatic)
-    ▼                     ▼
-┌────────────┐  ┌─────────────────┐
-│ Gemini API │  │ iCloud Private  │
-│ (Google)   │  │ Database        │
-└────────────┘  └─────────────────┘
+    │ HTTPS (BYOK)        │ CloudKit (automatic)  │ optional SQL-over-HTTP
+    ▼                     ▼                       ▼
+┌────────────┐  ┌─────────────────┐       ┌─────────────────┐
+│ Gemini API │  │ iCloud Private  │       │ User Turso DB   │
+│ (Google)   │  │ Database        │       │ push-only mirror│
+└────────────┘  └─────────────────┘       └─────────────────┘
 ```
 
 **Local-first**: SwiftData writes happen immediately for instant UI. CloudKit sync is automatic — the private database keeps all devices in sync transparently.
 
 **BYOK (Bring Your Own Key)**: Users provide their own Gemini API key (free from aistudio.google.com). The key is stored in the iOS Keychain and API calls go directly from the device — no proxy server involved.
+
+**Optional Turso mirror**: Users can add their own Turso database URL and auth token in Settings → Data → Turso Integration. The app uses Turso SQL-over-HTTP directly, mirrors namespaced `ofj_*` tables, and never treats Turso as the source of truth.
 
 **Service injection**: All services are created at app launch and passed through SwiftUI's `@Environment`. No singletons.
 
@@ -92,9 +103,11 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 | Model | Purpose |
 |-------|---------|
 | `DailyLog` | One per day, keyed by midnight-normalized date. Owns entries via cascade delete. |
-| `NutritionEntry` | Single food log — macros, micros, brand, serving info, optional source image. |
-| `SavedFood` | Reusable food template in the Food Bank. Same nutrition fields as an entry. |
+| `NutritionEntry` | Single food log — macros, micros, brand, serving info, optional calculator selection summary, and Apple Health sync metadata. |
+| `SavedFood` | Reusable food template in the Food Bank. Supports single foods, composite foods, and runtime nutrition calculators, plus last-used and archive display state. |
 | `TrackedContainer` | Weight-based container. Snapshots food nutrition at creation, derives consumption from weight delta. |
+| `GeminiScanLog` | Gemini scan/search diagnostics with request metadata, model attempts, raw non-image response text, and a 30-day CSV export window. |
+| `GeminiCostAccumulator` | Local running estimate of Gemini token cost and token usage, shown in Settings. |
 | `UserGoals` | Daily calorie/protein/carbs/fat targets. Persisted via `@AppStorage`. |
 
 ---
@@ -106,8 +119,8 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 | UI | SwiftUI + Liquid Glass (iOS 26) |
 | Local Data | SwiftData (`@Model`) |
 | State | `@Observable` + `@Environment` |
-| AI | Google Gemini 3.1 (Flash Lite for labels, Pro for food photos) — BYOK |
-| Sync | CloudKit (iCloud Private Database) |
+| AI | Google Gemini latest aliases (`gemini-flash-latest` for labels/lite scans/search, `gemini-pro-latest` for Pro food photos/search) — BYOK |
+| Sync | CloudKit (iCloud Private Database), optional Turso SQL-over-HTTP mirror |
 | Security | iOS Keychain (API key storage) |
 | Health | Apple HealthKit |
 
@@ -136,7 +149,7 @@ xcodebuild -project OpenFoodJournal.xcodeproj \
 
 Or open `OpenFoodJournal.xcodeproj` in Xcode and run on a simulator or device.
 
-> **Note:** The `server/` directory contains a legacy Express.js proxy from an earlier architecture. It is **not used** by the app. The current app communicates directly with the Gemini API and uses CloudKit for data sync — no server is required to build, run, or use OpenFoodJournal.
+> **Note:** The `server/` directory contains a legacy Express.js proxy from an earlier architecture. It is **not used** by the app. The current app communicates directly with Gemini, CloudKit, and optional Turso SQL-over-HTTP — no proxy server is required to build, run, or use OpenFoodJournal.
 
 ---
 
@@ -145,7 +158,7 @@ Or open `OpenFoodJournal.xcodeproj` in Xcode and run on a simulator or device.
 ```
 OpenFoodJournal/
 ├── Models/           # SwiftData models + enums + mock data
-├── Services/         # NutritionStore, ScanService, HealthKitService, KeychainService
+├── Services/         # NutritionStore, ScanService, TursoMirrorService, HealthKitService, KeychainService
 ├── Views/
 │   ├── DailyLog/     # Journal tab — calendar strip, macro bar, meal sections
 │   ├── FoodBank/     # Saved foods — search, sort, edit, log

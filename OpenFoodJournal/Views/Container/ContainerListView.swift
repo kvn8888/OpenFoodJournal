@@ -28,6 +28,7 @@ struct ContainerListView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(TursoMirrorService.self) private var tursoMirror
 
     /// Date to log completed container nutrition to
     var logDate: Date = .now
@@ -82,6 +83,7 @@ struct ContainerListView: View {
                             modelContext.delete(activeContainers[index])
                         }
                         try? modelContext.save()
+                        tursoMirror.scheduleMirror(reason: "container_deleted")
                     }
                 }
             }
@@ -98,6 +100,7 @@ struct ContainerListView: View {
                             modelContext.delete(completedContainers[index])
                         }
                         try? modelContext.save()
+                        tursoMirror.scheduleMirror(reason: "container_deleted")
                     }
                 }
             }

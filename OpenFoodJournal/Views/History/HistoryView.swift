@@ -7,7 +7,9 @@ import SwiftData
 
 struct HistoryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @State private var selectedDate: Date = .now
     @State private var editingEntry: NutritionEntry?
@@ -269,7 +271,7 @@ struct HistoryView: View {
                                             editingEntry = entry
                                         } label: {
                                             EntryRowView(entry: entry, onDelete: {
-                                                nutritionStore.delete(entry)
+                                                deleteEntry(entry)
                                             })
                                             .padding(.horizontal)
                                         }
@@ -306,13 +308,27 @@ struct HistoryView: View {
         .glassEffect(in: .rect(cornerRadius: 16))
         .padding(.horizontal)
     }
+
+    private func deleteEntry(_ entry: NutritionEntry) {
+        guard healthKitEnabled else {
+            nutritionStore.delete(entry)
+            return
+        }
+
+        Task {
+            _ = await healthKit.deleteSamples(for: entry)
+            nutritionStore.delete(entry)
+        }
+    }
 }
 
 // MARK: - DayDetailView (kept for backward compat if navigated to directly)
 
 struct DayDetailView: View {
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     let date: Date
 
     private var log: DailyLog? {
@@ -333,7 +349,7 @@ struct DayDetailView: View {
                                 mealType: mealType,
                                 entries: log.entries(for: mealType),
                                 onSelect: { _ in },
-                                onDelete: { entry in nutritionStore.delete(entry) }
+                                onDelete: { entry in deleteEntry(entry) }
                             )
                         }
                     }
@@ -349,11 +365,24 @@ struct DayDetailView: View {
         .navigationTitle(date.formatted(date: .long, time: .omitted))
         .navigationBarTitleDisplayMode(.inline)
     }
+
+    private func deleteEntry(_ entry: NutritionEntry) {
+        guard healthKitEnabled else {
+            nutritionStore.delete(entry)
+            return
+        }
+
+        Task {
+            _ = await healthKit.deleteSamples(for: entry)
+            nutritionStore.delete(entry)
+        }
+    }
 }
 
 #Preview {
     HistoryView()
         .modelContainer(ModelContainer.preview)
         .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
+        .environment(HealthKitService())
         .environment(UserGoals())
 }

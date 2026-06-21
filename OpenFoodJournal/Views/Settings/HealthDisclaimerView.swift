@@ -70,15 +70,15 @@ struct HealthDisclaimerView: View {
             }
 
             // MARK: - AI Nutrition Estimates
-            // Covers the Gemini-powered food photo scanning feature.
+            // Covers Gemini-powered food photo scanning and AI Search.
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("AI-Estimated Nutrition", systemImage: "wand.and.sparkles")
                         .font(.headline)
 
-                    Text("When you scan a food photo, the app sends the image to Google's Gemini AI to estimate nutritional content. These estimates are approximations and may differ significantly from actual values.")
+                    Text("When you scan a food photo or use AI Search, the app sends your request to Google's Gemini AI to estimate or retrieve nutritional content. These results are approximations and may differ significantly from actual values.")
 
-                    Text("Factors that affect accuracy include portion size, food preparation method, lighting, and image angle. Always verify critical nutrition information against the product's official nutrition label or a certified nutrition database.")
+                    Text("Factors that affect accuracy include portion size, food preparation method, lighting, image angle, and source quality. Always verify critical nutrition information against the product's official nutrition label or a certified nutrition database.")
 
                     Text("Label scans read printed nutrition facts directly and are generally more accurate, but may still contain OCR errors. Review scanned values before logging.")
                 }
@@ -94,7 +94,7 @@ struct HealthDisclaimerView: View {
                         .font(.headline)
                         .foregroundStyle(.red)
 
-                    Text("When enabled, the app writes your logged nutrition data (calories, macronutrients, and select micronutrients) to Apple Health. It reads your active energy burned to display your daily calorie balance. This data stays on your device and in your iCloud account and is never sent to any external server.")
+                    Text("When enabled, the app writes your logged nutrition data (calories, macronutrients, and select micronutrients) to Apple Health. It reads your active energy burned to display your daily calorie balance. This data stays on your device and in your iCloud account unless you enable optional Turso mirroring with your own database credentials.")
                 }
                 .font(.subheadline)
             } header: {

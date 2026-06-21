@@ -7,7 +7,7 @@
 // - Uses URLSession directly (no SPM dependencies) to match project conventions
 // - Text search uses the dedicated search API (search.openfoodfacts.org) —
 //   the v1 CGI endpoint is deprecated/unstable and the v2 API doesn't support full-text search
-// - Search returns lightweight hits (name, brand, code); full nutrition loaded on demand
+// - Search requests nutriments directly and filters out unusable placeholder rows
 // - Barcode/product lookup uses v2 API (/api/v2/product/{barcode})
 // - All nutrition values from OFF are per 100g; serving-based values derived from serving_size field
 // - Rate limits: 10 req/min for search, 100 req/min for product reads
@@ -47,6 +47,14 @@ struct OFFProduct: Identifiable, Sendable {
 
     /// Identifiable conformance — barcode is unique per product
     var id: String { code }
+
+    /// Rejects placeholder/erroneous OFF rows that have identity data but no
+    /// useful nutrition payload. This keeps zero-calorie database stubs out of
+    /// search results and barcode prefills.
+    var hasUsableNutrition: Bool {
+        caloriesPer100g > 0 &&
+        (proteinPer100g > 0 || carbsPer100g > 0 || fatPer100g > 0 || !micronutrients.isEmpty)
+    }
 
     // MARK: - Serving-Scaled Values
 
@@ -200,8 +208,8 @@ final class OpenFoodFactsService {
             totalResultCount = searchResponse.page_count
 
             // Convert search hits directly to OFFProduct — no batch fetch needed.
-            // Products without nutrition data still appear but with zero macros.
-            searchResults = searchResponse.hits.compactMap { hit -> OFFProduct? in
+            // Products without usable nutrition data are filtered out below.
+            let products = searchResponse.hits.compactMap { hit -> OFFProduct? in
                 guard let code = hit.code, !code.isEmpty,
                       let name = hit.product_name,
                       !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -230,6 +238,8 @@ final class OpenFoodFactsService {
                     micronutrients: micros
                 )
             }
+            searchResults = products.filter(\.hasUsableNutrition)
+            totalResultCount = searchResults.count
 
             isLoading = false
         } catch let error as DecodingError {
@@ -256,7 +266,7 @@ final class OpenFoodFactsService {
         defer { isLoading = false }
 
         guard let product = await fetchProductByBarcode(barcode) else {
-            errorMessage = "Product not found"
+            errorMessage = "Product not found or missing usable nutrition data"
             return nil
         }
         return product
@@ -368,7 +378,7 @@ final class OpenFoodFactsService {
         // Extract micronutrients from the nutriments dictionary
         let micros = parseMicronutrients(from: nutriments)
 
-        return OFFProduct(
+        let product = OFFProduct(
             code: raw.code ?? "",
             name: name,
             brand: brand,
@@ -380,6 +390,9 @@ final class OpenFoodFactsService {
             servingQuantityGrams: servingQty,
             micronutrients: micros
         )
+
+        guard product.hasUsableNutrition else { return nil }
+        return product
     }
 
     /// Extracts known micronutrients from the OFF nutriments dictionary.

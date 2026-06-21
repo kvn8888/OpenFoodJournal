@@ -1,7 +1,7 @@
 // OpenFoodJournal — FoodBankView
 // Main view for the Personal Food Bank tab.
-// Shows a searchable, sortable list of all saved foods.
-// Users can tap a food to log it to today's journal or swipe to delete.
+// Shows a searchable, sortable list of active saved foods.
+// Users can tap a food to log it to today's journal or swipe to edit/archive.
 // AGPL-3.0 License
 
 import SwiftUI
@@ -11,6 +11,7 @@ struct FoodBankView: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(TursoMirrorService.self) private var tursoMirror
 
     /// Date to log foods to (passed from DailyLogView when opened via radial menu)
     var logDate: Date = .now
@@ -24,8 +25,7 @@ struct FoodBankView: View {
     @State private var sortOrder: SortOrder = .lastUsed
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
     @State private var foodToEdit: SavedFood?          // For the edit sheet
-    @State private var showOFFSearch = false            // For Open Food Facts search sheet
-    @State private var showManualEntry = false          // For manual entry sheet
+    @State private var addSheet: FoodBankAddSheet?
 
     // ── Computed: filter + sort the foods based on search text ────
     // Filters by name and brand (case-insensitive) so users can quickly find a food.
@@ -33,11 +33,8 @@ struct FoodBankView: View {
     // @Model objects must stay owned by the ModelContext, not captured in @State.
     private var filteredFoods: [SavedFood] {
         let filtered = searchText.isEmpty
-            ? allFoods
-            : allFoods.filter {
-                $0.name.localizedCaseInsensitiveContains(searchText) ||
-                ($0.brand?.localizedCaseInsensitiveContains(searchText) ?? false)
-            }
+            ? allFoods.filter { !$0.isArchivedInFoodBank }
+            : allFoods.filter(matchesSearch)
 
         switch sortOrder {
         case .lastUsed:
@@ -57,6 +54,9 @@ struct FoodBankView: View {
                 if allFoods.isEmpty {
                     // ── Empty state: no saved foods yet ──
                     emptyState
+                } else if filteredFoods.isEmpty {
+                    // ── Empty state: everything is archived, or search has no matches ──
+                    filteredEmptyState
                 } else {
                     // ── Food list with search ──
                     foodList
@@ -76,19 +76,38 @@ struct FoodBankView: View {
             }
             // Sheet to log a selected food to the selected day's journal
             .sheet(item: $selectedFood) { food in
-                LogFoodSheet(food: food, logDate: logDate)
+                if food.kind == .calculator {
+                    NutritionCalculatorBuildView(calculator: food, logDate: logDate)
+                } else {
+                    LogFoodSheet(food: food, logDate: logDate)
+                }
             }
             // Sheet to edit a food's name, brand, macros
             .sheet(item: $foodToEdit) { food in
-                EditFoodSheet(food: food)
+                if food.kind == .calculator {
+                    NutritionCalculatorEditorView(calculator: food)
+                } else if food.kind == .composite {
+                    CompositeFoodBuilderView(food: food)
+                } else {
+                    EditFoodSheet(food: food)
+                }
             }
-            // Sheet for Open Food Facts search
-            .sheet(isPresented: $showOFFSearch) {
-                OpenFoodFactsSearchView(logDate: logDate)
-            }
-            // Sheet for manual food entry
-            .sheet(isPresented: $showManualEntry) {
-                ManualEntryView(defaultDate: logDate)
+            // Sheets launched from the "+" menu.
+            .sheet(item: $addSheet) { sheet in
+                switch sheet {
+                case .aiSearch:
+                    AIFoodSearchView(logDate: logDate)
+                case .compositeFood:
+                    CompositeFoodBuilderView()
+                case .nutritionCalculator:
+                    NutritionCalculatorLibraryView(logDate: logDate)
+                case .openFoodFacts:
+                    OpenFoodFactsSearchView(logDate: logDate)
+                case .manualEntry:
+                    ManualEntryView(defaultDate: logDate)
+                case .archive:
+                    FoodBankArchiveView(logDate: logDate)
+                }
             }
         }
     }
@@ -108,44 +127,63 @@ struct FoodBankView: View {
             }
 
             ForEach(filteredFoods) { food in
-                // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
-                // makes DailyLogView swipes silky smooth.
-                //
-                // Previous approach used .onTapGesture + .contentShape(Rectangle()),
-                // which eliminated the initial-tap delay but made the *swipe* gesture
-                // choppy because TapGesture and the List's swipe recognizer competed.
-                //
-                // Button with .buttonStyle(.plain) is optimised by UIKit for coexistence
-                // with List swipe actions — the system knows to hand off to the swipe
-                // recognizer early without waiting for a full tap-disambiguation pass.
-                Button {
-                    selectedFood = food
-                } label: {
-                    SavedFoodRowView(food: food)
-                }
-                .buttonStyle(.plain)
-                // Trailing swipe (left) — Edit only; delete lives inside EditFoodSheet
-                .swipeActions(edge: .trailing) {
-                    Button {
-                        foodToEdit = food
-                    } label: {
-                        Label("Edit", systemImage: "pencil")
-                    }
-                    .tint(.blue)
-                }
-                // Leading swipe (right) — quick-add shortcut opens the same LogFoodSheet as tapping
-                .swipeActions(edge: .leading) {
-                    Button {
-                        selectedFood = food
-                    } label: {
-                        Label("Add", systemImage: "plus")
-                    }
-                    .tint(.green)
-                }
+                foodRow(food)
             }
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    @ViewBuilder
+    private func foodRow(_ food: SavedFood) -> some View {
+        // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
+        // makes DailyLogView swipes silky smooth.
+        Button {
+            selectedFood = food
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                SavedFoodRowView(food: food)
+
+                if !searchText.isEmpty && food.isArchivedInFoodBank {
+                    archiveStatusLine(for: food)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        // Trailing swipe (left) — archive/unarchive plus edit; delete lives inside EditFoodSheet.
+        .swipeActions(edge: .trailing) {
+            if food.isArchivedInFoodBank {
+                Button {
+                    restore(food)
+                } label: {
+                    Label("Unarchive", systemImage: "tray.and.arrow.up")
+                }
+                .tint(.green)
+            } else {
+                Button {
+                    archive(food)
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+                .tint(.gray)
+            }
+
+            Button {
+                foodToEdit = food
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .tint(.blue)
+        }
+        // Leading swipe (right) — quick-add shortcut opens the same LogFoodSheet as tapping.
+        .swipeActions(edge: .leading) {
+            Button {
+                selectedFood = food
+            } label: {
+                Label("Add", systemImage: "plus")
+            }
+            .tint(.green)
+        }
     }
 
     // MARK: - Empty State
@@ -160,23 +198,64 @@ struct FoodBankView: View {
         }
     }
 
+    /// Shown when saved foods exist, but none belong in the current visible list.
+    private var filteredEmptyState: some View {
+        ContentUnavailableView {
+            Label(
+                searchText.isEmpty ? "All Foods Archived" : "No Results",
+                systemImage: searchText.isEmpty ? "archivebox" : "magnifyingglass"
+            )
+        } description: {
+            Text(searchText.isEmpty
+                ? "Archived foods are hidden from the main list but still appear in search and in the Archive sheet."
+                : "Try a different food name or brand.")
+        }
+    }
+
     // MARK: - Add Menu
 
     /// "+" toolbar menu with options to add foods via different methods:
     /// scan a label, enter manually, or search the Open Food Facts database.
     private var addMenu: some View {
         Menu {
+            // AI Search — Gemini with Google Search grounding
+            Button {
+                addSheet = .aiSearch
+            } label: {
+                Label("AI Search", systemImage: "sparkles")
+            }
+
+            // Composite Food — build a saved food from snapshot copies of Food Bank items
+            Button {
+                addSheet = .compositeFood
+            } label: {
+                Label("Composite Food", systemImage: "square.stack.3d.up")
+            }
+
+            // Nutrition Calculator — runtime restaurant/brand builders
+            Button {
+                addSheet = .nutritionCalculator
+            } label: {
+                Label("Nutrition Calculator", systemImage: "slider.horizontal.3")
+            }
+
             // Search Open Food Facts — opens the OFF search sheet
             Button {
-                showOFFSearch = true
+                addSheet = .openFoodFacts
             } label: {
                 Label("Search Open Food Facts", systemImage: "globe.americas")
             }
             // Manual entry — opens the same ManualEntryView used from the radial menu
             Button {
-                showManualEntry = true
+                addSheet = .manualEntry
             } label: {
                 Label("Manual Entry", systemImage: "square.and.pencil")
+            }
+            // Archive — browse foods hidden from the main Food Bank list
+            Button {
+                addSheet = .archive
+            } label: {
+                Label("Archive", systemImage: "archivebox")
             }
         } label: {
             Image(systemName: "plus")
@@ -196,6 +275,62 @@ struct FoodBankView: View {
             }
         } label: {
             Image(systemName: "arrow.up.arrow.down")
+        }
+    }
+
+    @ViewBuilder
+    private func archiveStatusLine(for food: SavedFood) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "archivebox")
+            Text(archiveStatusText(for: food))
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .padding(.leading, 56)
+    }
+
+    private func archiveStatusText(for food: SavedFood) -> String {
+        if food.archivedAt != nil {
+            return "Archived manually"
+        }
+
+        return "Auto archived: not logged in over 2 weeks"
+    }
+
+    private func matchesSearch(_ food: SavedFood) -> Bool {
+        food.name.localizedCaseInsensitiveContains(searchText) ||
+        (food.brand?.localizedCaseInsensitiveContains(searchText) ?? false)
+    }
+
+    private func archive(_ food: SavedFood) {
+        food.archiveForFoodBank()
+        try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "food_bank_archive")
+    }
+
+    private func restore(_ food: SavedFood) {
+        food.restoreFromFoodBankArchive()
+        try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "food_bank_restore")
+    }
+}
+
+private enum FoodBankAddSheet: Identifiable {
+    case aiSearch
+    case compositeFood
+    case nutritionCalculator
+    case openFoodFacts
+    case manualEntry
+    case archive
+
+    var id: String {
+        switch self {
+        case .aiSearch: "aiSearch"
+        case .compositeFood: "compositeFood"
+        case .nutritionCalculator: "nutritionCalculator"
+        case .openFoodFacts: "openFoodFacts"
+        case .manualEntry: "manualEntry"
+        case .archive: "archive"
         }
     }
 }

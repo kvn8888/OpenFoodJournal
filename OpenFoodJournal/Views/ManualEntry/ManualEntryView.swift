@@ -12,17 +12,77 @@ fileprivate enum ManualEntryField: Hashable {
     case servingSize
 }
 
+struct ManualEntryPrefill: Identifiable, Hashable {
+    let id = UUID()
+    let name: String
+    let brand: String?
+    let calories: Double
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+    let micronutrients: [String: MicronutrientValue]
+    let servingSize: String?
+
+    init(
+        name: String,
+        brand: String?,
+        calories: Double,
+        protein: Double,
+        carbs: Double,
+        fat: Double,
+        micronutrients: [String: MicronutrientValue],
+        servingSize: String?
+    ) {
+        self.name = name
+        self.brand = brand
+        self.calories = calories
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+        self.micronutrients = micronutrients
+        self.servingSize = servingSize
+    }
+
+    init(product: OFFProduct) {
+        self.init(
+            name: product.name,
+            brand: product.brand,
+            calories: product.caloriesPerServing,
+            protein: product.proteinPerServing,
+            carbs: product.carbsPerServing,
+            fat: product.fatPerServing,
+            micronutrients: product.micronutrients,
+            servingSize: product.servingSize
+        )
+    }
+
+    init(entry: NutritionEntry) {
+        self.init(
+            name: entry.name,
+            brand: entry.brand,
+            calories: entry.calories,
+            protein: entry.protein,
+            carbs: entry.carbs,
+            fat: entry.fat,
+            micronutrients: entry.micronutrients,
+            servingSize: entry.servingSize
+        )
+    }
+}
+
 struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(HealthKitService.self) private var healthKit
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(TursoMirrorService.self) private var tursoMirror
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     let defaultDate: Date
 
-    /// Optional OFF product to pre-fill the form with.
-    /// When set, all fields are populated from the product's nutrition data
-    /// and the user can review/edit before saving.
-    let prefillProduct: OFFProduct?
+    /// Optional food data to pre-fill the form with. OFF search and AI Search
+    /// both use this so users can review/edit before saving.
+    let prefill: ManualEntryPrefill?
 
     // Form state
     @State private var name = ""
@@ -54,13 +114,25 @@ struct ManualEntryView: View {
     /// Convenience initializer without pre-fill (backwards compatible)
     init(defaultDate: Date) {
         self.defaultDate = defaultDate
-        self.prefillProduct = nil
+        self.prefill = nil
     }
 
     /// Initializer with an OFF product to pre-fill the form
     init(defaultDate: Date, prefillProduct: OFFProduct) {
         self.defaultDate = defaultDate
-        self.prefillProduct = prefillProduct
+        self.prefill = ManualEntryPrefill(product: prefillProduct)
+    }
+
+    /// Initializer with a general prefill value for AI Search or future sources.
+    init(defaultDate: Date, prefill: ManualEntryPrefill) {
+        self.defaultDate = defaultDate
+        self.prefill = prefill
+    }
+
+    /// Initializer with a NutritionEntry that has not been inserted yet.
+    init(defaultDate: Date, prefillEntry: NutritionEntry) {
+        self.defaultDate = defaultDate
+        self.prefill = ManualEntryPrefill(entry: prefillEntry)
     }
 
     private var isValid: Bool {
@@ -167,31 +239,31 @@ struct ManualEntryView: View {
                 }
             }
             .onAppear {
-                // Pre-fill form from OFF product if provided
-                if let product = prefillProduct {
-                    name = product.name
-                    brand = product.brand ?? ""
-                    calories = formatValue(product.caloriesPerServing)
-                    protein = formatValue(product.proteinPerServing)
-                    carbs = formatValue(product.carbsPerServing)
-                    fat = formatValue(product.fatPerServing)
-                    servingSize = product.servingSize ?? ""
+                // Pre-fill form from search data if provided.
+                if let prefill {
+                    name = prefill.name
+                    brand = prefill.brand ?? ""
+                    calories = formatValue(prefill.calories)
+                    protein = formatValue(prefill.protein)
+                    carbs = formatValue(prefill.carbs)
+                    fat = formatValue(prefill.fat)
+                    servingSize = prefill.servingSize ?? ""
 
-                    // Pre-fill micronutrients from OFF data
-                    // Replace default values with OFF values, add any extras
+                    // Pre-fill micronutrients from the source data. Replace
+                    // default values where names match, then add any extras.
                     for i in micronutrientTexts.indices {
                         let microName = micronutrientTexts[i].name
-                        if let offValue = product.micronutrients[microName] {
-                            micronutrientTexts[i].text = formatValue(offValue.value)
+                        if let sourceValue = prefill.micronutrients[microName] {
+                            micronutrientTexts[i].text = formatValue(sourceValue.value)
                         }
                     }
-                    // Add any OFF micronutrients not in the default set
+                    // Add any source micronutrients not in the default set.
                     let existingNames = Set(micronutrientTexts.map(\.name))
-                    for (nutrientName, value) in product.micronutrients where !existingNames.contains(nutrientName) {
+                    for (nutrientName, value) in prefill.micronutrients where !existingNames.contains(nutrientName) {
                         micronutrientTexts.append((name: nutrientName, unit: value.unit, text: formatValue(value.value)))
                     }
 
-                    if !product.micronutrients.isEmpty {
+                    if !prefill.micronutrients.isEmpty {
                         showExtended = true
                     }
 
@@ -258,15 +330,24 @@ struct ManualEntryView: View {
             brand: trimmedBrand.isEmpty ? nil : trimmedBrand
         )
         nutritionStore.log(entry, to: defaultDate)
+        syncToHealthKitIfNeeded(entry)
 
         // Optionally save to Food Bank for quick re-logging
         if saveToFoodBank {
             let savedFood = SavedFood(from: entry)
             modelContext.insert(savedFood)
             try? modelContext.save()
+            tursoMirror.scheduleMirror(reason: "manual_food_bank_save")
         }
 
         dismiss()
+    }
+
+    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
+        guard healthKitEnabled else { return }
+        Task {
+            await healthKit.sync(entry, in: modelContext)
+        }
     }
 }
 
@@ -301,6 +382,9 @@ private struct MacroInputRow: View {
 }
 
 #Preview {
+    let container = ModelContainer.preview
     ManualEntryView(defaultDate: .now)
-        .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
+        .modelContainer(container)
+        .environment(NutritionStore(modelContext: container.mainContext))
+        .environment(HealthKitService())
 }

@@ -15,3 +15,7 @@ DerivedData/
 # Node
 server/*.log
 .rocketride/
+
+# Python helper scripts
+__pycache__/
+*.pyc

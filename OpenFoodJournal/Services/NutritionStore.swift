@@ -8,33 +8,62 @@ import Observation
 @Observable
 @MainActor
 final class NutritionStore {
+    @ObservationIgnored
     let modelContext: ModelContext
+    @ObservationIgnored
+    private let tursoMirror: TursoMirrorService?
     /// Bumped on every write so SwiftUI views that read it re-evaluate their computed properties
     private(set) var changeCount = 0
 
-    init(modelContext: ModelContext) {
+    init(modelContext: ModelContext, tursoMirror: TursoMirrorService? = nil) {
         self.modelContext = modelContext
+        self.tursoMirror = tursoMirror
     }
 
     // MARK: - Log Entry
 
     func log(_ entry: NutritionEntry, to date: Date) {
         let log = fetchOrCreateLog(for: date)
+        entry.timestamp = Self.timestamp(on: date, preservingTimeFrom: entry.timestamp)
         modelContext.insert(entry)
-        entry.dailyLog = log
-        log.entries?.append(entry)
+        link(entry, to: log)
+        markHealthKitSyncStaleIfNeeded(entry)
+        refreshSavedFoodUsageIfLinked(to: entry)
         save()
+    }
+
+    private func refreshSavedFoodUsageIfLinked(to entry: NutritionEntry) {
+        guard let foodID = entry.savedFoodID else { return }
+
+        var descriptor = FetchDescriptor<SavedFood>(
+            predicate: #Predicate { $0.id == foodID }
+        )
+        descriptor.fetchLimit = 1
+
+        if let food = try? modelContext.fetch(descriptor).first {
+            food.markLoggedForFoodBank()
+        }
     }
 
     // MARK: - Fetch
 
     func fetchLog(for date: Date) -> DailyLog? {
         let startOfDay = Calendar.current.startOfDay(for: date)
-        var descriptor = FetchDescriptor<DailyLog>(
+        let descriptor = FetchDescriptor<DailyLog>(
             predicate: #Predicate { $0.date == startOfDay }
         )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        guard let logs = try? modelContext.fetch(descriptor) else { return nil }
+
+        // CloudKit can briefly produce duplicate DailyLog rows for the same day.
+        // Prefer the populated row so the journal does not appear empty.
+        return logs.sorted { lhs, rhs in
+            let lhsCount = lhs.safeEntries.count
+            let rhsCount = rhs.safeEntries.count
+            if lhsCount != rhsCount {
+                return lhsCount > rhsCount
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }.first
     }
 
     func fetchLogs(from startDate: Date, to endDate: Date) -> [DailyLog] {
@@ -54,6 +83,13 @@ final class NutritionStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
+    func fetchAllEntries() -> [NutritionEntry] {
+        let descriptor = FetchDescriptor<NutritionEntry>(
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+        )
+        return (try? modelContext.fetch(descriptor)) ?? []
+    }
+
     // MARK: - Delete
 
     func delete(_ entry: NutritionEntry) {
@@ -68,12 +104,12 @@ final class NutritionStore {
 
     // MARK: - Export
 
-    /// Exports all logged entries as CSV. Core macros are always columns;
-    /// micronutrients are collected across all entries and added as dynamic columns.
+    /// Exports logged entries as spreadsheet-friendly CSV.
+    /// This is intentionally analytical, not the restore-grade backup format.
     /// Data comes from the local SwiftData store which CloudKit keeps in sync with iCloud.
     func exportCSV() -> String {
         // Fetch all entries directly — avoids missing orphaned entries not linked to a log
-        var entryDescriptor = FetchDescriptor<NutritionEntry>(
+        let entryDescriptor = FetchDescriptor<NutritionEntry>(
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
         let allEntries = (try? modelContext.fetch(entryDescriptor)) ?? []
@@ -86,49 +122,185 @@ final class NutritionStore {
         }
         let sortedMicroNames = allMicroNames.sorted()
 
-        // Build header: fixed columns + dynamic micro columns
-        var header = ["Date", "Time", "Meal", "Name", "Brand", "Scan Mode", "Confidence",
-                      "Calories", "Protein (g)", "Carbs (g)", "Fat (g)",
-                      "Serving Qty", "Serving Unit"]
+        // Build header: fixed columns + dynamic micro columns.
+        var header = [
+            "Entry ID", "Daily Log ID", "Log Date", "Entry Timestamp",
+            "Meal", "Name", "Brand", "Scan Mode", "Confidence %",
+            "Calories", "Protein (g)", "Carbs (g)", "Fat (g)",
+            "Serving Size", "Selection Summary", "Servings Per Container", "Serving Count",
+            "Serving Qty", "Serving Unit", "Saved Food ID", "Scan Duration Ms"
+        ]
         header.append(contentsOf: sortedMicroNames)
-        var rows: [String] = [header.map { "\"\($0)\"" }.joined(separator: ",")]
-
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .short
-
-        let timeFormatter = DateFormatter()
-        timeFormatter.timeStyle = .short
+        var rows: [String] = [header.map(Self.csvEscape).joined(separator: ",")]
 
         for entry in allEntries {
             let logDate = entry.dailyLog?.date ?? entry.timestamp
-            let confidence = entry.confidence.map { String(format: "%.0f%%", $0 * 100) } ?? ""
-            var fields = [
-                dateFormatter.string(from: logDate),
-                timeFormatter.string(from: entry.timestamp),
-                entry.mealType.rawValue,
-                entry.name,
-                entry.brand ?? "",
-                entry.scanMode.rawValue,
-                confidence,
-                String(format: "%.1f", entry.calories),
-                String(format: "%.1f", entry.protein),
-                String(format: "%.1f", entry.carbs),
-                String(format: "%.1f", entry.fat),
-                entry.servingQuantity.map { String(format: "%.2f", $0) } ?? "",
-                entry.servingUnit ?? "",
-            ]
+            let confidence = entry.confidence.map { Self.decimal($0 * 100, digits: 0) } ?? ""
+            var fields: [String] = []
+            fields.append(entry.id.uuidString)
+            fields.append(entry.dailyLog?.id.uuidString ?? "")
+            fields.append(Self.isoDateFormatter.string(from: logDate))
+            fields.append(Self.isoTimestampFormatter.string(from: entry.timestamp))
+            fields.append(entry.mealType.rawValue)
+            fields.append(entry.name)
+            fields.append(entry.brand ?? "")
+            fields.append(entry.scanMode.rawValue)
+            fields.append(confidence)
+            fields.append(Self.decimal(entry.calories))
+            fields.append(Self.decimal(entry.protein))
+            fields.append(Self.decimal(entry.carbs))
+            fields.append(Self.decimal(entry.fat))
+            fields.append(entry.servingSize ?? "")
+            fields.append(entry.selectionSummary ?? "")
+            fields.append(entry.servingsPerContainer.map { Self.decimal($0) } ?? "")
+            fields.append(Self.decimal(entry.servingCount, digits: 2))
+            fields.append(entry.servingQuantity.map { Self.decimal($0, digits: 2) } ?? "")
+            fields.append(entry.servingUnit ?? "")
+            fields.append(entry.savedFoodID?.uuidString ?? "")
+            fields.append(entry.scanDurationMs.map(String.init) ?? "")
+
             // Append each micronutrient value (or empty if entry doesn't have it)
             for microName in sortedMicroNames {
                 if let micro = entry.micronutrients[microName] {
-                    fields.append(String(format: "%.1f %@", micro.value, micro.unit))
+                    fields.append("\(Self.decimal(micro.value)) \(micro.unit)")
                 } else {
                     fields.append("")
                 }
             }
-            rows.append(fields.map { "\"\($0)\"" }.joined(separator: ","))
+            rows.append(fields.map(Self.csvEscape).joined(separator: ","))
         }
 
         return rows.joined(separator: "\n")
+    }
+
+    private static func csvEscape(_ value: String) -> String {
+        "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+    }
+
+    private static func decimal(_ value: Double, digits: Int = 1) -> String {
+        String(format: "%.\(digits)f", locale: Locale(identifier: "en_US_POSIX"), value)
+    }
+
+    private static let isoDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        return formatter
+    }()
+
+    private static let isoTimestampFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    // MARK: - Backup Export / Import
+
+    func exportBackup(goals: UserGoals, appSettings: AppSettingsRecord) throws -> Data {
+        let dailyLogs = (try? modelContext.fetch(
+            FetchDescriptor<DailyLog>(sortBy: [SortDescriptor(\.date, order: .forward)])
+        )) ?? []
+        let entries = (try? modelContext.fetch(
+            FetchDescriptor<NutritionEntry>(sortBy: [SortDescriptor(\.timestamp, order: .forward)])
+        )) ?? []
+        let savedFoods = (try? modelContext.fetch(
+            FetchDescriptor<SavedFood>(sortBy: [SortDescriptor(\.createdAt, order: .forward)])
+        )) ?? []
+        let containers = (try? modelContext.fetch(
+            FetchDescriptor<TrackedContainer>(sortBy: [SortDescriptor(\.startDate, order: .forward)])
+        )) ?? []
+
+        let backup = OpenFoodJournalBackup(
+            schemaVersion: OpenFoodJournalBackup.currentSchemaVersion,
+            exportedAt: .now,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
+            dailyLogs: dailyLogs.map(DailyLogRecord.init),
+            nutritionEntries: entries.map(NutritionEntryRecord.init),
+            savedFoods: savedFoods.map(SavedFoodRecord.init),
+            trackedContainers: containers.map(TrackedContainerRecord.init),
+            preferences: PreferencesRecord(Preferences.current(in: modelContext)),
+            userGoals: UserGoalsRecord(goals: goals),
+            appSettings: appSettings
+        )
+
+        return try backup.encodedData()
+    }
+
+    func importBackup(_ backup: OpenFoodJournalBackup, goals: UserGoals) throws -> BackupImportSummary {
+        guard backup.schemaVersion <= OpenFoodJournalBackup.currentSchemaVersion else {
+            throw BackupImportError.unsupportedSchemaVersion(backup.schemaVersion)
+        }
+
+        var summary = BackupImportSummary()
+
+        var logsByID = keyedByID((try? modelContext.fetch(FetchDescriptor<DailyLog>())) ?? []) { $0.id }
+        var foodsByID = keyedByID((try? modelContext.fetch(FetchDescriptor<SavedFood>())) ?? []) { $0.id }
+        var entriesByID = keyedByID((try? modelContext.fetch(FetchDescriptor<NutritionEntry>())) ?? []) { $0.id }
+        var containersByID = keyedByID((try? modelContext.fetch(FetchDescriptor<TrackedContainer>())) ?? []) { $0.id }
+
+        for record in backup.dailyLogs {
+            if let log = logsByID[record.id] {
+                log.date = record.date.startOfDay
+                log.notes = record.notes
+                summary.updatedDailyLogs += 1
+            } else {
+                let log = DailyLog(date: record.date, id: record.id, notes: record.notes)
+                modelContext.insert(log)
+                logsByID[record.id] = log
+                summary.insertedDailyLogs += 1
+            }
+        }
+
+        for record in backup.savedFoods {
+            if let food = foodsByID[record.id] {
+                record.apply(to: food)
+                summary.updatedSavedFoods += 1
+            } else {
+                let food = record.makeModel()
+                modelContext.insert(food)
+                foodsByID[record.id] = food
+                summary.insertedSavedFoods += 1
+            }
+        }
+
+        for record in backup.nutritionEntries {
+            let entry: NutritionEntry
+            if let existing = entriesByID[record.id] {
+                entry = existing
+                record.apply(to: entry)
+                summary.updatedEntries += 1
+            } else {
+                entry = record.makeModel()
+                modelContext.insert(entry)
+                entriesByID[record.id] = entry
+                summary.insertedEntries += 1
+            }
+
+            if let logID = record.dailyLogID, let log = logsByID[logID] {
+                link(entry, to: log)
+            } else {
+                unlinkFromDailyLog(entry)
+            }
+        }
+
+        for record in backup.trackedContainers {
+            if let container = containersByID[record.id] {
+                record.apply(to: container)
+                summary.updatedContainers += 1
+            } else {
+                let container = record.makeModel()
+                modelContext.insert(container)
+                containersByID[record.id] = container
+                summary.insertedContainers += 1
+            }
+        }
+
+        if let preferencesRecord = backup.preferences {
+            preferencesRecord.apply(to: Preferences.current(in: modelContext))
+        }
+        backup.userGoals.apply(to: goals)
+
+        save()
+        return summary
     }
 
     // MARK: - Save (public for use in edit flows)
@@ -155,6 +327,7 @@ final class NutritionStore {
 
     /// Save an entry's edits locally
     func saveEntry(_ entry: NutritionEntry) {
+        markHealthKitSyncStaleIfNeeded(entry)
         save()
     }
 
@@ -300,6 +473,35 @@ final class NutritionStore {
         }
     }
 
+    /// Idempotent repair: keeps historical NutritionEntry rows reachable from
+    /// their DailyLog so day views and aggregates match direct-entry exports.
+    @discardableResult
+    func repairDailyLogEntryRelationships() -> Int {
+        let entryDescriptor = FetchDescriptor<NutritionEntry>(
+            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+        )
+        guard let entries = try? modelContext.fetch(entryDescriptor), !entries.isEmpty else { return 0 }
+
+        var repaired = 0
+        for entry in entries {
+            let targetDate = entry.dailyLog?.date ?? entry.timestamp
+            let targetLog = fetchOrCreateLog(for: targetDate)
+            let targetEntries = targetLog.entries ?? []
+            let relationshipIsCorrect = entry.dailyLog?.id == targetLog.id
+            let occurrenceCount = targetEntries.filter { $0.id == entry.id }.count
+
+            if !relationshipIsCorrect || occurrenceCount != 1 {
+                link(entry, to: targetLog)
+                repaired += 1
+            }
+        }
+
+        if repaired > 0 {
+            save()
+        }
+        return repaired
+    }
+
     /// One-time migration: deduplicates serving mappings on all SavedFoods and their
     /// linked entries. Ensures only one mapping per from.unit exists.
     func deduplicateAllMappings() {
@@ -331,14 +533,10 @@ final class NutritionStore {
 
     /// Move an entry to a different day's log (used when the user changes the date in EditEntryView)
     func moveEntry(_ entry: NutritionEntry, to newDate: Date) {
-        // Remove from old log
-        if let oldLog = entry.dailyLog {
-            oldLog.entries?.removeAll { $0.id == entry.id }
-        }
-        // Attach to new (or existing) log
         let newLog = fetchOrCreateLog(for: newDate)
-        entry.dailyLog = newLog
-        newLog.entries?.append(entry)
+        entry.timestamp = Self.timestamp(on: newDate, preservingTimeFrom: entry.timestamp)
+        link(entry, to: newLog)
+        markHealthKitSyncStaleIfNeeded(entry)
         save()
     }
 
@@ -473,6 +671,34 @@ final class NutritionStore {
 
     // MARK: - Private
 
+    private func keyedByID<T>(_ items: [T], id: (T) -> UUID) -> [UUID: T] {
+        var result: [UUID: T] = [:]
+        for item in items {
+            result[id(item)] = item
+        }
+        return result
+    }
+
+    private func link(_ entry: NutritionEntry, to log: DailyLog) {
+        if entry.dailyLog?.id != log.id {
+            unlinkFromDailyLog(entry)
+        }
+
+        entry.dailyLog = log
+        var entries = log.entries ?? []
+        entries.removeAll { $0.id == entry.id }
+        entries.append(entry)
+        log.entries = entries
+    }
+
+    private func unlinkFromDailyLog(_ entry: NutritionEntry) {
+        guard let oldLog = entry.dailyLog else { return }
+        var entries = oldLog.entries ?? []
+        entries.removeAll { $0.id == entry.id }
+        oldLog.entries = entries
+        entry.dailyLog = nil
+    }
+
     private func fetchOrCreateLog(for date: Date) -> DailyLog {
         if let existing = fetchLog(for: date) {
             return existing
@@ -483,7 +709,30 @@ final class NutritionStore {
     }
 
     private func save() {
-        try? modelContext.save()
+        do {
+            try modelContext.save()
+            tursoMirror?.scheduleMirror(reason: "nutrition_store_save")
+        } catch {
+            // Keep existing non-throwing write behavior for UI flows.
+        }
         changeCount += 1
+    }
+
+    private static func timestamp(on date: Date, preservingTimeFrom timestamp: Date) -> Date {
+        let calendar = Calendar.current
+        let time = calendar.dateComponents([.hour, .minute, .second], from: timestamp)
+        return calendar.date(
+            bySettingHour: time.hour ?? 0,
+            minute: time.minute ?? 0,
+            second: time.second ?? 0,
+            of: date
+        ) ?? date
+    }
+
+    private func markHealthKitSyncStaleIfNeeded(_ entry: NutritionEntry) {
+        if entry.healthKitLastWriteHash != entry.healthKitWriteHash {
+            entry.healthKitSyncStatus = HealthKitSyncStatus.notSynced
+            entry.healthKitLastError = nil
+        }
     }
 }

@@ -7,7 +7,9 @@ import SwiftData
 struct DailyLogView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
+    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @State private var selectedDate: Date = .now
     @State private var presentedSheet: DailyLogSheet?
@@ -58,7 +60,7 @@ struct DailyLogView: View {
                                     presentedSheet = .editEntry(entry)
                                 },
                                 onDelete: { entry in
-                                    nutritionStore.delete(entry)
+                                    deleteEntry(entry)
                                 }
                             )
                         }
@@ -121,7 +123,7 @@ struct DailyLogView: View {
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
             case .scan:
-                ScanCaptureView(logDate: selectedDate)
+                ScanCaptureView(logDate: scanDate)
             case .manualEntry:
                 ManualEntryView(defaultDate: selectedDate)
             case .editEntry(let entry):
@@ -138,16 +140,7 @@ struct DailyLogView: View {
                 ZStack {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .controlSize(.large)
-                            .tint(.white)
-                        Text("Analyzing…")
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                    }
-                    .padding(32)
-                    .glassEffect(in: .rect(cornerRadius: 20))
+                    ScanProgressOverlay(scanService: scanService)
                 }
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.3), value: scanService.isScanning)
@@ -175,6 +168,18 @@ struct DailyLogView: View {
             if let entry = scanService.pendingResult {
                 ScanResultSheet(entry: entry, logDate: scanDate)
             }
+        }
+    }
+
+    private func deleteEntry(_ entry: NutritionEntry) {
+        guard healthKitEnabled else {
+            nutritionStore.delete(entry)
+            return
+        }
+
+        Task {
+            _ = await healthKit.deleteSamples(for: entry)
+            nutritionStore.delete(entry)
         }
     }
 }
@@ -206,7 +211,11 @@ enum DailyLogSheet: Identifiable {
 private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
+    @Environment(HealthKitService.self) private var healthKit
+    @Environment(TursoMirrorService.self) private var tursoMirror
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var entry: NutritionEntry
     let logDate: Date
@@ -217,17 +226,20 @@ private struct ScanResultSheet: View {
             onConfirm: {
                 // Log entry only — no Food Bank save
                 nutritionStore.log(entry, to: logDate)
+                syncToHealthKitIfNeeded(entry)
                 scanService.pendingResult = nil
                 dismiss()
             },
             onConfirmAndSave: {
                 // Log entry to journal
                 nutritionStore.log(entry, to: logDate)
+                syncToHealthKitIfNeeded(entry)
 
                 // Also save to Food Bank
                 let saved = SavedFood(from: entry)
                 nutritionStore.modelContext.insert(saved)
                 try? nutritionStore.modelContext.save()
+                tursoMirror.scheduleMirror(reason: "scan_save_to_food_bank")
 
                 scanService.pendingResult = nil
                 dismiss()
@@ -235,8 +247,66 @@ private struct ScanResultSheet: View {
             onRetake: {
                 scanService.pendingResult = nil
                 dismiss()
+            },
+            onRedo: scanService.lastSubmittedScan == nil ? nil : {
+                scanService.pendingResult = nil
+                scanService.redoLastScanInBackground()
+                dismiss()
             }
         )
+    }
+
+    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
+        guard healthKitEnabled else { return }
+        Task {
+            await healthKit.sync(entry, in: modelContext)
+        }
+    }
+}
+
+// MARK: - Scan Progress Overlay
+
+private struct ScanProgressOverlay: View {
+    let scanService: ScanService
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Analyzing...")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text(scanService.scanProgressMessage)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.75))
+                }
+            }
+
+            if !scanService.thinkingTrace.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Thinking trace", systemImage: "brain.head.profile")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+
+                    ForEach(Array(scanService.thinkingTrace.enumerated()), id: \.offset) { _, trace in
+                        Text(trace)
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.78))
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.top, 2)
+            }
+        }
+        .frame(maxWidth: 320, alignment: .leading)
+        .padding(24)
+        .glassEffect(in: .rect(cornerRadius: 20))
+        .padding(.horizontal, 24)
     }
 }
 
@@ -266,6 +336,7 @@ private struct EmptyLogView: View {
     DailyLogView()
         .modelContainer(container)
         .environment(store)
+        .environment(HealthKitService())
         .environment(UserGoals())
 }
 
@@ -277,5 +348,6 @@ private struct EmptyLogView: View {
     DailyLogView()
         .modelContainer(container)
         .environment(store)
+        .environment(HealthKitService())
         .environment(UserGoals())
 }

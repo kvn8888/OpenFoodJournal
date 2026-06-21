@@ -11,6 +11,8 @@ struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var entry: NutritionEntry
 
@@ -138,7 +140,7 @@ struct EditEntryView: View {
                             nutritionStore.saveEntry(entry)
                         }
 
-                        Task { await healthKit.write(entry) }
+                        syncToHealthKitIfNeeded(entry)
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -150,8 +152,7 @@ struct EditEntryView: View {
                 titleVisibility: .visible
             ) {
                 Button("Delete", role: .destructive) {
-                    nutritionStore.delete(entry)
-                    dismiss()
+                    deleteEntry()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -331,6 +332,27 @@ struct EditEntryView: View {
     /// Replaces an existing mapping and propagates to SavedFood + siblings.
     private func updateMapping(at index: Int, with mapping: ServingMapping) {
         nutritionStore.replaceMapping(at: index, with: mapping, on: entry)
+    }
+
+    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
+        guard healthKitEnabled else { return }
+        Task {
+            await healthKit.sync(entry, in: modelContext)
+        }
+    }
+
+    private func deleteEntry() {
+        guard healthKitEnabled else {
+            nutritionStore.delete(entry)
+            dismiss()
+            return
+        }
+
+        Task {
+            _ = await healthKit.deleteSamples(for: entry)
+            nutritionStore.delete(entry)
+            dismiss()
+        }
     }
 }
 

@@ -11,6 +11,7 @@ struct ScanResultCard: View {
     let onConfirm: () -> Void            // Log only
     let onConfirmAndSave: () -> Void     // Log + save to Food Bank
     let onRetake: () -> Void
+    let onRedo: (() -> Void)?
 
     @State private var showExtended = true
 
@@ -121,6 +122,14 @@ struct ScanResultCard: View {
                                 .frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.glass)
+
+                        if let onRedo {
+                            Button(action: onRedo) {
+                                Label("Redo", systemImage: "arrow.clockwise")
+                                    .frame(maxWidth: .infinity, minHeight: 44)
+                            }
+                            .buttonStyle(.glass)
+                        }
 
                         // Log only — no Food Bank save
                         Button(action: onConfirm) {
@@ -286,7 +295,8 @@ private struct MicronutrientField: View {
             entry: NutritionEntry.preview,
             onConfirm: {},
             onConfirmAndSave: {},
-            onRetake: {}
+            onRetake: {},
+            onRedo: nil
         )
         .frame(maxHeight: 600)
     }

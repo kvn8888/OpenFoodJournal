@@ -63,6 +63,18 @@ final class NutritionEntry {
     // Nil for manual entries. Used to track optimization progress.
     var scanDurationMs: Int?
 
+    // Human-readable detail snapshot for generated entries, such as a
+    // nutrition-calculator build's selected ingredients and runtime portions.
+    var selectionSummary: String?
+
+    // Apple Health sync state. HealthKit is a derived export target, so these
+    // fields let the app retry/replace only samples it wrote itself.
+    var healthKitSyncStatus: HealthKitSyncStatus = HealthKitSyncStatus.notSynced
+    var healthKitSyncedAt: Date?
+    var healthKitSyncVersion: Int = 0
+    var healthKitLastError: String?
+    var healthKitLastWriteHash: String?
+
     // Inverse relationship
     var dailyLog: DailyLog?
 
@@ -133,5 +145,43 @@ extension NutritionEntry {
     /// Sorted micronutrient keys for consistent display order
     var sortedMicronutrientNames: [String] {
         micronutrients.keys.sorted()
+    }
+
+    var healthKitSampleTimestamp: Date {
+        let calendar = Calendar.current
+        guard let logDate = dailyLog?.date else { return timestamp }
+        if calendar.isDate(timestamp, inSameDayAs: logDate) {
+            return timestamp
+        }
+
+        let time = calendar.dateComponents([.hour, .minute, .second], from: timestamp)
+        return calendar.date(
+            bySettingHour: time.hour ?? 0,
+            minute: time.minute ?? 0,
+            second: time.second ?? 0,
+            of: logDate
+        ) ?? logDate
+    }
+
+    var healthKitWriteHash: String {
+        var parts = [
+            id.uuidString,
+            String(format: "%.3f", healthKitSampleTimestamp.timeIntervalSince1970),
+            name,
+            String(format: "%.4f", calories),
+            String(format: "%.4f", protein),
+            String(format: "%.4f", carbs),
+            String(format: "%.4f", fat),
+        ]
+
+        for key in micronutrients.keys.sorted() {
+            if let micro = micronutrients[key] {
+                parts.append(key)
+                parts.append(String(format: "%.4f", micro.value))
+                parts.append(micro.unit)
+            }
+        }
+
+        return parts.joined(separator: "|")
     }
 }

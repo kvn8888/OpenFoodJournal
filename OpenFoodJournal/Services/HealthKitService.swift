@@ -4,6 +4,7 @@
 import Foundation
 import HealthKit
 import Observation
+import SwiftData
 
 @Observable
 @MainActor
@@ -11,20 +12,60 @@ final class HealthKitService {
     var isAuthorized = false
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    @ObservationIgnored
+    private let tursoMirror: TursoMirrorService?
+
+    init(tursoMirror: TursoMirrorService? = nil) {
+        self.tursoMirror = tursoMirror
+    }
+
+    enum SyncResult {
+        case synced
+        case skipped
+        case failed(String)
+    }
+
+    struct SyncSummary {
+        var synced = 0
+        var skipped = 0
+        var failed = 0
+
+        var message: String {
+            "\(synced) synced, \(skipped) already current, \(failed) failed."
+        }
+    }
+
+    private struct SampleDefinition {
+        let key: String
+        let quantityTypeIdentifier: HKQuantityTypeIdentifier
+        let unit: HKUnit
+        let value: (NutritionEntry) -> Double?
+    }
+
+    private static let sampleDefinitions: [SampleDefinition] = [
+        SampleDefinition(key: "dietaryEnergyConsumed", quantityTypeIdentifier: .dietaryEnergyConsumed, unit: .kilocalorie()) { $0.calories },
+        SampleDefinition(key: "dietaryProtein", quantityTypeIdentifier: .dietaryProtein, unit: .gram()) { $0.protein },
+        SampleDefinition(key: "dietaryCarbohydrates", quantityTypeIdentifier: .dietaryCarbohydrates, unit: .gram()) { $0.carbs },
+        SampleDefinition(key: "dietaryFatTotal", quantityTypeIdentifier: .dietaryFatTotal, unit: .gram()) { $0.fat },
+        SampleDefinition(key: "dietaryFiber", quantityTypeIdentifier: .dietaryFiber, unit: .gram()) { $0.micronutrients["Fiber"]?.value },
+        SampleDefinition(key: "dietarySugar", quantityTypeIdentifier: .dietarySugar, unit: .gram()) { $0.micronutrients["Sugar"]?.value },
+        SampleDefinition(key: "dietarySodium", quantityTypeIdentifier: .dietarySodium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Sodium"]?.value },
+        SampleDefinition(key: "dietaryCholesterol", quantityTypeIdentifier: .dietaryCholesterol, unit: .gramUnit(with: .milli)) { $0.micronutrients["Cholesterol"]?.value },
+        SampleDefinition(key: "dietaryFatSaturated", quantityTypeIdentifier: .dietaryFatSaturated, unit: .gram()) { $0.micronutrients["Saturated Fat"]?.value },
+        SampleDefinition(key: "dietaryVitaminA", quantityTypeIdentifier: .dietaryVitaminA, unit: .gramUnit(with: .micro)) { $0.micronutrients["Vitamin A"]?.value },
+        SampleDefinition(key: "dietaryVitaminC", quantityTypeIdentifier: .dietaryVitaminC, unit: .gramUnit(with: .milli)) { $0.micronutrients["Vitamin C"]?.value },
+        SampleDefinition(key: "dietaryCalcium", quantityTypeIdentifier: .dietaryCalcium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Calcium"]?.value },
+        SampleDefinition(key: "dietaryIron", quantityTypeIdentifier: .dietaryIron, unit: .gramUnit(with: .milli)) { $0.micronutrients["Iron"]?.value },
+        SampleDefinition(key: "dietaryPotassium", quantityTypeIdentifier: .dietaryPotassium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Potassium"]?.value },
+    ]
+
+    @ObservationIgnored
     private let store = HKHealthStore()
 
+    @ObservationIgnored
     private let writeTypes: Set<HKSampleType> = {
         var types: Set<HKSampleType> = []
-        let ids: [HKQuantityTypeIdentifier] = [
-            .dietaryEnergyConsumed,
-            .dietaryProtein,
-            .dietaryCarbohydrates,
-            .dietaryFatTotal,
-            .dietaryFiber,
-            .dietarySugar,
-            .dietarySodium,
-            .dietaryCholesterol,
-        ]
+        let ids = sampleDefinitions.map(\.quantityTypeIdentifier)
         for id in ids {
             if let type = HKQuantityType.quantityType(forIdentifier: id) {
                 types.insert(type)
@@ -33,6 +74,7 @@ final class HealthKitService {
         return types
     }()
 
+    @ObservationIgnored
     private let readTypes: Set<HKObjectType> = {
         var types: Set<HKObjectType> = []
         if let active = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned) {
@@ -56,56 +98,156 @@ final class HealthKitService {
     // MARK: - Write Nutrition
 
     func write(_ entry: NutritionEntry) async {
-        guard isAvailable, isAuthorized else { return }
+        _ = await sync(entry, force: true)
+    }
 
+    @discardableResult
+    func sync(_ entry: NutritionEntry, in modelContext: ModelContext? = nil, force: Bool = false) async -> SyncResult {
+        guard isAvailable, isAuthorized else { return .skipped }
+
+        let writeHash = entry.healthKitWriteHash
+        if !force,
+           entry.healthKitSyncStatus == HealthKitSyncStatus.synced,
+           entry.healthKitLastWriteHash == writeHash {
+            return .skipped
+        }
+
+        let nextVersion = entry.healthKitSyncVersion + 1
+        let samples = makeSamples(for: entry, syncVersion: nextVersion)
+
+        do {
+            try await deleteExistingSamples(for: entry)
+            if !samples.isEmpty {
+                try await store.save(samples)
+            }
+
+            entry.healthKitSyncStatus = HealthKitSyncStatus.synced
+            entry.healthKitSyncedAt = .now
+            entry.healthKitSyncVersion = nextVersion
+            entry.healthKitLastWriteHash = writeHash
+            entry.healthKitLastError = nil
+            try? modelContext?.save()
+            tursoMirror?.scheduleMirror(reason: "healthkit_sync")
+            return .synced
+        } catch {
+            entry.healthKitSyncStatus = HealthKitSyncStatus.failed
+            entry.healthKitLastError = error.localizedDescription
+            try? modelContext?.save()
+            tursoMirror?.scheduleMirror(reason: "healthkit_sync_failed")
+            #if DEBUG
+            print("[HealthKitService] Sync failed: \(error)")
+            #endif
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    @discardableResult
+    func deleteSamples(for entry: NutritionEntry) async -> SyncResult {
+        guard isAvailable, isAuthorized else { return .skipped }
+
+        do {
+            try await deleteExistingSamples(for: entry)
+            return .synced
+        } catch {
+            #if DEBUG
+            print("[HealthKitService] Delete failed: \(error)")
+            #endif
+            return .failed(error.localizedDescription)
+        }
+    }
+
+    func syncMissingEntries(_ entries: [NutritionEntry], in modelContext: ModelContext) async -> SyncSummary {
+        var summary = SyncSummary()
+
+        for entry in entries {
+            let result = await sync(entry, in: modelContext)
+            switch result {
+            case .synced:
+                summary.synced += 1
+            case .skipped:
+                summary.skipped += 1
+            case .failed:
+                summary.failed += 1
+            }
+        }
+
+        try? modelContext.save()
+        tursoMirror?.scheduleMirror(reason: "healthkit_backfill")
+        return summary
+    }
+
+    private func makeSamples(for entry: NutritionEntry, syncVersion: Int) -> [HKQuantitySample] {
         let metadata: [String: Any] = [
-            HKMetadataKeyFoodType: entry.name
+            HKMetadataKeyFoodType: entry.name,
+            "OpenFoodJournalEntryID": entry.id.uuidString
         ]
 
         var samples: [HKQuantitySample] = []
 
-        func addSample(_ id: HKQuantityTypeIdentifier, value: Double, unit: HKUnit) {
-            guard let type = HKQuantityType.quantityType(forIdentifier: id) else { return }
-            let quantity = HKQuantity(unit: unit, doubleValue: value)
-            let sample = HKQuantitySample(type: type, quantity: quantity, start: entry.timestamp, end: entry.timestamp, metadata: metadata)
+        for definition in Self.sampleDefinitions {
+            guard let value = definition.value(entry),
+                  value.isFinite,
+                  value > 0,
+                  let type = HKQuantityType.quantityType(forIdentifier: definition.quantityTypeIdentifier)
+            else { continue }
+
+            var sampleMetadata = metadata
+            sampleMetadata[HKMetadataKeySyncIdentifier] = syncIdentifier(for: entry.id, sampleKey: definition.key)
+            sampleMetadata[HKMetadataKeySyncVersion] = syncVersion
+            sampleMetadata["OpenFoodJournalNutrient"] = definition.key
+
+            let quantity = HKQuantity(unit: definition.unit, doubleValue: value)
+            let sample = HKQuantitySample(
+                type: type,
+                quantity: quantity,
+                start: entry.healthKitSampleTimestamp,
+                end: entry.healthKitSampleTimestamp,
+                metadata: sampleMetadata
+            )
             samples.append(sample)
         }
 
-        addSample(.dietaryEnergyConsumed, value: entry.calories, unit: .kilocalorie())
-        addSample(.dietaryProtein, value: entry.protein, unit: .gram())
-        addSample(.dietaryCarbohydrates, value: entry.carbs, unit: .gram())
-        addSample(.dietaryFatTotal, value: entry.fat, unit: .gram())
+        return samples
+    }
 
-        // Map known micronutrient names to HealthKit identifiers.
-        // Only nutrients with a known HK mapping get written; the rest are stored
-        // in SwiftData only. This mapping grows as we add more HealthKit support.
-        let hkMicroMap: [String: (id: HKQuantityTypeIdentifier, unit: HKUnit)] = [
-            "Fiber":         (.dietaryFiber,       .gram()),
-            "Sugar":         (.dietarySugar,       .gram()),
-            "Sodium":        (.dietarySodium,      .gramUnit(with: .milli)),
-            "Cholesterol":   (.dietaryCholesterol, .gramUnit(with: .milli)),
-            "Saturated Fat": (.dietaryFatSaturated, .gram()),
-            "Vitamin A":     (.dietaryVitaminA,    .gramUnit(with: .micro)),
-            "Vitamin C":     (.dietaryVitaminC,    .gramUnit(with: .milli)),
-            "Calcium":       (.dietaryCalcium,     .gramUnit(with: .milli)),
-            "Iron":          (.dietaryIron,        .gramUnit(with: .milli)),
-            "Potassium":     (.dietaryPotassium,   .gramUnit(with: .milli)),
-        ]
-
-        for (name, micro) in entry.micronutrients {
-            if let mapping = hkMicroMap[name] {
-                addSample(mapping.id, value: micro.value, unit: mapping.unit)
+    private func deleteExistingSamples(for entry: NutritionEntry) async throws {
+        for definition in Self.sampleDefinitions {
+            guard let type = HKQuantityType.quantityType(forIdentifier: definition.quantityTypeIdentifier) else { continue }
+            let samples = try await samples(
+                type: type,
+                syncIdentifier: syncIdentifier(for: entry.id, sampleKey: definition.key)
+            )
+            if !samples.isEmpty {
+                try await store.delete(samples)
             }
         }
+    }
 
-        do {
-            try await store.save(samples)
-        } catch {
-            // Non-fatal — HealthKit write failure doesn't block core app function
-            #if DEBUG
-            print("[HealthKitService] Write failed: \(error)")
-            #endif
+    private func samples(type: HKSampleType, syncIdentifier: String) async throws -> [HKSample] {
+        try await withCheckedThrowingContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(
+                withMetadataKey: HKMetadataKeySyncIdentifier,
+                operatorType: .equalTo,
+                value: syncIdentifier
+            )
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: samples ?? [])
+                }
+            }
+            store.execute(query)
         }
+    }
+
+    private func syncIdentifier(for entryID: UUID, sampleKey: String) -> String {
+        "k3vnc.OpenFoodJournal.\(entryID.uuidString).\(sampleKey)"
     }
 
     // MARK: - Read Active Energy
