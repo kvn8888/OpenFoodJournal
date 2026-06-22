@@ -76,9 +76,9 @@ enum DailyLogSheet: Identifiable {
 
 ### NutritionCalculatorView (`Views/FoodBank/NutritionCalculatorView.swift`)
 - **Library**: `NutritionCalculatorLibraryView` lists `SavedFood(kind: .calculator)` rows from the Food Bank and opens build/edit sheets
-- **Editor**: `NutritionCalculatorEditorView` creates or edits calculator identity, groups, selection rules, ingredients, runtime portion labels, macro/micro values, and Gemini OCR imports
-- **OCR import**: selected screenshots/photos call `ScanService.extractCalculatorRows`; rows are staged in the editor and only merged into groups after the user taps import
-- **Builder**: `NutritionCalculatorBuildView` lets users pick portions, adjust quantity multipliers at runtime, see live totals, save presets, and add the calculated result to the journal
+- **Editor**: `NutritionCalculatorEditorView` creates or edits calculator identity and a flat list of ingredients with portion names and macro/micro values
+- **OCR import**: the ingredient editor can choose an image from the library or camera, then calls `ScanService.extractCalculatorIngredient(named:from:useProModel:)`; the typed ingredient name anchors Gemini, returned nutrients are appended as unnamed portions, and users must name portions before saving
+- **Builder**: `NutritionCalculatorBuildView` lets users pick one portion per ingredient, adjust quantities, see live totals, and add the calculated result to the journal
 - **Logging behavior**: logs a normal `NutritionEntry` with copied macros/micros and `selectionSummary`; previous entries are not connected to later calculator edits
 
 ### FoodBankArchiveView (`Views/FoodBank/FoodBankArchiveView.swift`)

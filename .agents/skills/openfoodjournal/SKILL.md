@@ -45,7 +45,7 @@ See [references/models.md](references/models.md) for full property lists.
 
 - **`DailyLog`** — `@Model`, keyed by `date` normalized to midnight (no `@Attribute(.unique)` — CloudKit can't enforce uniqueness; app-level dedup in `fetchOrCreateLog(for:)`). Owns `[NutritionEntry]?` (optional for CloudKit) via cascade delete. Uses `safeEntries` computed property for reads.
 - **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/serving/servingCount/servingQuantity/servingUnit/servingMappings + optional `selectionSummary` for generated calculator builds. Includes HealthKit sync metadata (`healthKitSyncStatus`, `healthKitSyncedAt`, `healthKitSyncVersion`, `healthKitLastError`, `healthKitLastWriteHash`) so Apple Health writes are idempotent.
-- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `kind: SavedFoodKind` (`.single`/`.composite`/`.calculator`), `compositeIngredients: [CompositeIngredientSnapshot]`, `calculatorGroups: [CalculatorGroup]`, `calculatorPresets: [CalculatorPreset]`, `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting, and `archivedAt: Date?` for manual cosmetic archive state. Composite ingredients are copied snapshots, never live `SavedFood` references, so editing a composite only affects future logs. Nutrition calculators are also saved-food rows: groups, ingredients, portion labels, and presets are Codable value snapshots, not SwiftData relationship trees. Foods auto-archive cosmetically when `lastUsedAt` is more than 14 days old; archived foods stay in SwiftData, remain searchable, and can be browsed from Food Bank "+" → Archive.
+- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `kind: SavedFoodKind` (`.single`/`.composite`/`.calculator`), `compositeIngredients: [CompositeIngredientSnapshot]`, `calculatorIngredients: [CalculatorIngredient]`, `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting, and `archivedAt: Date?` for manual cosmetic archive state. Composite ingredients are copied snapshots, never live `SavedFood` references, so editing a composite only affects future logs. Nutrition calculators are also saved-food rows: flat ingredient/portion value snapshots, not SwiftData relationship trees. Foods auto-archive cosmetically when `lastUsedAt` is more than 14 days old; archived foods stay in SwiftData, remain searchable, and can be browsed from Food Bank "+" → Archive.
 - **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
   - `NewContainerSheet` shows the last completed `finalWeight` for the same `SavedFood` as the next container weight placeholder, so users continuing an open container can type/confirm the last end weight instead of re-entering it from memory.
   - The container food picker sorts all saved foods by most recent container activity first, then alphabetically for foods that have never been tracked.
@@ -64,7 +64,7 @@ See [references/models.md](references/models.md) for full property lists.
 See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `saveEntry()`, `repairDailyLogEntryRelationships()`, `exportCSV()`, `exportBackup()`, `importBackup()`. CSV is spreadsheet/analytics only. Restore-grade backup uses versioned JSON DTOs in `OpenFoodJournalBackup.swift` and imports idempotently by UUID. Local/iCloud remain source of truth; successful saves schedule the optional Turso mirror when enabled.
-- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Gemini `inline_data` part in one direct REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `streamGenerateContent?alt=sse` with Gemini `includeThoughts` so thought-summary parts update `thinkingTrace` in the loading overlay while the scan/search is in flight; only non-thinking parts are accumulated as final nutrition JSON. Also supports Food Bank AI Search via Gemini `google_search` grounding and returns a reviewable `NutritionEntry`, plus nutrition-calculator OCR import via `extractCalculatorRows(from:useProModel:)` which stages `CalculatorOCRRow` values from screenshots/photos for user review. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite scans and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
+- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Gemini `inline_data` part in one direct REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `streamGenerateContent?alt=sse` with Gemini `includeThoughts` so thought-summary parts update `thinkingTrace` in the loading overlay while the scan/search is in flight; only non-thinking parts are accumulated as final nutrition JSON. Also supports Food Bank AI Search via Gemini `google_search` grounding and returns a reviewable `NutritionEntry`, plus nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)` which fills portions for one user-named ingredient at a time. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite scans and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
 - **`TursoMirrorService`** — Optional `@Observable @MainActor` direct SQL-over-HTTP mirror to a user-provided Turso database. Credentials are Keychain-only (`turso-database-url`, `turso-auth-token`); non-secret state uses `turso.enabled`, `turso.includeDiagnostics`, `turso.lastSyncAt`, `turso.lastError`, and `turso.lastRowCount`. Uses `/health` for connection tests and `/v2/pipeline` for migrations/mirroring. It is push-only, generation-pruned, non-blocking, and never reads Turso back into SwiftData.
 - **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`, and optional Turso mirror credentials under `turso-database-url` / `turso-auth-token`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`, `hasTursoCredentials`, `tursoDatabaseURL`, `tursoAuthToken`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
@@ -171,11 +171,14 @@ Food Bank "+" → Composite Food
 Food Bank "+" → Nutrition Calculator
   → NutritionCalculatorLibraryView lists SavedFood(kind: .calculator) rows by last used
   → New/Edit opens NutritionCalculatorEditorView
-  → User defines restaurant/brand identity, groups, selection rule (single/multiple), ingredients, and runtime portion labels
-  → Gemini OCR import can read screenshots/photos into staged CalculatorOCRRow values; user imports reviewed rows into editable groups/ingredients/portions
-  → Groups and presets are stored as Codable value arrays on SavedFood, not relationships
+  → User defines restaurant/brand identity and a flat list of ingredients with portion names
+  → Ingredient editor can call Gemini OCR on images for the user-named ingredient only
+  → Image import stays visibly disabled until the ingredient has a name and at least one image is selected
+  → OCR fills nutrition first; imported portions keep source labels when available, otherwise default to "Normal"
+  → Manually added portions also default to "Normal" instead of opening with a blank name
+  → Calculator ingredients are stored as Codable value arrays on SavedFood, not relationships
   → Build opens NutritionCalculatorBuildView
-  → User chooses portions, adjusts quantity multipliers at runtime, sees live macro totals, optionally saves a preset
+  → User chooses one portion per ingredient, adjusts quantities, and sees live macro totals
   → Add to Journal writes a NutritionEntry with copied macros/micros, savedFoodID, servingUnit "build", and selectionSummary
   → Later calculator edits affect future builds only; previous NutritionEntry rows keep their logged nutrition snapshot
 ```
@@ -205,7 +208,37 @@ iOS App (SwiftData + CloudKit)
 
 ## Turso Agent Debugging
 
-When a user has enabled Turso mirroring and provides credentials, use `.agents/skills/openfoodjournal/scripts/turso_debug.py` for read-only SQL inspection. It accepts `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` or `--url` / `--token` and supports: `summary`, `day YYYY-MM-DD`, `entry UUID`, `food-search TEXT`, `healthkit-pending`, `gemini-failures --days 30`, and `raw-sql "SELECT ..."` (SELECT-only unless `--allow-write` is passed).
+When a user has enabled Turso mirroring and provides credentials, use `.agents/skills/openfoodjournal/scripts/turso_debug.py` for read-only SQL inspection. It accepts `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN`, common `LIBSQL_*` aliases, `.env` by default, or `--url` / `--token`. It supports: `summary`, `day YYYY-MM-DD`, `entry UUID`, `food-search TEXT`, `healthkit-pending`, `gemini-failures --days 30`, `typed-args-smoke-test`, and `raw-sql "SELECT ..."` (SELECT-only unless `--allow-write` is passed).
+
+## GitHub Project Board
+
+Use `.agents/skills/openfoodjournal/scripts/github_project_board.py` to inspect
+or update the OpenFoodJournal GitHub Projects v2 kanban board. The helper wraps
+`gh project` with repo defaults so agents can avoid retyping owner/repo/project
+arguments.
+
+Requirements:
+- `gh auth status` must show `repo` and `project` scopes.
+- Default owner/repo: `kvn8888/OpenFoodJournal`.
+- Default project title lookup: `OpenFoodJournal`.
+- After each work session, update relevant GitHub issues and board fields
+  (`Status`, `Priority`, `Size`) so the board reflects the latest state.
+  At minimum, move actively worked issues to `In Progress`, move verified
+  completed issues to `Done`, and add notes/links for blockers or validation.
+
+Common commands:
+```bash
+python .agents/skills/openfoodjournal/scripts/github_project_board.py create
+python .agents/skills/openfoodjournal/scripts/github_project_board.py projects
+python .agents/skills/openfoodjournal/scripts/github_project_board.py columns
+python .agents/skills/openfoodjournal/scripts/github_project_board.py list
+python .agents/skills/openfoodjournal/scripts/github_project_board.py list --status Todo
+python .agents/skills/openfoodjournal/scripts/github_project_board.py add-issue 4 --status Todo --priority P0 --size M
+python .agents/skills/openfoodjournal/scripts/github_project_board.py move 4 "In Progress"
+python .agents/skills/openfoodjournal/scripts/github_project_board.py create-issue --title "Bug title" --body-file /tmp/body.md --label area:healthkit,type:bug,priority:p0 --status Todo --priority P0 --size M
+python .agents/skills/openfoodjournal/scripts/github_project_board.py edit-issue 10 --body-file /tmp/body.md --add-label area:healthkit --status Todo --priority P0
+python .agents/skills/openfoodjournal/scripts/github_project_board.py set-fields 10 --status "In Progress" --priority P0 --size M
+```
 
 ## Backup / Export Flow
 
@@ -217,7 +250,7 @@ Settings → Data → Export Spreadsheet CSV
 
 Settings → Data → Export Backup
   → NutritionStore.exportBackup(goals, appSettings)
-  → Versioned JSON (`schemaVersion: 1`) with DailyLog, NutritionEntry, SavedFood (including composite ingredient snapshots and calculator groups/presets), TrackedContainer, Preferences, UserGoals, and non-sensitive app settings
+  → Versioned JSON (`schemaVersion: 1`) with DailyLog, NutritionEntry, SavedFood (including composite ingredient snapshots and calculator ingredient snapshots), TrackedContainer, Preferences, UserGoals, and non-sensitive app settings
   → Does not include Gemini API key, HealthKit authorization state, or HealthKit samples
 
 Settings → Data → Import Backup
@@ -309,7 +342,9 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 **EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveEntry(entry)`.
 
-## Current State (Last Updated: 2026-06-21)
+**CursorEndModifier**: Applied once at the app root with `.cursorAtEnd()`. It keeps `UITextField` cursors at the end on focus and installs a non-canceling window tap recognizer that dismisses the keyboard when tapping outside text inputs. Keep this centralized instead of adding competing per-view whitespace tap gestures.
+
+## Current State (Last Updated: 2026-06-22)
 
 - **Branch: `app-store`** — CloudKit is the primary sync path, with optional push-only Turso mirror for user-owned SQL debugging
 - App structure complete: all models, services, and views implemented
@@ -318,6 +353,8 @@ Already configured in `OpenFoodJournal.entitlements`:
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Gemini scans/searches call the Gemini REST API directly from the device using the user's BYOK key; no Render proxy is used by the current app path
 - Food Bank: save foods from scan/manual entry, build composite foods from snapshot ingredient portions, browse/search/sort active foods, auto-hide foods unused for over 14 days, manually archive/unarchive foods, log archived foods from search or Archive
+- Nutrition Calculator: calculators are `SavedFood(kind: .calculator)` rows with flat ingredient/portion snapshots. OCR import is name-first per ingredient: type an ingredient name, choose an image from the library or camera, Gemini fills nutrients, and portion rows default to a visible "Normal" label when no source label exists.
+- Keyboard UX: tapping outside a text input dismisses the keyboard app-wide via `CursorEndModifier`, while taps still pass through to buttons/lists.
 - Settings Data: spreadsheet CSV export plus versioned JSON backup export/import. JSON import is idempotent by UUID.
 - **Gemini scan UX**: loading overlay can show streamed thought-summary trace, result sheet and scan page can redo the last submitted photo set, and camera view has 0.5x/1x/2x zoom controls
 - **Open Food Facts integration**: Enter-only search, zero-calorie/no-usable-nutrition rows filtered out, add to journal/food bank, per-serving nutrition

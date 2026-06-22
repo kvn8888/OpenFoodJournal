@@ -97,8 +97,7 @@ enum HealthKitSyncStatus: String, Codable, CaseIterable {
     var archivedAt: Date?
     var kind: SavedFoodKind
     var compositeIngredients: [CompositeIngredientSnapshot]
-    var calculatorGroups: [CalculatorGroup]
-    var calculatorPresets: [CalculatorPreset]
+    var calculatorIngredients: [CalculatorIngredient]
 
     // Computed/helpers
     var isArchivedInFoodBank: Bool  // archivedAt != nil OR lastUsedAt older than 14 days
@@ -107,9 +106,9 @@ enum HealthKitSyncStatus: String, Codable, CaseIterable {
     func markLoggedForFoodBank(now: Date)
     static func compositeTotals(for: [CompositeIngredientSnapshot]) -> CompositeNutritionTotals
     func refreshCompositeNutrition()
-    static func calculatorTotals(for: [CalculatorGroup], selections: [CalculatorSelection]) -> CompositeNutritionTotals
-    static func calculatorSelectionSummary(for: [CalculatorGroup], selections: [CalculatorSelection]) -> String
-    static func missingCalculatorSelectionCount(for: [CalculatorGroup], selections: [CalculatorSelection]) -> Int
+    static func calculatorTotals(for: [CalculatorIngredient], selections: [CalculatorSelection]) -> CompositeNutritionTotals
+    static func calculatorSelectionSummary(for: [CalculatorIngredient], selections: [CalculatorSelection]) -> String
+    static func missingCalculatorSelectionCount(for: [CalculatorIngredient], selections: [CalculatorSelection]) -> Int
     func refreshCalculatorNutrition()
 }
 ```
@@ -118,7 +117,7 @@ Food Bank archive is cosmetic only. Archived foods stay in SwiftData, remain sea
 
 Composite foods are also `SavedFood` rows. They store `CompositeIngredientSnapshot` values with copied ingredient nutrition, serving info, selected quantity, and selected unit. They do not store live `SavedFood` references, so editing a composite only changes future logs.
 
-Nutrition calculators are also `SavedFood` rows (`kind == .calculator`). They store calculator groups and presets as Codable value arrays, not SwiftData relationships. Logging a calculator writes a normal `NutritionEntry` with copied totals and `selectionSummary`; later calculator edits do not mutate old entries.
+Nutrition calculators are also `SavedFood` rows (`kind == .calculator`). They store a flat `calculatorIngredients` value array, not SwiftData relationships. Logging a calculator writes a normal `NutritionEntry` with copied totals and `selectionSummary`; later calculator edits do not mutate old entries.
 
 ## CompositeIngredientSnapshot (`OpenFoodJournal/Models/SavedFood.swift`)
 
@@ -143,19 +142,6 @@ struct CompositeIngredientSnapshot: Identifiable, Codable, Hashable, Sendable {
 ## Calculator Value Types (`OpenFoodJournal/Models/SavedFood.swift`)
 
 ```swift
-enum CalculatorSelectionRule: String, Codable, CaseIterable, Identifiable {
-    case single
-    case multiple
-}
-
-struct CalculatorGroup: Identifiable, Codable, Hashable, Sendable {
-    var id: UUID
-    var name: String
-    var isRequired: Bool
-    var selectionRule: CalculatorSelectionRule
-    var ingredients: [CalculatorIngredient]
-}
-
 struct CalculatorIngredient: Identifiable, Codable, Hashable, Sendable {
     var id: UUID
     var name: String
@@ -172,18 +158,9 @@ struct CalculatorPortionOption: Identifiable, Codable, Hashable, Sendable {
 
 struct CalculatorSelection: Identifiable, Codable, Hashable, Sendable {
     var id: UUID
-    var groupID: UUID
     var ingredientID: UUID
     var portionID: UUID
     var quantity: Double
-}
-
-struct CalculatorPreset: Identifiable, Codable, Hashable, Sendable {
-    var id: UUID
-    var name: String
-    var selections: [CalculatorSelection]
-    var createdAt: Date
-    var lastUsedAt: Date
 }
 ```
 

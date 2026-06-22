@@ -154,7 +154,7 @@ Every sheet must include:
 | `NutrientBreakdownView` | Donut chart + per-food bars | NavigationDestination |
 | `NutritionDetailView` | Period picker + macro cards + micros | Full screen section |
 | `ServingMappingSection` | Reusable Form section for unit maps | Form section |
-| `CursorEndModifier` | UITextField cursor fix | Applied at app root |
+| `CursorEndModifier` | Text-field cursor fix + tap-outside keyboard dismiss | Applied at app root |
 
 ### Row Components
 | Component | Context | Key Elements |
@@ -345,6 +345,7 @@ Before merging any new view:
 - [ ] Search should match `brand` field in addition to `name`
 
 ### Keyboard UX
+- [x] Tapping outside a text input dismisses the keyboard app-wide — handled once by `CursorEndModifier` with a non-canceling window tap recognizer, so normal button/list taps still work
 - [ ] Every keyboard popup must have a "Done" button to dismiss — use `.toolbar { ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done") { focusedField = nil } } }`
 
 ### Calendar Strip → Continuous Scrollable Calendar

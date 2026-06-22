@@ -30,7 +30,7 @@ Versioned JSON backup DTOs. Current `schemaVersion` is `1`.
 Included:
 - `DailyLog` rows with IDs, dates, notes
 - `NutritionEntry` rows with IDs, timestamps, full serving data, micronutrients, mappings, savedFoodID, scanDurationMs, selectionSummary, and dailyLogID relationship
-- `SavedFood` rows with IDs, nutrition template fields, serving data, mappings, lastUsedAt, archivedAt, kind, composite ingredient snapshots, calculator groups, and calculator presets
+- `SavedFood` rows with IDs, nutrition template fields, serving data, mappings, lastUsedAt, archivedAt, kind, composite ingredient snapshots, and calculator ingredient snapshots
 - `TrackedContainer` rows with IDs, food snapshots, weights, dates, savedFoodID
 - `Preferences`, `UserGoals`, and non-sensitive app settings (`scan.useProModel`, `off.contributeEnabled`)
 
@@ -50,11 +50,11 @@ Not included: Gemini API key, HealthKit authorization state, or HealthKit sample
 func scan(image: UIImage, mode: ScanMode, prompt: String? = nil, useProModel: Bool = false) async throws -> NutritionEntry
 func scan(images: [UIImage], mode: ScanMode, prompt: String? = nil, useProModel: Bool = false) async throws -> NutritionEntry
 func searchNutrition(query: String, useProModel: Bool = false) async throws -> NutritionEntry
-func extractCalculatorRows(from images: [UIImage], useProModel: Bool = false) async throws -> [CalculatorOCRRow]
+func extractCalculatorIngredient(named name: String, from images: [UIImage], useProModel: Bool = false) async throws -> CalculatorIngredientDraft
 ```
 - Encodes 1-4 resized JPEG photos as Gemini `inline_data` parts for label/food scans
 - Uses Gemini `google_search` grounding for Food Bank AI Search
-- Extracts staged `CalculatorOCRRow` values from restaurant/brand nutrition calculator screenshots/photos for `NutritionCalculatorEditorView`; the user must review/import the rows before persistence
+- Extracts portions for one user-named restaurant/brand calculator ingredient from images; the typed ingredient name anchors Gemini so it does not invent a whole calculator structure
 - Parses `GeminiNutritionResponse` (Codable) into `NutritionEntry`
 - Streams Gemini thought-summary parts into `thinkingTrace`
 - Writes comprehensive `GeminiScanLog` success/failure diagnostics, updates `GeminiCostAccumulator` from response `usageMetadata`, and prunes logs older than 30 days
@@ -112,7 +112,7 @@ func scheduleMirror(reason: String)
 **Schema**:
 - Namespaced `ofj_*` tables only.
 - Normalized core tables for daily logs, entries, saved foods, tracked containers, preferences, user goals, app settings, Gemini scan logs, Gemini cost accumulators, and sync runs.
-- Complex Swift value fields (micronutrients, serving, serving mappings, composite ingredients, calculator groups/presets, Gemini thinking trace) are mirrored as JSON text.
+- Complex Swift value fields (micronutrients, serving, serving mappings, composite ingredients, calculator ingredients, Gemini thinking trace) are mirrored as JSON text.
 - Migrations use `CREATE TABLE IF NOT EXISTS`, `PRAGMA table_info(table)`, and `ALTER TABLE ADD COLUMN` only for missing additive columns. Do not use `ALTER TABLE ADD COLUMN IF NOT EXISTS`.
 
 **Mirror contract**:
