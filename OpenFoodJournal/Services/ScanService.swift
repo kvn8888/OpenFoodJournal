@@ -36,11 +36,8 @@ enum ScanError: LocalizedError {
     }
 }
 
-struct CalculatorOCRRow: Identifiable, Codable, Hashable, Sendable {
-    var id: UUID = UUID()
-    var groupName: String?
-    var ingredientName: String
-    var portionLabel: String
+struct CalculatorPortionDraft: Codable, Sendable {
+    var label: String
     var calories: Double
     var protein: Double
     var carbs: Double
@@ -48,20 +45,14 @@ struct CalculatorOCRRow: Identifiable, Codable, Hashable, Sendable {
     var micronutrients: [String: MicronutrientValue]
 
     init(
-        id: UUID = UUID(),
-        groupName: String? = nil,
-        ingredientName: String,
-        portionLabel: String,
+        label: String,
         calories: Double,
         protein: Double,
         carbs: Double,
         fat: Double,
         micronutrients: [String: MicronutrientValue] = [:]
     ) {
-        self.id = id
-        self.groupName = groupName
-        self.ingredientName = ingredientName
-        self.portionLabel = portionLabel
+        self.label = label
         self.calories = calories
         self.protein = protein
         self.carbs = carbs
@@ -70,9 +61,7 @@ struct CalculatorOCRRow: Identifiable, Codable, Hashable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case groupName
-        case ingredientName
-        case portionLabel
+        case label
         case calories
         case protein
         case carbs
@@ -81,8 +70,9 @@ struct CalculatorOCRRow: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-private struct CalculatorOCRResponse: Codable {
-    var rows: [CalculatorOCRRow]
+struct CalculatorIngredientDraft: Codable, Sendable {
+    var name: String
+    var portions: [CalculatorPortionDraft]
 }
 
 // MARK: - Gemini REST API Types
@@ -904,16 +894,27 @@ final class ScanService {
         return entry
     }
 
-    /// Extracts calculator ingredient/portion rows from restaurant nutrition
-    /// calculator screenshots. The rows are staged for review; callers decide
-    /// what to merge into a saved calculator.
-    func extractCalculatorRows(from images: [UIImage], useProModel: Bool = false) async throws -> [CalculatorOCRRow] {
+    /// Extracts portions for one named calculator ingredient from restaurant
+    /// nutrition images. The typed name anchors extraction; callers keep
+    /// that name authoritative when mapping the id-less draft into local values.
+    func extractCalculatorIngredient(
+        named name: String,
+        from images: [UIImage],
+        useProModel: Bool = false
+    ) async throws -> CalculatorIngredientDraft {
         isScanning = true
         error = nil
         thinkingTrace = []
-        scanProgressMessage = "Reading calculator screenshots..."
+        scanProgressMessage = "Reading ingredient image..."
         defer { isScanning = false }
         let start = ContinuousClock.now
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedName.isEmpty else {
+            let err = ScanError.emptySearchQuery
+            self.error = err
+            throw err
+        }
 
         guard !images.isEmpty else {
             let err = ScanError.noImages
@@ -954,7 +955,7 @@ final class ScanService {
         }
 
         let modelConfig = ModelConfig.aiSearch(useProModel: useProModel)
-        let prompt = Self.calculatorOCRPrompt
+        let prompt = Self.calculatorIngredientPrompt(name: trimmedName)
         let imageParts = preparedImages.map {
             GeminiPart.inlineData(mimeType: "image/jpeg", data: $0.data.base64EncodedString())
         }
@@ -1007,7 +1008,7 @@ final class ScanService {
                 resolvedModel: trace.resolvedModel ?? modelConfig.primary,
                 usedFallback: trace.usedFallback,
                 photoCount: images.count,
-                userPrompt: "Nutrition calculator OCR import",
+                userPrompt: "Nutrition calculator ingredient OCR: \(trimmedName)",
                 durationMs: msFrom(ContinuousClock.now.duration(to: start)),
                 debugTrace: trace,
                 error: visibleError
@@ -1016,7 +1017,10 @@ final class ScanService {
         }
 
         do {
-            let response = try JSONDecoder().decode(CalculatorOCRResponse.self, from: Data(text.utf8))
+            let response = try JSONDecoder().decode(CalculatorIngredientDraft.self, from: Data(text.utf8))
+            let filteredPortions = response.portions.filter {
+                !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
             recordGeminiScanLog(
                 operation: .scan,
                 status: .success,
@@ -1025,14 +1029,16 @@ final class ScanService {
                 resolvedModel: trace.resolvedModel ?? modelConfig.primary,
                 usedFallback: trace.usedFallback,
                 photoCount: images.count,
-                userPrompt: "Nutrition calculator OCR import",
+                userPrompt: "Nutrition calculator ingredient OCR: \(trimmedName)",
                 durationMs: msFrom(ContinuousClock.now.duration(to: start)),
                 debugTrace: trace
             )
-            return response.rows.filter {
-                !$0.ingredientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                !$0.portionLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            }
+            return CalculatorIngredientDraft(
+                name: response.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? trimmedName
+                    : response.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                portions: filteredPortions
+            )
         } catch {
             let err = ScanError.decodingError(error)
             self.error = err
@@ -1044,7 +1050,7 @@ final class ScanService {
                 resolvedModel: trace.resolvedModel ?? modelConfig.primary,
                 usedFallback: trace.usedFallback,
                 photoCount: images.count,
-                userPrompt: "Nutrition calculator OCR import",
+                userPrompt: "Nutrition calculator ingredient OCR: \(trimmedName)",
                 durationMs: msFrom(ContinuousClock.now.duration(to: start)),
                 debugTrace: trace,
                 error: err
@@ -1815,37 +1821,40 @@ extension ScanService {
     - Return only the JSON object. Do not include citations, markdown, comments, or prose outside the JSON
     """
 
-    /// Prompt for calculator OCR import — extracts rows for user review.
-    static let calculatorOCRPrompt = """
-    You are importing nutrition calculator data for a food journal. Read the provided screenshot or photo of a restaurant or brand nutrition calculator.
+    /// Prompt for calculator OCR import — extracts one named ingredient only.
+    static func calculatorIngredientPrompt(name: String) -> String {
+        """
+        You are importing ONE ingredient for a restaurant/brand nutrition calculator in a food journal.
 
-    Return a JSON object with this EXACT structure:
-    {
-      "rows": [
+        The user is importing the ingredient named: "\(name)".
+
+        Read the provided image(s) of this item's nutrition information. Extract data for THIS ingredient only — ignore any other menu items visible in the image.
+
+        Return a JSON object with this EXACT structure:
         {
-          "groupName": "<category if visible, such as Protein, Rice, Salsa, Toppings, otherwise null>",
-          "ingredientName": "<ingredient or menu component name>",
-          "portionLabel": "<portion label exactly as shown in the source>",
-          "calories": <number>,
-          "protein": <grams as number>,
-          "carbs": <grams as number>,
-          "fat": <grams as number>,
-          "micronutrients": {
-            "<nutrient_id>": {"value": <number>, "unit": "<g|mg|mcg|IU|%>"}
-          }
+          "name": "<the ingredient name as the source labels it>",
+          "portions": [
+            {
+              "label": "<visible serving amount or source label for this nutrition value, e.g. '4 oz', '1 scoop', 'Single', 'Double', or 'Serving'>",
+              "calories": <number>,
+              "protein": <grams as number>,
+              "carbs": <grams as number>,
+              "fat": <grams as number>,
+              "micronutrients": { "<nutrient_id>": {"value": <number>, "unit": "<g|mg|mcg|IU|%>"} }
+            }
+          ]
         }
-      ]
-    }
 
-    Rules:
-    - Portion labels are runtime user data. Do not normalize labels to a fixed list.
-    - If the screenshot only shows one amount for an ingredient, use the visible amount as portionLabel, or "serving" if no label is visible.
-    - Extract exact rows shown in the calculator; do not infer missing ingredients.
-    - Use 0 for missing macro values only when the calculator explicitly shows 0.
-    - Omit micronutrients that are not visible.
-    - Use canonical micronutrient IDs when possible: fiber, added_sugars, sugar, sodium, cholesterol, saturated_fat, trans_fat, calcium, iron, potassium, vitamin_a, vitamin_c, vitamin_d.
-    - Return only JSON. Do not include markdown, comments, citations, or prose.
-    """
+        Rules:
+        - If the source lists multiple serving sizes for this one item (e.g. 4 oz vs 8 oz, single vs double, regular vs large), return ONE portion object per size, using the visible source label only to distinguish the nutrition values.
+        - If only one amount is shown, return a single portion using the visible serving label, or an empty label if none is visible.
+        - Do not invent app portion names such as Light, Normal, or Extra. The app will default missing portion labels to Normal.
+        - Do not invent extra sizes. Do not return other ingredients.
+        - Use 0 for a macro only when the source explicitly shows 0; omit micronutrients you can't read.
+        - Prefer canonical micronutrient IDs: fiber, added_sugars, sugar, sodium, cholesterol, saturated_fat, trans_fat, calcium, iron, potassium, vitamin_a, vitamin_c, vitamin_d.
+        - Return only JSON. No markdown, comments, citations, or prose.
+        """
+    }
 }
 
 private extension GeminiNutritionResponse {

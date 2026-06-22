@@ -17,7 +17,7 @@ struct SavedFoodRowView: View {
                     Image(systemName: "slider.horizontal.3")
                         .font(.headline)
                         .foregroundStyle(.teal)
-                    Text("\(food.calculatorGroups.count)")
+                    Text("\(food.calculatorIngredients.count)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 } else {
@@ -48,7 +48,7 @@ struct SavedFoodRowView: View {
                     .lineLimit(1)
 
                 if food.kind == .calculator {
-                    Label("Calculator · \(food.calculatorGroups.count) group\(food.calculatorGroups.count == 1 ? "" : "s")", systemImage: "slider.horizontal.3")
+                    Label("Calculator · \(food.calculatorIngredients.count) ingredient\(food.calculatorIngredients.count == 1 ? "" : "s")", systemImage: "slider.horizontal.3")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -72,7 +72,7 @@ struct SavedFoodRowView: View {
 
             // ── Right: Macro chips matching the journal's EntryRowView ──
             if food.kind == .calculator {
-                Text("\(food.calculatorPresets.count) preset\(food.calculatorPresets.count == 1 ? "" : "s")")
+                Text("\(food.calculatorIngredients.count) item\(food.calculatorIngredients.count == 1 ? "" : "s")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {

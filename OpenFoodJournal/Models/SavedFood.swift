@@ -111,20 +111,6 @@ struct CompositeIngredientSnapshot: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-enum CalculatorSelectionRule: String, Codable, CaseIterable, Identifiable, Sendable {
-    case single
-    case multiple
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .single: "Choose One"
-        case .multiple: "Choose Multiple"
-        }
-    }
-}
-
 struct CalculatorPortionOption: Identifiable, Codable, Hashable, Sendable {
     var id: UUID = UUID()
     var label: String = ""
@@ -172,6 +158,19 @@ struct CalculatorPortionOption: Identifiable, Codable, Hashable, Sendable {
 
         return totals
     }
+
+    func scaledPortion(by factor: Double, label: String) -> CalculatorPortionOption {
+        CalculatorPortionOption(
+            label: label,
+            calories: calories * factor,
+            protein: protein * factor,
+            carbs: carbs * factor,
+            fat: fat * factor,
+            micronutrients: micronutrients.mapValues {
+                MicronutrientValue(value: $0.value * factor, unit: $0.unit)
+            }
+        )
+    }
 }
 
 struct CalculatorIngredient: Identifiable, Codable, Hashable, Sendable {
@@ -195,33 +194,8 @@ struct CalculatorIngredient: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
-struct CalculatorGroup: Identifiable, Codable, Hashable, Sendable {
-    var id: UUID = UUID()
-    var name: String = ""
-    var isRequired: Bool = false
-    var selectionRule: CalculatorSelectionRule = CalculatorSelectionRule.single
-    var ingredients: [CalculatorIngredient] = []
-
-    init() {}
-
-    init(
-        id: UUID = UUID(),
-        name: String,
-        isRequired: Bool = false,
-        selectionRule: CalculatorSelectionRule = CalculatorSelectionRule.single,
-        ingredients: [CalculatorIngredient] = []
-    ) {
-        self.id = id
-        self.name = name
-        self.isRequired = isRequired
-        self.selectionRule = selectionRule
-        self.ingredients = ingredients
-    }
-}
-
 struct CalculatorSelection: Identifiable, Codable, Hashable, Sendable {
     var id: UUID = UUID()
-    var groupID: UUID = UUID()
     var ingredientID: UUID = UUID()
     var portionID: UUID = UUID()
     var quantity: Double = 1
@@ -230,40 +204,14 @@ struct CalculatorSelection: Identifiable, Codable, Hashable, Sendable {
 
     init(
         id: UUID = UUID(),
-        groupID: UUID,
         ingredientID: UUID,
         portionID: UUID,
         quantity: Double = 1
     ) {
         self.id = id
-        self.groupID = groupID
         self.ingredientID = ingredientID
         self.portionID = portionID
         self.quantity = quantity
-    }
-}
-
-struct CalculatorPreset: Identifiable, Codable, Hashable, Sendable {
-    var id: UUID = UUID()
-    var name: String = ""
-    var selections: [CalculatorSelection] = []
-    var createdAt: Date = Date()
-    var lastUsedAt: Date = Date()
-
-    init() {}
-
-    init(
-        id: UUID = UUID(),
-        name: String,
-        selections: [CalculatorSelection],
-        createdAt: Date = .now,
-        lastUsedAt: Date = .now
-    ) {
-        self.id = id
-        self.name = name
-        self.selections = selections
-        self.createdAt = createdAt
-        self.lastUsedAt = lastUsedAt
     }
 }
 
@@ -315,8 +263,7 @@ final class SavedFood {
     // Composite foods snapshot ingredient nutrition instead of referencing source SavedFoods.
     var kind: SavedFoodKind = SavedFoodKind.single
     var compositeIngredients: [CompositeIngredientSnapshot] = []
-    var calculatorGroups: [CalculatorGroup] = []
-    var calculatorPresets: [CalculatorPreset] = []
+    var calculatorIngredients: [CalculatorIngredient] = []
 
     init(
         id: UUID = UUID(),
@@ -336,10 +283,9 @@ final class SavedFood {
         servingMappings: [ServingMapping] = [],
         originalScanMode: ScanMode = .manual,
         archivedAt: Date? = nil,
-        kind: SavedFoodKind = .single,
+        kind: SavedFoodKind = SavedFoodKind.single,
         compositeIngredients: [CompositeIngredientSnapshot] = [],
-        calculatorGroups: [CalculatorGroup] = [],
-        calculatorPresets: [CalculatorPreset] = []
+        calculatorIngredients: [CalculatorIngredient] = []
     ) {
         self.id = id
         self.name = name
@@ -361,8 +307,7 @@ final class SavedFood {
         self.archivedAt = archivedAt
         self.kind = kind
         self.compositeIngredients = compositeIngredients
-        self.calculatorGroups = calculatorGroups
-        self.calculatorPresets = calculatorPresets
+        self.calculatorIngredients = calculatorIngredients
     }
 }
 
@@ -441,7 +386,7 @@ extension SavedFood {
         carbs = 0
         fat = 0
         micronutrients = [:]
-        servingSize = "\(calculatorGroups.count) group\(calculatorGroups.count == 1 ? "" : "s")"
+        servingSize = "\(calculatorIngredients.count) ingredient\(calculatorIngredients.count == 1 ? "" : "s")"
         servingsPerContainer = nil
         serving = nil
         servingQuantity = 1
@@ -451,13 +396,13 @@ extension SavedFood {
     }
 
     static func calculatorTotals(
-        for groups: [CalculatorGroup],
+        for ingredients: [CalculatorIngredient],
         selections: [CalculatorSelection]
     ) -> CompositeNutritionTotals {
         var totals = CompositeNutritionTotals()
 
         for selection in selections {
-            guard let resolved = resolve(selection, in: groups) else { continue }
+            guard let resolved = resolve(selection, in: ingredients) else { continue }
             let scaled = resolved.portion.scaled(by: selection.quantity)
             totals.calories += scaled.calories
             totals.protein += scaled.protein
@@ -473,37 +418,36 @@ extension SavedFood {
     }
 
     static func calculatorSelectionSummary(
-        for groups: [CalculatorGroup],
+        for ingredients: [CalculatorIngredient],
         selections: [CalculatorSelection]
     ) -> String {
         selections.compactMap { selection in
-            guard let resolved = resolve(selection, in: groups) else { return nil }
+            guard let resolved = resolve(selection, in: ingredients) else { return nil }
             let quantityPrefix = selection.quantity == 1
                 ? ""
                 : "\(formatQuantity(selection.quantity))x "
-            return "\(resolved.group.name): \(quantityPrefix)\(resolved.ingredient.name) (\(resolved.portion.label))"
+            return "\(quantityPrefix)\(resolved.ingredient.name) (\(resolved.portion.label))"
         }
         .joined(separator: ", ")
     }
 
     static func missingCalculatorSelectionCount(
-        for groups: [CalculatorGroup],
+        for ingredients: [CalculatorIngredient],
         selections: [CalculatorSelection]
     ) -> Int {
-        selections.filter { resolve($0, in: groups) == nil }.count
+        selections.filter { resolve($0, in: ingredients) == nil }.count
     }
 
     private static func resolve(
         _ selection: CalculatorSelection,
-        in groups: [CalculatorGroup]
-    ) -> (group: CalculatorGroup, ingredient: CalculatorIngredient, portion: CalculatorPortionOption)? {
-        guard let group = groups.first(where: { $0.id == selection.groupID }),
-              let ingredient = group.ingredients.first(where: { $0.id == selection.ingredientID }),
+        in ingredients: [CalculatorIngredient]
+    ) -> (ingredient: CalculatorIngredient, portion: CalculatorPortionOption)? {
+        guard let ingredient = ingredients.first(where: { $0.id == selection.ingredientID }),
               let portion = ingredient.portions.first(where: { $0.id == selection.portionID }) else {
             return nil
         }
 
-        return (group, ingredient, portion)
+        return (ingredient, portion)
     }
 
     private static func formatQuantity(_ value: Double) -> String {

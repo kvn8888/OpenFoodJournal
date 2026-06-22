@@ -213,8 +213,7 @@ struct SavedFoodRecord: Codable {
     var archivedAt: Date?
     var kind: SavedFoodKind
     var compositeIngredients: [CompositeIngredientSnapshot]
-    var calculatorGroups: [CalculatorGroup]
-    var calculatorPresets: [CalculatorPreset]
+    var calculatorIngredients: [CalculatorIngredient]
 
     init(_ food: SavedFood) {
         id = food.id
@@ -237,8 +236,7 @@ struct SavedFoodRecord: Codable {
         archivedAt = food.archivedAt
         kind = food.kind
         compositeIngredients = food.compositeIngredients
-        calculatorGroups = food.calculatorGroups
-        calculatorPresets = food.calculatorPresets
+        calculatorIngredients = food.calculatorIngredients
     }
 
     enum CodingKeys: String, CodingKey {
@@ -262,8 +260,7 @@ struct SavedFoodRecord: Codable {
         case archivedAt
         case kind
         case compositeIngredients
-        case calculatorGroups
-        case calculatorPresets
+        case calculatorIngredients
     }
 
     init(from decoder: Decoder) throws {
@@ -291,13 +288,9 @@ struct SavedFoodRecord: Codable {
             [CompositeIngredientSnapshot].self,
             forKey: .compositeIngredients
         ) ?? []
-        calculatorGroups = try container.decodeIfPresent(
-            [CalculatorGroup].self,
-            forKey: .calculatorGroups
-        ) ?? []
-        calculatorPresets = try container.decodeIfPresent(
-            [CalculatorPreset].self,
-            forKey: .calculatorPresets
+        calculatorIngredients = try container.decodeIfPresent(
+            [CalculatorIngredient].self,
+            forKey: .calculatorIngredients
         ) ?? []
     }
 
@@ -323,8 +316,7 @@ struct SavedFoodRecord: Codable {
         try container.encodeIfPresent(archivedAt, forKey: .archivedAt)
         try container.encode(kind, forKey: .kind)
         try container.encode(compositeIngredients, forKey: .compositeIngredients)
-        try container.encode(calculatorGroups, forKey: .calculatorGroups)
-        try container.encode(calculatorPresets, forKey: .calculatorPresets)
+        try container.encode(calculatorIngredients, forKey: .calculatorIngredients)
     }
 
     func makeModel() -> SavedFood {
@@ -348,8 +340,7 @@ struct SavedFoodRecord: Codable {
             archivedAt: archivedAt,
             kind: kind,
             compositeIngredients: compositeIngredients,
-            calculatorGroups: calculatorGroups,
-            calculatorPresets: calculatorPresets
+            calculatorIngredients: calculatorIngredients
         )
         food.lastUsedAt = lastUsedAt
         food.refreshCompositeNutrition()
@@ -377,8 +368,7 @@ struct SavedFoodRecord: Codable {
         food.archivedAt = archivedAt
         food.kind = kind
         food.compositeIngredients = compositeIngredients
-        food.calculatorGroups = calculatorGroups
-        food.calculatorPresets = calculatorPresets
+        food.calculatorIngredients = calculatorIngredients
         food.refreshCompositeNutrition()
         food.refreshCalculatorNutrition()
     }

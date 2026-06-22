@@ -5,6 +5,7 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UIKit
 
 struct NutritionCalculatorLibraryView: View {
     @Environment(\.dismiss) private var dismiss
@@ -89,7 +90,7 @@ struct NutritionCalculatorLibraryView: View {
             Label(searchText.isEmpty ? "No Calculators" : "No Results", systemImage: "slider.horizontal.3")
         } description: {
             Text(searchText.isEmpty
-                 ? "Add a restaurant or brand calculator, then build custom meals from runtime portion options."
+                 ? "Add a restaurant or brand calculator, then build custom meals from portion options."
                  : "Try another restaurant or brand.")
         } actions: {
             Button {
@@ -111,29 +112,21 @@ struct NutritionCalculatorLibraryView: View {
 struct NutritionCalculatorEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
-    @Environment(ScanService.self) private var scanService
     @Environment(TursoMirrorService.self) private var tursoMirror
-    @AppStorage("scan.useProModel") private var useProModel: Bool = false
 
     private let calculator: SavedFood?
 
     @State private var name: String
     @State private var brand: String
-    @State private var groups: [CalculatorGroup]
-    @State private var presets: [CalculatorPreset]
-    @State private var editingGroup: CalculatorGroup?
-    @State private var selectedPhotoItems: [PhotosPickerItem] = []
-    @State private var stagedRows: [CalculatorOCRRow] = []
-    @State private var ocrError: String?
-    @State private var isImportingOCR = false
+    @State private var ingredients: [CalculatorIngredient]
+    @State private var editingIngredient: CalculatorIngredient?
     @State private var showDeleteConfirm = false
 
     init(calculator: SavedFood? = nil) {
         self.calculator = calculator
         _name = State(initialValue: calculator?.name ?? "")
         _brand = State(initialValue: calculator?.brand ?? "")
-        _groups = State(initialValue: calculator?.calculatorGroups ?? [])
-        _presets = State(initialValue: calculator?.calculatorPresets ?? [])
+        _ingredients = State(initialValue: calculator?.calculatorIngredients ?? [])
     }
 
     private var isEditing: Bool { calculator != nil }
@@ -146,8 +139,7 @@ struct NutritionCalculatorEditorView: View {
         NavigationStack {
             Form {
                 identitySection
-                ocrSection
-                groupsSection
+                ingredientsSection
                 if isEditing {
                     deleteSection
                 }
@@ -166,12 +158,12 @@ struct NutritionCalculatorEditorView: View {
                     .disabled(!isValid)
                 }
             }
-            .sheet(item: $editingGroup) { group in
-                CalculatorGroupEditorSheet(group: group) { updated in
-                    if let index = groups.firstIndex(where: { $0.id == updated.id }) {
-                        groups[index] = updated
+            .sheet(item: $editingIngredient) { ingredient in
+                CalculatorIngredientEditorSheet(ingredient: ingredient) { updated in
+                    if let index = ingredients.firstIndex(where: { $0.id == updated.id }) {
+                        ingredients[index] = updated
                     } else {
-                        groups.append(updated)
+                        ingredients.append(updated)
                     }
                 }
             }
@@ -198,86 +190,37 @@ struct NutritionCalculatorEditorView: View {
     private var identitySection: some View {
         Section("Identity") {
             TextField("Restaurant or brand", text: $name)
-            TextField("Default meal name or note (optional)", text: $brand)
+            TextField("Brand note (optional)", text: $brand)
         }
     }
 
-    private var ocrSection: some View {
+    private var ingredientsSection: some View {
         Section {
-            PhotosPicker(
-                selection: $selectedPhotoItems,
-                maxSelectionCount: ScanService.maxImagesPerScan,
-                matching: .images
-            ) {
-                Label("Choose Screenshot or Photo", systemImage: "photo.on.rectangle")
-            }
-
-            Button {
-                Task { await extractOCRRows() }
-            } label: {
-                if isImportingOCR {
-                    Label("Reading Nutrition Rows", systemImage: "wand.and.sparkles")
-                } else {
-                    Label("Extract Rows with Gemini", systemImage: "wand.and.sparkles")
-                }
-            }
-            .disabled(selectedPhotoItems.isEmpty || isImportingOCR)
-
-            if let ocrError {
-                Text(ocrError)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-
-            if !stagedRows.isEmpty {
-                ForEach(stagedRows) { row in
-                    CalculatorOCRRowView(row: row)
-                }
-
-                Button {
-                    importStagedRows()
-                } label: {
-                    Label("Import Reviewed Rows", systemImage: "tray.and.arrow.down")
-                }
-            }
-        } header: {
-            Text("Gemini OCR Import")
-        } footer: {
-            Text("Extracted rows are staged here first. Importing creates editable groups, ingredients, and runtime portion labels.")
-        }
-    }
-
-    private var groupsSection: some View {
-        Section {
-            if groups.isEmpty {
-                Text("Add groups like Rice, Protein, Toppings, or import rows from screenshots.")
+            if ingredients.isEmpty {
+                Text("Add ingredients like rice, protein, salsa, toppings, or any brand-specific component.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(groups) { group in
+                ForEach(ingredients) { ingredient in
                     Button {
-                        editingGroup = group
+                        editingIngredient = ingredient
                     } label: {
-                        CalculatorGroupRow(group: group)
+                        CalculatorIngredientRow(ingredient: ingredient)
                     }
                     .buttonStyle(.plain)
                 }
                 .onDelete { offsets in
-                    groups.remove(atOffsets: offsets)
+                    ingredients.remove(atOffsets: offsets)
                 }
             }
 
             Button {
-                editingGroup = CalculatorGroup(
-                    name: "",
-                    isRequired: false,
-                    selectionRule: .multiple
-                )
+                editingIngredient = CalculatorIngredient(name: "")
             } label: {
-                Label("Add Group", systemImage: "plus.circle")
+                Label("Add Ingredient", systemImage: "plus.circle")
             }
         } header: {
-            Text("Groups")
+            Text("Ingredients")
         }
     }
 
@@ -292,69 +235,6 @@ struct NutritionCalculatorEditorView: View {
         }
     }
 
-    private func extractOCRRows() async {
-        isImportingOCR = true
-        ocrError = nil
-        defer { isImportingOCR = false }
-
-        var images: [UIImage] = []
-        for item in selectedPhotoItems {
-            guard let data = try? await item.loadTransferable(type: Data.self),
-                  let image = UIImage(data: data) else { continue }
-            images.append(image)
-        }
-
-        do {
-            stagedRows = try await scanService.extractCalculatorRows(from: images, useProModel: useProModel)
-            if stagedRows.isEmpty {
-                ocrError = "No usable rows were found. Try a clearer screenshot."
-            }
-        } catch {
-            ocrError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    private func importStagedRows() {
-        for row in stagedRows {
-            let groupName = row.groupName?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Imported"
-            let ingredientName = row.ingredientName.trimmingCharacters(in: .whitespacesAndNewlines)
-            let portionLabel = row.portionLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !ingredientName.isEmpty, !portionLabel.isEmpty else { continue }
-
-            let portion = CalculatorPortionOption(
-                label: portionLabel,
-                calories: row.calories,
-                protein: row.protein,
-                carbs: row.carbs,
-                fat: row.fat,
-                micronutrients: row.micronutrients
-            )
-
-            let groupIndex = groups.firstIndex {
-                $0.name.caseInsensitiveCompare(groupName) == .orderedSame
-            } ?? {
-                groups.append(CalculatorGroup(name: groupName, selectionRule: .multiple))
-                return groups.count - 1
-            }()
-
-            let ingredientIndex = groups[groupIndex].ingredients.firstIndex {
-                $0.name.caseInsensitiveCompare(ingredientName) == .orderedSame
-            } ?? {
-                groups[groupIndex].ingredients.append(CalculatorIngredient(name: ingredientName))
-                return groups[groupIndex].ingredients.count - 1
-            }()
-
-            if !groups[groupIndex].ingredients[ingredientIndex].portions.contains(where: {
-                $0.label.caseInsensitiveCompare(portionLabel) == .orderedSame
-            }) {
-                groups[groupIndex].ingredients[ingredientIndex].portions.append(portion)
-            }
-        }
-
-        stagedRows = []
-        selectedPhotoItems = []
-    }
-
     private func saveCalculator() {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBrand = brand.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -363,8 +243,7 @@ struct NutritionCalculatorEditorView: View {
             calculator.name = trimmedName
             calculator.brand = trimmedBrand.nilIfEmpty
             calculator.kind = .calculator
-            calculator.calculatorGroups = groups
-            calculator.calculatorPresets = presets
+            calculator.calculatorIngredients = ingredients
             calculator.refreshCalculatorNutrition()
         } else {
             let calculator = SavedFood(
@@ -374,12 +253,11 @@ struct NutritionCalculatorEditorView: View {
                 protein: 0,
                 carbs: 0,
                 fat: 0,
-                servingSize: "\(groups.count) group\(groups.count == 1 ? "" : "s")",
+                servingSize: ingredientCountText(ingredients.count),
                 servingQuantity: 1,
                 servingUnit: "build",
                 kind: .calculator,
-                calculatorGroups: groups,
-                calculatorPresets: presets
+                calculatorIngredients: ingredients
             )
             calculator.refreshCalculatorNutrition()
             modelContext.insert(calculator)
@@ -405,9 +283,6 @@ struct NutritionCalculatorBuildView: View {
     @State private var mealType: MealType = .snack
     @State private var buildName: String
     @State private var selections: [CalculatorSelection] = []
-    @State private var presetName = ""
-    @State private var showPresetPrompt = false
-    @State private var presetWarning: String?
 
     init(calculator: SavedFood, logDate: Date) {
         self.calculator = calculator
@@ -416,18 +291,11 @@ struct NutritionCalculatorBuildView: View {
     }
 
     private var totals: CompositeNutritionTotals {
-        SavedFood.calculatorTotals(for: calculator.calculatorGroups, selections: selections)
-    }
-
-    private var missingRequiredGroups: [CalculatorGroup] {
-        calculator.calculatorGroups.filter { group in
-            group.isRequired && !selections.contains(where: { $0.groupID == group.id })
-        }
+        SavedFood.calculatorTotals(for: calculator.calculatorIngredients, selections: selections)
     }
 
     private var canLog: Bool {
         !selections.isEmpty &&
-        missingRequiredGroups.isEmpty &&
         !buildName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -435,10 +303,7 @@ struct NutritionCalculatorBuildView: View {
         NavigationStack {
             Form {
                 summarySection
-                if !calculator.calculatorPresets.isEmpty {
-                    presetsSection
-                }
-                groupsSection
+                ingredientsSection
                 quantitiesSection
                 actionsSection
             }
@@ -448,21 +313,6 @@ struct NutritionCalculatorBuildView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-            }
-            .alert("Save Build Preset", isPresented: $showPresetPrompt) {
-                TextField("Preset name", text: $presetName)
-                Button("Save") { savePreset() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Presets store selections, not nutrition totals, so future logs use the latest calculator values.")
-            }
-            .alert("Preset Needs Review", isPresented: Binding(
-                get: { presetWarning != nil },
-                set: { if !$0 { presetWarning = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(presetWarning ?? "")
             }
         }
     }
@@ -487,68 +337,25 @@ struct NutritionCalculatorBuildView: View {
         }
     }
 
-    private var presetsSection: some View {
-        Section("Presets") {
-            ForEach(calculator.calculatorPresets.sorted { $0.lastUsedAt > $1.lastUsedAt }) { preset in
-                Button {
-                    applyPreset(preset)
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(preset.name)
-                                .fontWeight(.medium)
-                            Text("\(preset.selections.count) selection\(preset.selections.count == 1 ? "" : "s")")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private var groupsSection: some View {
-        ForEach(calculator.calculatorGroups) { group in
-            Section {
-                if group.ingredients.isEmpty {
-                    Text("No ingredients in this group.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else if group.selectionRule == .single {
-                    Picker(group.name, selection: singleSelectionBinding(for: group)) {
-                        if !group.isRequired {
-                            Text("None").tag("")
-                        }
-                        ForEach(group.ingredients) { ingredient in
-                            ForEach(ingredient.portions) { portion in
-                                Text("\(ingredient.name) — \(portion.label)")
-                                    .tag(selectionKey(groupID: group.id, ingredientID: ingredient.id, portionID: portion.id))
-                            }
-                        }
-                    }
-                } else {
-                    ForEach(group.ingredients) { ingredient in
-                        Picker(ingredient.name, selection: multipleSelectionBinding(group: group, ingredient: ingredient)) {
+    private var ingredientsSection: some View {
+        Section("Ingredients") {
+            if calculator.calculatorIngredients.isEmpty {
+                Text("This calculator has no ingredients yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(calculator.calculatorIngredients) { ingredient in
+                    if ingredient.portions.isEmpty {
+                        Text(ingredient.name)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(ingredient.name, selection: portionBinding(for: ingredient)) {
                             Text("None").tag("")
                             ForEach(ingredient.portions) { portion in
                                 Text(portion.label)
-                                    .tag(selectionKey(groupID: group.id, ingredientID: ingredient.id, portionID: portion.id))
+                                    .tag(selectionKey(ingredientID: ingredient.id, portionID: portion.id))
                             }
                         }
-                    }
-                }
-            } header: {
-                HStack {
-                    Text(group.name)
-                    if group.isRequired {
-                        Text("Required")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
                     }
                 }
             }
@@ -566,7 +373,7 @@ struct NutritionCalculatorBuildView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(resolved.ingredient.name)
                                         .fontWeight(.medium)
-                                    Text("\(resolved.group.name) · \(resolved.portion.label)")
+                                    Text(resolved.portion.label)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -587,7 +394,7 @@ struct NutritionCalculatorBuildView: View {
             } header: {
                 Text("Quantities")
             } footer: {
-                Text("Use quantities for runtime adjustments like double portions or multiple scoops without changing the saved calculator.")
+                Text("Use quantities for adjustments like double portions or multiple scoops without changing the saved calculator.")
             }
         }
     }
@@ -602,73 +409,48 @@ struct NutritionCalculatorBuildView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(!canLog)
-
-            Button {
-                presetName = buildName
-                showPresetPrompt = true
-            } label: {
-                Label("Save Build Preset", systemImage: "bookmark")
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
-            .disabled(selections.isEmpty)
         } footer: {
-            if !missingRequiredGroups.isEmpty {
-                Text("Choose an option for: \(missingRequiredGroups.map(\.name).joined(separator: ", ")).")
+            if selections.isEmpty {
+                Text("Choose at least one ingredient portion to log a calculator build.")
             }
         }
     }
 
-    private func singleSelectionBinding(for group: CalculatorGroup) -> Binding<String> {
+    private func portionBinding(for ingredient: CalculatorIngredient) -> Binding<String> {
         Binding {
-            guard let selection = selections.first(where: { $0.groupID == group.id }) else { return "" }
-            return selectionKey(groupID: selection.groupID, ingredientID: selection.ingredientID, portionID: selection.portionID)
+            guard let selection = selections.first(where: { $0.ingredientID == ingredient.id }) else { return "" }
+            return selectionKey(ingredientID: selection.ingredientID, portionID: selection.portionID)
         } set: { newValue in
-            selections.removeAll { $0.groupID == group.id }
+            selections.removeAll { $0.ingredientID == ingredient.id }
             if let selection = selection(from: newValue) {
                 selections.append(selection)
             }
         }
     }
 
-    private func multipleSelectionBinding(group: CalculatorGroup, ingredient: CalculatorIngredient) -> Binding<String> {
-        Binding {
-            guard let selection = selections.first(where: { $0.groupID == group.id && $0.ingredientID == ingredient.id }) else {
-                return ""
-            }
-            return selectionKey(groupID: selection.groupID, ingredientID: selection.ingredientID, portionID: selection.portionID)
-        } set: { newValue in
-            selections.removeAll { $0.groupID == group.id && $0.ingredientID == ingredient.id }
-            if let selection = selection(from: newValue) {
-                selections.append(selection)
-            }
-        }
-    }
-
-    private func selectionKey(groupID: UUID, ingredientID: UUID, portionID: UUID) -> String {
-        "\(groupID.uuidString)|\(ingredientID.uuidString)|\(portionID.uuidString)"
+    private func selectionKey(ingredientID: UUID, portionID: UUID) -> String {
+        "\(ingredientID.uuidString)|\(portionID.uuidString)"
     }
 
     private func selection(from key: String) -> CalculatorSelection? {
         let parts = key.split(separator: "|").map(String.init)
-        guard parts.count == 3,
-              let groupID = UUID(uuidString: parts[0]),
-              let ingredientID = UUID(uuidString: parts[1]),
-              let portionID = UUID(uuidString: parts[2]) else {
+        guard parts.count == 2,
+              let ingredientID = UUID(uuidString: parts[0]),
+              let portionID = UUID(uuidString: parts[1]) else {
             return nil
         }
-        return CalculatorSelection(groupID: groupID, ingredientID: ingredientID, portionID: portionID)
+        return CalculatorSelection(ingredientID: ingredientID, portionID: portionID)
     }
 
     private func resolvedSelection(
         _ selection: CalculatorSelection
-    ) -> (group: CalculatorGroup, ingredient: CalculatorIngredient, portion: CalculatorPortionOption)? {
-        guard let group = calculator.calculatorGroups.first(where: { $0.id == selection.groupID }),
-              let ingredient = group.ingredients.first(where: { $0.id == selection.ingredientID }),
+    ) -> (ingredient: CalculatorIngredient, portion: CalculatorPortionOption)? {
+        guard let ingredient = calculator.calculatorIngredients.first(where: { $0.id == selection.ingredientID }),
               let portion = ingredient.portions.first(where: { $0.id == selection.portionID }) else {
             return nil
         }
 
-        return (group, ingredient, portion)
+        return (ingredient, portion)
     }
 
     private func quantityBinding(for selection: Binding<CalculatorSelection>) -> Binding<Double> {
@@ -679,36 +461,10 @@ struct NutritionCalculatorBuildView: View {
         }
     }
 
-    private func applyPreset(_ preset: CalculatorPreset) {
-        let missing = SavedFood.missingCalculatorSelectionCount(
-            for: calculator.calculatorGroups,
-            selections: preset.selections
-        )
-        if missing > 0 {
-            presetWarning = "\(missing) saved selection\(missing == 1 ? "" : "s") no longer exist in this calculator. Review the build before logging."
-        }
-        selections = preset.selections.filter {
-            SavedFood.missingCalculatorSelectionCount(for: calculator.calculatorGroups, selections: [$0]) == 0
-        }
-        if let index = calculator.calculatorPresets.firstIndex(where: { $0.id == preset.id }) {
-            calculator.calculatorPresets[index].lastUsedAt = .now
-            try? modelContext.save()
-            tursoMirror.scheduleMirror(reason: "nutrition_calculator_preset_used")
-        }
-    }
-
-    private func savePreset() {
-        let trimmed = presetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !selections.isEmpty else { return }
-        calculator.calculatorPresets.append(CalculatorPreset(name: trimmed, selections: selections))
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: "nutrition_calculator_preset_saved")
-    }
-
     private func logBuild() {
         let trimmedName = buildName.trimmingCharacters(in: .whitespacesAndNewlines)
         let summary = SavedFood.calculatorSelectionSummary(
-            for: calculator.calculatorGroups,
+            for: calculator.calculatorIngredients,
             selections: selections
         )
         let entry = NutritionEntry(
@@ -744,103 +500,10 @@ struct NutritionCalculatorBuildView: View {
     }
 }
 
-private struct CalculatorGroupEditorSheet: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let group: CalculatorGroup
-    let onSave: (CalculatorGroup) -> Void
-
-    @State private var name: String
-    @State private var isRequired: Bool
-    @State private var selectionRule: CalculatorSelectionRule
-    @State private var ingredients: [CalculatorIngredient]
-    @State private var editingIngredient: CalculatorIngredient?
-
-    init(group: CalculatorGroup, onSave: @escaping (CalculatorGroup) -> Void) {
-        self.group = group
-        self.onSave = onSave
-        _name = State(initialValue: group.name)
-        _isRequired = State(initialValue: group.isRequired)
-        _selectionRule = State(initialValue: group.selectionRule)
-        _ingredients = State(initialValue: group.ingredients)
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Group") {
-                    TextField("Group name", text: $name)
-                    Picker("Selection", selection: $selectionRule) {
-                        ForEach(CalculatorSelectionRule.allCases) { rule in
-                            Text(rule.label).tag(rule)
-                        }
-                    }
-                    Toggle("Required", isOn: $isRequired)
-                }
-
-                Section("Ingredients") {
-                    if ingredients.isEmpty {
-                        Text("Add ingredients, then define runtime portion labels for each one.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(ingredients) { ingredient in
-                            Button {
-                                editingIngredient = ingredient
-                            } label: {
-                                CalculatorIngredientRow(ingredient: ingredient)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .onDelete { offsets in
-                            ingredients.remove(atOffsets: offsets)
-                        }
-                    }
-
-                    Button {
-                        let ingredient = CalculatorIngredient(name: "")
-                        editingIngredient = ingredient
-                    } label: {
-                        Label("Add Ingredient", systemImage: "plus.circle")
-                    }
-                }
-            }
-            .navigationTitle("Group")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        onSave(CalculatorGroup(
-                            id: group.id,
-                            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                            isRequired: isRequired,
-                            selectionRule: selectionRule,
-                            ingredients: ingredients
-                        ))
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-            .sheet(item: $editingIngredient) { ingredient in
-                CalculatorIngredientEditorSheet(ingredient: ingredient) { updated in
-                    if let index = ingredients.firstIndex(where: { $0.id == updated.id }) {
-                        ingredients[index] = updated
-                    } else {
-                        ingredients.append(updated)
-                    }
-                }
-            }
-        }
-    }
-}
-
 private struct CalculatorIngredientEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ScanService.self) private var scanService
+    @AppStorage("scan.useProModel") private var useProModel: Bool = false
 
     let ingredient: CalculatorIngredient
     let onSave: (CalculatorIngredient) -> Void
@@ -849,6 +512,13 @@ private struct CalculatorIngredientEditorSheet: View {
     @State private var note: String
     @State private var portions: [CalculatorPortionOption]
     @State private var editingPortion: CalculatorPortionOption?
+    @State private var selectedPhotoItems: [PhotosPickerItem] = []
+    @State private var capturedImages: [UIImage] = []
+    @State private var showPhotoLibrary = false
+    @State private var showImageSourceDialog = false
+    @State private var showCameraCapture = false
+    @State private var ocrError: String?
+    @State private var isImportingOCR = false
 
     init(ingredient: CalculatorIngredient, onSave: @escaping (CalculatorIngredient) -> Void) {
         self.ingredient = ingredient
@@ -856,6 +526,43 @@ private struct CalculatorIngredientEditorSheet: View {
         _name = State(initialValue: ingredient.name)
         _note = State(initialValue: ingredient.note ?? "")
         _portions = State(initialValue: ingredient.portions)
+    }
+
+    private static let defaultPortionLabel = "Normal"
+
+    private var trimmedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var hasIngredientName: Bool {
+        !trimmedName.isEmpty
+    }
+
+    private var canSave: Bool {
+        hasIngredientName &&
+        !hasUnnamedPortions
+    }
+
+    private var canImport: Bool {
+        hasIngredientName && pendingImageCount > 0 && !isImportingOCR
+    }
+
+    private var importButtonLooksActive: Bool {
+        canImport || isImportingOCR
+    }
+
+    private var hasUnnamedPortions: Bool {
+        portions.contains {
+            $0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private var pendingImageCount: Int {
+        selectedPhotoItems.count + capturedImages.count
+    }
+
+    private var remainingImageSlots: Int {
+        max(ScanService.maxImagesPerScan - pendingImageCount, 0)
     }
 
     var body: some View {
@@ -866,32 +573,9 @@ private struct CalculatorIngredientEditorSheet: View {
                     TextField("Note (optional)", text: $note)
                 }
 
-                Section("Runtime Portions") {
-                    if portions.isEmpty {
-                        Text("Portion labels are typed by the user from the restaurant or brand data, not hard-coded by the app.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(portions) { portion in
-                            Button {
-                                editingPortion = portion
-                            } label: {
-                                CalculatorPortionRow(portion: portion)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .onDelete { offsets in
-                            portions.remove(atOffsets: offsets)
-                        }
-                    }
-
-                    Button {
-                        let portion = CalculatorPortionOption(label: "", calories: 0, protein: 0, carbs: 0, fat: 0)
-                        editingPortion = portion
-                    } label: {
-                        Label("Add Portion", systemImage: "plus.circle")
-                    }
-                }
+                nutritionImportSection
+                quickActionsSection
+                portionsSection
             }
             .navigationTitle("Ingredient")
             .navigationBarTitleDisplayMode(.inline)
@@ -903,25 +587,306 @@ private struct CalculatorIngredientEditorSheet: View {
                     Button("Save") {
                         onSave(CalculatorIngredient(
                             id: ingredient.id,
-                            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                            name: trimmedName,
                             note: note.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty,
                             portions: portions
                         ))
                         dismiss()
                     }
                     .fontWeight(.semibold)
-                    .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!canSave)
                 }
             }
             .sheet(item: $editingPortion) { portion in
                 CalculatorPortionEditorSheet(portion: portion) { updated in
-                    if let index = portions.firstIndex(where: { $0.id == updated.id }) {
-                        portions[index] = updated
-                    } else {
-                        portions.append(updated)
-                    }
+                    upsertPortion(updated)
                 }
             }
+            .sheet(isPresented: $showCameraCapture) {
+                CalculatorCameraCaptureView { image in
+                    guard pendingImageCount < ScanService.maxImagesPerScan else { return }
+                    capturedImages.append(image)
+                }
+            }
+            .photosPicker(
+                isPresented: $showPhotoLibrary,
+                selection: $selectedPhotoItems,
+                maxSelectionCount: max(remainingImageSlots, 1),
+                matching: .images
+            )
+            .confirmationDialog(
+                "Choose Image",
+                isPresented: $showImageSourceDialog,
+                titleVisibility: .visible
+            ) {
+                Button {
+                    showPhotoLibrary = true
+                } label: {
+                    Label("Photo Library", systemImage: "photo.on.rectangle")
+                }
+
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button {
+                        showCameraCapture = true
+                    } label: {
+                        Label("Take Photo", systemImage: "camera")
+                    }
+                }
+
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+    }
+
+    private var nutritionImportSection: some View {
+        Section {
+            Button {
+                showImageSourceDialog = true
+            } label: {
+                Label("Choose Image", systemImage: "photo")
+            }
+            .disabled(remainingImageSlots == 0)
+
+            if pendingImageCount > 0 {
+                HStack {
+                    Label("\(pendingImageCount) image\(pendingImageCount == 1 ? "" : "s") ready", systemImage: "photo.stack")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear") {
+                        selectedPhotoItems = []
+                        capturedImages = []
+                    }
+                    .font(.caption)
+                }
+            }
+
+            Button {
+                Task { await importFromImage() }
+            } label: {
+                Group {
+                    if isImportingOCR {
+                        HStack {
+                            ProgressView()
+                            Text("Filling Nutrients")
+                        }
+                    } else {
+                        Label("Import from Image", systemImage: "wand.and.sparkles")
+                    }
+                }
+                .foregroundStyle(importButtonLooksActive ? Color.accentColor : Color.secondary)
+                .opacity(importButtonLooksActive ? 1 : 0.5)
+            }
+            .disabled(!canImport)
+
+            if let ocrError {
+                Text(ocrError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        } header: {
+            Text("Import Nutrition")
+        } footer: {
+            Text("Type the ingredient name first. After Gemini fills nutrients, name each portion.")
+        }
+    }
+
+    @ViewBuilder
+    private var quickActionsSection: some View {
+        if let base = portions.first {
+            Section("Quick Portions") {
+                Button {
+                    upsertPortion(base.scaledPortion(by: 0.5, label: "Light"))
+                } label: {
+                    Label("Add Light (1/2x)", systemImage: "minus.circle")
+                }
+
+                Button {
+                    upsertPortion(base.scaledPortion(by: 2.0, label: "Extra"))
+                } label: {
+                    Label("Add Extra (2x)", systemImage: "plus.circle")
+                }
+
+                Button {
+                    editingPortion = newBlankPortion()
+                } label: {
+                    Label("Add Custom...", systemImage: "slider.horizontal.3")
+                }
+            }
+        }
+    }
+
+    private var portionsSection: some View {
+        Section("Portions") {
+            if portions.isEmpty {
+                Text("Import nutrition from an image, then name the portions shown by the restaurant or brand.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(portions) { portion in
+                    Button {
+                        editingPortion = portion
+                    } label: {
+                        CalculatorPortionRow(portion: portion)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .onDelete { offsets in
+                    portions.remove(atOffsets: offsets)
+                }
+            }
+
+            if hasUnnamedPortions {
+                Label("Name each imported portion before saving.", systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+
+            Button {
+                editingPortion = newBlankPortion()
+            } label: {
+                Label("Add Portion", systemImage: "plus.circle")
+            }
+        }
+    }
+
+    private func importFromImage() async {
+        isImportingOCR = true
+        ocrError = nil
+        defer { isImportingOCR = false }
+
+        var images: [UIImage] = []
+        for item in selectedPhotoItems {
+            guard let data = try? await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else { continue }
+            images.append(image)
+        }
+        images.append(contentsOf: capturedImages)
+
+        do {
+            let draft = try await scanService.extractCalculatorIngredient(
+                named: trimmedName,
+                from: images,
+                useProModel: useProModel
+            )
+            var labels = Set(portions.map { normalizedPortionLabel($0.label) })
+            let imported = draft.portions.map {
+                CalculatorPortionOption(
+                    label: uniquePortionLabel(preferred: $0.label, existingLabels: &labels),
+                    calories: $0.calories,
+                    protein: $0.protein,
+                    carbs: $0.carbs,
+                    fat: $0.fat,
+                    micronutrients: $0.micronutrients
+                )
+            }
+
+            if imported.isEmpty {
+                ocrError = "No usable portions were found. Try a clearer image."
+            } else {
+                portions.append(contentsOf: imported)
+                selectedPhotoItems = []
+                capturedImages = []
+                editingPortion = imported.first
+            }
+        } catch {
+            ocrError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func upsertPortion(_ portion: CalculatorPortionOption) {
+        let label = portion.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else {
+            editingPortion = portion
+            return
+        }
+
+        var normalized = portion
+        normalized.label = label
+        if let index = portions.firstIndex(where: { $0.id == normalized.id }) {
+            portions[index] = normalized
+        } else if let index = portions.firstIndex(where: {
+            $0.label.caseInsensitiveCompare(label) == .orderedSame
+        }) {
+            portions[index] = normalized
+        } else {
+            portions.append(normalized)
+        }
+    }
+
+    private func newBlankPortion() -> CalculatorPortionOption {
+        CalculatorPortionOption(
+            label: newPortionLabel(),
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0
+        )
+    }
+
+    private func newPortionLabel(preferred: String? = nil) -> String {
+        var labels = Set(portions.map { normalizedPortionLabel($0.label) })
+        return uniquePortionLabel(preferred: preferred, existingLabels: &labels)
+    }
+
+    private func uniquePortionLabel(preferred: String? = nil, existingLabels: inout Set<String>) -> String {
+        let trimmed = preferred?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let base = trimmed.isEmpty ? Self.defaultPortionLabel : trimmed
+        var candidate = base
+        var suffix = 2
+
+        while existingLabels.contains(normalizedPortionLabel(candidate)) {
+            candidate = "\(base) \(suffix)"
+            suffix += 1
+        }
+
+        existingLabels.insert(normalizedPortionLabel(candidate))
+        return candidate
+    }
+
+    private func normalizedPortionLabel(_ label: String) -> String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+}
+
+private struct CalculatorCameraCaptureView: UIViewControllerRepresentable {
+    let onCapture: (UIImage) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.allowsEditing = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+        let parent: CalculatorCameraCaptureView
+
+        init(parent: CalculatorCameraCaptureView) {
+            self.parent = parent
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]
+        ) {
+            if let image = info[.originalImage] as? UIImage {
+                parent.onCapture(image)
+            }
+            parent.dismiss()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            parent.dismiss()
         }
     }
 }
@@ -965,7 +930,7 @@ private struct CalculatorPortionEditorSheet: View {
         NavigationStack {
             Form {
                 Section("Portion") {
-                    TextField("Runtime label", text: $label)
+                    TextField("Portion name", text: $label)
                     macroField("Calories", text: $caloriesText, unit: "cal")
                     macroField("Protein", text: $proteinText, unit: "g")
                     macroField("Carbs", text: $carbsText, unit: "g")
@@ -1049,27 +1014,6 @@ private struct CalculatorPortionEditorSheet: View {
     }
 }
 
-private struct CalculatorGroupRow: View {
-    let group: CalculatorGroup
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(group.name)
-                    .fontWeight(.medium)
-                Text("\(group.selectionRule.label) · \(group.ingredients.count) ingredient\(group.ingredients.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "chevron.right")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-    }
-}
-
 private struct CalculatorIngredientRow: View {
     let ingredient: CalculatorIngredient
 
@@ -1078,7 +1022,7 @@ private struct CalculatorIngredientRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(ingredient.name)
                     .fontWeight(.medium)
-                Text("\(ingredient.portions.count) runtime portion\(ingredient.portions.count == 1 ? "" : "s")")
+                Text("\(ingredient.portions.count) portion\(ingredient.portions.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1095,10 +1039,12 @@ private struct CalculatorPortionRow: View {
     let portion: CalculatorPortionOption
 
     var body: some View {
+        let label = portion.label.trimmingCharacters(in: .whitespacesAndNewlines)
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(portion.label)
+                Text(label.isEmpty ? "Name this portion" : label)
                     .fontWeight(.medium)
+                    .foregroundStyle(label.isEmpty ? Color.orange : Color.primary)
                 Text("\(CalculatorFormat.number(portion.calories)) cal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1110,28 +1056,6 @@ private struct CalculatorPortionRow: View {
                 MacroChip(value: portion.fat, color: .yellow, label: "F")
             }
         }
-    }
-}
-
-private struct CalculatorOCRRowView: View {
-    let row: CalculatorOCRRow
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(row.ingredientName)
-                .fontWeight(.medium)
-            Text("\((row.groupName ?? "Imported")) · \(row.portionLabel)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Text("\(CalculatorFormat.number(row.calories)) cal")
-                MacroChip(value: row.protein, color: .blue, label: "P")
-                MacroChip(value: row.carbs, color: .green, label: "C")
-                MacroChip(value: row.fat, color: .yellow, label: "F")
-            }
-            .font(.caption)
-        }
-        .padding(.vertical, 4)
     }
 }
 
@@ -1167,6 +1091,10 @@ private struct CalculatorMicroDraft: Identifiable {
     var name: String
     var valueText: String
     var unit: String
+}
+
+private func ingredientCountText(_ count: Int) -> String {
+    "\(count) ingredient\(count == 1 ? "" : "s")"
 }
 
 private enum CalculatorFormat {

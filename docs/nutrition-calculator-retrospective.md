@@ -105,21 +105,18 @@ Want me to sketch the concrete `kind: .calculator` extension to `SavedFood` so i
 
 I followed Claude's core recommendation: the calculator is a new `SavedFood.kind == .calculator`, not a separate `FoodCalculator` SwiftData model. That keeps it in the Food Bank, keeps CloudKit schema risk low, and reuses the existing pattern of "saved template now, copied nutrition when logged."
 
-The implementation uses value types under `SavedFood`:
-- `CalculatorGroup` for categories such as rice, protein, salsa, toppings.
-- `CalculatorSelectionRule` for single-choice vs multi-choice groups.
-- `CalculatorIngredient` for the selectable item.
-- `CalculatorPortionOption` for runtime portion labels and absolute nutrition values.
-- `CalculatorSelection` for a user's current build or preset selection.
-- `CalculatorPreset` for reusable builds that recalculate against the current calculator.
+The current implementation uses flat value types under `SavedFood`:
+- `CalculatorIngredient` for each restaurant or brand component.
+- `CalculatorPortionOption` for portion names and absolute nutrition values.
+- `CalculatorSelection` for a user's current build selection: ingredient, portion, quantity.
 
-Portion labels are plain strings entered or imported at runtime. The app does not model a fixed enum for labels like little/normal/extra. Runtime quantity multipliers in the build screen handle cases such as double protein or multiple scoops without changing the saved calculator definition.
+Portion names are plain strings entered by the user after nutrients are filled. The app does not model a fixed enum for labels like little/normal/extra. Quantity multipliers in the build screen handle cases such as double protein or multiple scoops without changing the saved calculator definition.
 
 ## What Shipped
 
 ### Food Bank entry point
 
-`FoodBankView` now adds `Nutrition Calculator` to the same plus menu that already holds AI Search, Composite Food, Open Food Facts, Manual Entry, and Archive. Calculator rows use `SavedFoodRowView` with a calculator icon, group count, and preset count.
+`FoodBankView` now adds `Nutrition Calculator` to the same plus menu that already holds AI Search, Composite Food, Open Food Facts, Manual Entry, and Archive. Calculator rows use `SavedFoodRowView` with a calculator icon and ingredient count.
 
 Tapping a calculator opens `NutritionCalculatorBuildView`; editing opens `NutritionCalculatorEditorView`. Archive and nested edit flows route calculators to those same views.
 
@@ -127,39 +124,36 @@ Tapping a calculator opens `NutritionCalculatorBuildView`; editing opens `Nutrit
 
 `NutritionCalculatorEditorView` supports:
 - Restaurant/brand identity.
-- Groups with required/optional flags and single/multiple selection rules.
-- Ingredients under each group.
-- User-defined runtime portion labels.
+- A flat ingredient list.
+- User-defined portion names.
 - Macro and micronutrient entry per portion.
+- Per-ingredient image import, including photo library and direct camera capture.
+- Portion names entered after nutrient import, so Gemini fills numbers but users assign the actual restaurant/brand labels before saving.
+- Quick Light (1/2x), Extra (2x), and Custom portion creation from the first portion.
 - Deleting calculators without affecting old logged entries.
 
-Draft rows are only inserted when the nested editor is saved. Cancelling an "Add Group", "Add Ingredient", or "Add Portion" sheet does not leave a placeholder behind.
+Draft rows are only inserted when the nested editor is saved. Cancelling an "Add Ingredient" or "Add Portion" sheet does not leave a placeholder behind.
 
 ### Gemini OCR import
 
-`ScanService.extractCalculatorRows(from:useProModel:)` accepts up to 4 screenshots/photos and asks Gemini for staged `CalculatorOCRRow` values. The prompt explicitly says portion labels are runtime user data and should not be normalized to a fixed list.
+`ScanService.extractCalculatorIngredient(named:from:useProModel:)` accepts up to 4 images for one user-named ingredient. The typed name anchors Gemini so it fills only that ingredient's portions instead of inventing a full calculator structure.
 
-The editor shows OCR rows for review. They only become calculator groups/ingredients/portions after the user taps `Import Reviewed Rows`.
+The ingredient editor appends returned nutrition as unnamed portions for review. Users then enter the actual portion names before saving the ingredient.
 
 ### Build and logging flow
 
 `NutritionCalculatorBuildView` separates meal-building from authoring:
-- Pick one option in single-choice groups.
-- Pick one portion per ingredient in multi-choice groups.
-- Adjust runtime quantity multipliers for selected items.
+- Pick one portion per ingredient.
+- Adjust quantity multipliers for selected items.
 - See live macro totals.
-- Save build presets.
 - Add the build to the journal.
 
 Logging creates a normal `NutritionEntry` with copied macros, micronutrients, `savedFoodID`, `servingUnit = "build"`, and a human-readable `selectionSummary`. Old entries are immutable snapshots; later calculator edits affect only future logs.
 
-Preset IDs can dangle after calculator edits. Applying a preset filters missing selections and shows a warning instead of crashing or silently logging missing items.
-
 ### Export/import
 
 Backup DTOs now include:
-- `SavedFood.calculatorGroups`
-- `SavedFood.calculatorPresets`
+- `SavedFood.calculatorIngredients`
 - `NutritionEntry.selectionSummary`
 
 These are additive fields under schema version 1. Older backup files still decode with defaults for missing calculator data.
@@ -168,7 +162,7 @@ CSV export now includes `Selection Summary` for analytics visibility.
 
 ### Project knowledge
 
-The README and `.agents/skills/openfoodjournal` references were updated so future agents see calculators as a third saved-food kind, understand the runtime portion-label rule, and know the new scan/OCR and backup surface area.
+The README and `.agents/skills/openfoodjournal` references were updated so future agents see calculators as a third saved-food kind, understand the portion naming rule, and know the new scan/OCR and backup surface area.
 
 ## Things I Ran Into
 
