@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -32,6 +33,33 @@ TABLES = [
 ]
 
 
+def load_env_file(path: str | None) -> dict[str, str]:
+    if not path or not os.path.exists(path):
+        return {}
+
+    values: dict[str, str] = {}
+    with open(path, encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key.startswith("export "):
+                key = key[len("export ") :].strip()
+            values[key] = value
+    return values
+
+
+def first_present(values: dict[str, str], keys: list[str]) -> str | None:
+    for key in keys:
+        value = os.environ.get(key) or values.get(key)
+        if value:
+            return value
+    return None
+
+
 def normalize_url(value: str) -> str:
     value = value.strip().rstrip("/")
     if value.startswith("libsql://"):
@@ -49,7 +77,7 @@ def sql_value(value: Any) -> dict[str, Any]:
     if isinstance(value, int):
         return {"type": "integer", "value": str(value)}
     if isinstance(value, float):
-        return {"type": "float", "value": str(value)}
+        return {"type": "float", "value": value}
     return {"type": "text", "value": str(value)}
 
 
@@ -67,6 +95,7 @@ class TursoClient:
     def __init__(self, url: str, token: str) -> None:
         self.url = normalize_url(url)
         self.token = token.strip()
+        self.ssl_context = default_ssl_context()
         if not self.token:
             raise SystemExit("Turso auth token is required")
 
@@ -94,7 +123,7 @@ class TursoClient:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=30, context=self.ssl_context) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
@@ -118,6 +147,13 @@ class TursoClient:
         for raw_row in result.get("rows", []):
             rows.append({name: cell_value(raw_row[index]) for index, name in enumerate(cols)})
         return rows
+
+
+def default_ssl_context() -> ssl.SSLContext:
+    macos_cert_file = "/private/etc/ssl/cert.pem"
+    if os.path.exists(macos_cert_file):
+        return ssl.create_default_context(cafile=macos_cert_file)
+    return ssl.create_default_context()
 
 
 def print_rows(rows: list[dict[str, Any]]) -> None:
@@ -229,10 +265,26 @@ def command_raw_sql(client: TursoClient, sql: str, allow_write: bool) -> None:
     print_rows(client.execute(sql))
 
 
+def command_typed_args_smoke_test(client: TursoClient) -> None:
+    print_rows(
+        client.execute(
+            """
+            SELECT
+              ? AS null_value,
+              ? AS integer_value,
+              ? AS float_value,
+              ? AS text_value
+            """,
+            [None, 42, 3.5, "milk"],
+        )
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Inspect an OpenFoodJournal Turso mirror")
-    parser.add_argument("--url", default=os.environ.get("TURSO_DATABASE_URL"), help="Turso database URL")
-    parser.add_argument("--token", default=os.environ.get("TURSO_AUTH_TOKEN"), help="Turso auth token")
+    parser.add_argument("--url", help="Turso database URL")
+    parser.add_argument("--token", help="Turso auth token")
+    parser.add_argument("--env-file", default=".env", help="Optional dotenv file for Turso credentials")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("summary")
@@ -255,17 +307,22 @@ def build_parser() -> argparse.ArgumentParser:
     raw.add_argument("sql")
     raw.add_argument("--allow-write", action="store_true")
 
+    subparsers.add_parser("typed-args-smoke-test")
+
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    if not args.url:
-        raise SystemExit("Set TURSO_DATABASE_URL or pass --url")
-    if not args.token:
-        raise SystemExit("Set TURSO_AUTH_TOKEN or pass --token")
+    env_file = load_env_file(args.env_file)
+    url = args.url or first_present(env_file, ["TURSO_DATABASE_URL", "LIBSQL_DATABASE_URL", "TURSO_DB_URL"])
+    token = args.token or first_present(env_file, ["TURSO_AUTH_TOKEN", "LIBSQL_AUTH_TOKEN", "TURSO_DATABASE_TOKEN"])
+    if not url:
+        raise SystemExit("Set TURSO_DATABASE_URL in the environment/.env or pass --url")
+    if not token:
+        raise SystemExit("Set TURSO_AUTH_TOKEN in the environment/.env or pass --token")
 
-    client = TursoClient(args.url, args.token)
+    client = TursoClient(url, token)
     if args.command == "summary":
         command_summary(client)
     elif args.command == "day":
@@ -280,6 +337,8 @@ def main() -> int:
         command_gemini_failures(client, args.days)
     elif args.command == "raw-sql":
         command_raw_sql(client, args.sql, args.allow_write)
+    elif args.command == "typed-args-smoke-test":
+        command_typed_args_smoke_test(client)
     return 0
 
 

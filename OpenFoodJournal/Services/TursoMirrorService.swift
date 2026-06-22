@@ -59,7 +59,7 @@ enum TursoSQLValue: Encodable, Equatable, Sendable {
             try container.encode(String(value), forKey: .value)
         case .real(let value):
             try container.encode("float", forKey: .type)
-            try container.encode(String(value), forKey: .value)
+            try container.encode(value, forKey: .value)
         case .text(let value):
             try container.encode("text", forKey: .type)
             try container.encode(value, forKey: .value)
@@ -175,8 +175,7 @@ enum TursoSchema {
             .init(name: "serving_json", type: "TEXT"),
             .init(name: "serving_mappings_json", type: "TEXT"),
             .init(name: "composite_ingredients_json", type: "TEXT"),
-            .init(name: "calculator_groups_json", type: "TEXT"),
-            .init(name: "calculator_presets_json", type: "TEXT"),
+            .init(name: "calculator_ingredients_json", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
         TursoTableDefinition(name: "ofj_tracked_containers", columns: [
@@ -785,8 +784,7 @@ final class TursoMirrorService {
                 "serving_json": optionalJSON(food.serving),
                 "serving_mappings_json": .text(jsonString(food.servingMappings)),
                 "composite_ingredients_json": .text(jsonString(food.compositeIngredients)),
-                "calculator_groups_json": .text(jsonString(food.calculatorGroups)),
-                "calculator_presets_json": .text(jsonString(food.calculatorPresets)),
+                "calculator_ingredients_json": .text(jsonString(food.calculatorIngredients)),
                 "mirror_generation": .text(generation)
             ]))
         }

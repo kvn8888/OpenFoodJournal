@@ -30,7 +30,7 @@ The implementation followed this plan:
 - Accept both `libsql://...` and `https://...`, normalizing `libsql://` into the HTTPS endpoint used by Turso SQL-over-HTTP.
 - Use Turso SQL-over-HTTP directly through `/v2/pipeline`, not the Swift SDK and not a proxy server.
 - Keep the schema namespaced with `ofj_*` tables so it does not collide with old server tables.
-- Mirror normalized rows, using JSON columns for complex Swift value fields such as micronutrients, serving mappings, composite ingredients, calculator groups, calculator presets, and Gemini thinking traces.
+- Mirror normalized rows, using JSON columns for complex Swift value fields such as micronutrients, serving mappings, composite ingredients, calculator ingredients, and Gemini thinking traces.
 - Include Gemini logs and cost accumulator rows by default, while excluding API keys, Turso tokens, raw image bytes, raw photos, and HealthKit authorization tokens.
 - Use `CREATE TABLE IF NOT EXISTS` plus `PRAGMA table_info(table)` for additive migrations. SQLite/libSQL does not support `ALTER TABLE ADD COLUMN IF NOT EXISTS`, so the missing-column check has to be explicit.
 - Use a `mirror_generation` per run: upsert current rows for a table, then prune older generations for that table after its batch succeeds.

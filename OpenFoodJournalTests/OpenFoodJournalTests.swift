@@ -30,17 +30,17 @@ struct OpenFoodJournalTests {
 
         let data = try JSONEncoder().encode(statement)
         let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        let args = try #require(json["args"] as? [[String: String]])
+        let args = try #require(json["args"] as? [[String: Any]])
 
-        #expect(args[0]["type"] == "null")
-        #expect(args[1]["type"] == "integer")
-        #expect(args[1]["value"] == "42")
-        #expect(args[2]["type"] == "float")
-        #expect(args[2]["value"] == "3.5")
-        #expect(args[3]["type"] == "text")
-        #expect(args[3]["value"] == "milk")
-        #expect(args[4]["type"] == "blob")
-        #expect(args[4]["base64"] == "AQI=")
+        #expect(args[0]["type"] as? String == "null")
+        #expect(args[1]["type"] as? String == "integer")
+        #expect(args[1]["value"] as? String == "42")
+        #expect(args[2]["type"] as? String == "float")
+        #expect(args[2]["value"] as? Double == 3.5)
+        #expect(args[3]["type"] as? String == "text")
+        #expect(args[3]["value"] as? String == "milk")
+        #expect(args[4]["type"] as? String == "blob")
+        #expect(args[4]["base64"] as? String == "AQI=")
     }
 
     @Test func tursoMigrationStatementsCoverEveryMirrorTable() {
