@@ -1848,7 +1848,7 @@ extension ScanService {
         Rules:
         - If the source lists multiple serving sizes for this one item (e.g. 4 oz vs 8 oz, single vs double, regular vs large), return ONE portion object per size, using the visible source label only to distinguish the nutrition values.
         - If only one amount is shown, return a single portion using the visible serving label, or an empty label if none is visible.
-        - Do not invent app portion names such as Light, Normal, or Extra. The app will default missing portion labels to Normal.
+        - Do not invent app portion names such as light, normal, or extra. The app will default missing portion labels to normal.
         - Do not invent extra sizes. Do not return other ingredients.
         - Use 0 for a macro only when the source explicitly shows 0; omit micronutrients you can't read.
         - Prefer canonical micronutrient IDs: fiber, added_sugars, sugar, sodium, cholesterol, saturated_fat, trans_fat, calcium, iron, potassium, vitamin_a, vitamin_c, vitamin_d.

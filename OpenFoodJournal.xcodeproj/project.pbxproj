@@ -29,9 +29,22 @@
 		0EC7C2E32F6CD5D40012BC87 /* OpenFoodJournalUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenFoodJournalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		0EC7C3002F7550010012BC87 /* Exceptions for "OpenFoodJournal" folder in "OpenFoodJournal" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 0EC7C2C62F6CD5D30012BC87 /* OpenFoodJournal */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		0EC7C2C92F6CD5D30012BC87 /* OpenFoodJournal */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				0EC7C3002F7550010012BC87 /* Exceptions for "OpenFoodJournal" folder in "OpenFoodJournal" target */,
+			);
 			path = OpenFoodJournal;
 			sourceTree = "<group>";
 		};
@@ -399,7 +412,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenFoodJournal/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "OpenFoodJournal reads your active energy data to help track your daily calorie balance.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "OpenFoodJournal writes nutrition data to help you track your food intake.";
@@ -437,7 +451,8 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = OpenFoodJournal/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "OpenFoodJournal reads your active energy data to help track your daily calorie balance.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "OpenFoodJournal writes nutrition data to help you track your food intake.";

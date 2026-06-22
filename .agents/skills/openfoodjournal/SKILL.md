@@ -174,8 +174,8 @@ Food Bank "+" → Nutrition Calculator
   → User defines restaurant/brand identity and a flat list of ingredients with portion names
   → Ingredient editor can call Gemini OCR on images for the user-named ingredient only
   → Image import stays visibly disabled until the ingredient has a name and at least one image is selected
-  → OCR fills nutrition first; imported portions keep source labels when available, otherwise default to "Normal"
-  → Manually added portions also default to "Normal" instead of opening with a blank name
+  → OCR fills nutrition first; imported portions keep source labels when available, otherwise default to "normal"
+  → Manually added portions also default to "normal" as actual field text instead of opening with a blank placeholder
   → Calculator ingredients are stored as Codable value arrays on SavedFood, not relationships
   → Build opens NutritionCalculatorBuildView
   → User chooses one portion per ingredient, adjusts quantities, and sees live macro totals
@@ -353,7 +353,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Gemini scans/searches call the Gemini REST API directly from the device using the user's BYOK key; no Render proxy is used by the current app path
 - Food Bank: save foods from scan/manual entry, build composite foods from snapshot ingredient portions, browse/search/sort active foods, auto-hide foods unused for over 14 days, manually archive/unarchive foods, log archived foods from search or Archive
-- Nutrition Calculator: calculators are `SavedFood(kind: .calculator)` rows with flat ingredient/portion snapshots. OCR import is name-first per ingredient: type an ingredient name, choose an image from the library or camera, Gemini fills nutrients, and portion rows default to a visible "Normal" label when no source label exists.
+- Nutrition Calculator: calculators are `SavedFood(kind: .calculator)` rows with flat ingredient/portion snapshots. OCR import is name-first per ingredient: type an ingredient name, choose an image from the library or camera, Gemini fills nutrients, and portion rows default to visible `normal` field text when no source label exists.
 - Keyboard UX: tapping outside a text input dismisses the keyboard app-wide via `CursorEndModifier`, while taps still pass through to buttons/lists.
 - Settings Data: spreadsheet CSV export plus versioned JSON backup export/import. JSON import is idempotent by UUID.
 - **Gemini scan UX**: loading overlay can show streamed thought-summary trace, result sheet and scan page can redo the last submitted photo set, and camera view has 0.5x/1x/2x zoom controls

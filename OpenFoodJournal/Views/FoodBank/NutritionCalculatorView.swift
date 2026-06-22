@@ -525,10 +525,15 @@ private struct CalculatorIngredientEditorSheet: View {
         self.onSave = onSave
         _name = State(initialValue: ingredient.name)
         _note = State(initialValue: ingredient.note ?? "")
-        _portions = State(initialValue: ingredient.portions)
+        var labels: Set<String> = []
+        _portions = State(initialValue: ingredient.portions.map { portion in
+            var normalized = portion
+            normalized.label = Self.uniquePortionLabel(preferred: portion.label, existingLabels: &labels)
+            return normalized
+        })
     }
 
-    private static let defaultPortionLabel = "Normal"
+    fileprivate static let defaultPortionLabel = "normal"
 
     private var trimmedName: String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -772,7 +777,7 @@ private struct CalculatorIngredientEditorSheet: View {
             var labels = Set(portions.map { normalizedPortionLabel($0.label) })
             let imported = draft.portions.map {
                 CalculatorPortionOption(
-                    label: uniquePortionLabel(preferred: $0.label, existingLabels: &labels),
+                    label: Self.uniquePortionLabel(preferred: $0.label, existingLabels: &labels),
                     calories: $0.calories,
                     protein: $0.protein,
                     carbs: $0.carbs,
@@ -826,10 +831,10 @@ private struct CalculatorIngredientEditorSheet: View {
 
     private func newPortionLabel(preferred: String? = nil) -> String {
         var labels = Set(portions.map { normalizedPortionLabel($0.label) })
-        return uniquePortionLabel(preferred: preferred, existingLabels: &labels)
+        return Self.uniquePortionLabel(preferred: preferred, existingLabels: &labels)
     }
 
-    private func uniquePortionLabel(preferred: String? = nil, existingLabels: inout Set<String>) -> String {
+    private static func uniquePortionLabel(preferred: String? = nil, existingLabels: inout Set<String>) -> String {
         let trimmed = preferred?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let base = trimmed.isEmpty ? Self.defaultPortionLabel : trimmed
         var candidate = base
@@ -844,8 +849,12 @@ private struct CalculatorIngredientEditorSheet: View {
         return candidate
     }
 
-    private func normalizedPortionLabel(_ label: String) -> String {
+    private static func normalizedPortionLabel(_ label: String) -> String {
         label.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func normalizedPortionLabel(_ label: String) -> String {
+        Self.normalizedPortionLabel(label)
     }
 }
 
@@ -907,7 +916,8 @@ private struct CalculatorPortionEditorSheet: View {
     init(portion: CalculatorPortionOption, onSave: @escaping (CalculatorPortionOption) -> Void) {
         self.portion = portion
         self.onSave = onSave
-        _label = State(initialValue: portion.label)
+        let initialLabel = portion.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        _label = State(initialValue: initialLabel.isEmpty ? CalculatorIngredientEditorSheet.defaultPortionLabel : initialLabel)
         _caloriesText = State(initialValue: CalculatorFormat.number(portion.calories))
         _proteinText = State(initialValue: CalculatorFormat.number(portion.protein))
         _carbsText = State(initialValue: CalculatorFormat.number(portion.carbs))
@@ -919,7 +929,7 @@ private struct CalculatorPortionEditorSheet: View {
     }
 
     private var canSave: Bool {
-        !label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !trimmedLabel.isEmpty &&
         Double(caloriesText) != nil &&
         Double(proteinText) != nil &&
         Double(carbsText) != nil &&
@@ -990,7 +1000,7 @@ private struct CalculatorPortionEditorSheet: View {
 
         return CalculatorPortionOption(
             id: portion.id,
-            label: label.trimmingCharacters(in: .whitespacesAndNewlines),
+            label: trimmedLabel.isEmpty ? CalculatorIngredientEditorSheet.defaultPortionLabel : trimmedLabel,
             calories: Double(caloriesText) ?? 0,
             protein: Double(proteinText) ?? 0,
             carbs: Double(carbsText) ?? 0,
@@ -1011,6 +1021,10 @@ private struct CalculatorPortionEditorSheet: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .leading)
         }
+    }
+
+    private var trimmedLabel: String {
+        label.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -1040,11 +1054,12 @@ private struct CalculatorPortionRow: View {
 
     var body: some View {
         let label = portion.label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayLabel = label.isEmpty ? CalculatorIngredientEditorSheet.defaultPortionLabel : label
         HStack {
             VStack(alignment: .leading, spacing: 4) {
-                Text(label.isEmpty ? "Name this portion" : label)
+                Text(displayLabel)
                     .fontWeight(.medium)
-                    .foregroundStyle(label.isEmpty ? Color.orange : Color.primary)
+                    .foregroundStyle(Color.primary)
                 Text("\(CalculatorFormat.number(portion.calories)) cal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
