@@ -57,7 +57,12 @@ struct AIFoodSearchView: View {
             }
             .overlay {
                 if scanService.isScanning {
-                    AIThinkingProgressView(scanService: scanService)
+                    AIThinkingProgressView(
+                        progressMessage: scanService.scanProgressMessage,
+                        thinkingTrace: scanService.thinkingTrace,
+                        thinkingTraceUpdateCount: scanService.thinkingTraceUpdateCount,
+                        expectsThinkingTrace: scanService.expectsThinkingTrace
+                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.ultraThinMaterial)
                 }
@@ -136,7 +141,10 @@ struct AIFoodSearchView: View {
 }
 
 private struct AIThinkingProgressView: View {
-    let scanService: ScanService
+    let progressMessage: String
+    let thinkingTrace: [String]
+    let thinkingTraceUpdateCount: Int
+    let expectsThinkingTrace: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -145,23 +153,33 @@ private struct AIThinkingProgressView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Searching nutrition data...")
                         .font(.subheadline.weight(.semibold))
-                    Text(scanService.scanProgressMessage)
+                    Text(progressMessage)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
 
-            if !scanService.thinkingTrace.isEmpty {
+            if expectsThinkingTrace || !thinkingTrace.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Gemini thought summaries", systemImage: "brain.head.profile")
+                    Label("Gemini is thinking", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
 
-                    ForEach(Array(scanService.thinkingTrace.enumerated()), id: \.offset) { _, trace in
-                        Text(trace)
+                    Text("Thought summaries: \(thinkingTraceUpdateCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    if thinkingTrace.isEmpty {
+                        Text("Waiting for Gemini thought summaries...")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
-                            .lineLimit(4)
-                            .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        ForEach(Array(thinkingTrace.enumerated()), id: \.offset) { _, trace in
+                            Text(trace)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
             }

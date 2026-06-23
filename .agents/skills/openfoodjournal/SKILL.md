@@ -64,7 +64,7 @@ See [references/models.md](references/models.md) for full property lists.
 See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `saveEntry()`, `repairDailyLogEntryRelationships()`, `exportCSV()`, `exportBackup()`, `importBackup()`. CSV is spreadsheet/analytics only. Restore-grade backup uses versioned JSON DTOs in `OpenFoodJournalBackup.swift` and imports idempotently by UUID. Local/iCloud remain source of truth; successful saves schedule the optional Turso mirror when enabled.
-- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Gemini `inline_data` part in one direct REST API call (`generativelanguage.googleapis.com`) → `NutritionEntry` (not yet inserted). Uses `streamGenerateContent?alt=sse` with Gemini `includeThoughts` so thought-summary parts update `thinkingTrace` in the loading overlay while the scan/search is in flight; only non-thinking parts are accumulated as final nutrition JSON. Also supports Food Bank AI Search via Gemini `google_search` grounding and returns a reviewable `NutritionEntry`, plus nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)` which fills portions for one user-named ingredient at a time. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite scans and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
+- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Interactions API `image` content block in one direct REST API call (`generativelanguage.googleapis.com/v1beta/interactions`) → `NutritionEntry` (not yet inserted). Uses streamed Interactions SSE with `generation_config.thinking_summaries = "auto"` so `step.delta` events with `delta.type == "thought_summary"` update `thinkingTrace` in the loading overlay while the scan/search is in flight; `delta.type == "text"` is accumulated as final nutrition JSON. Gemini may emit only one late thought-summary event for a request; do not fake streaming by delaying the final nutrition sheet just to display that late summary. DEBUG builds print compact SSE timing lines and attempt logs store first/last thought-summary and text-delta timings for diagnosing true stream behavior. Also supports Food Bank AI Search via Interactions `google_search` grounding and returns a reviewable `NutritionEntry`, plus nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)` which fills portions for one user-named ingredient at a time. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite scans and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
 - **`TursoMirrorService`** — Optional `@Observable @MainActor` direct SQL-over-HTTP mirror to a user-provided Turso database. Credentials are Keychain-only (`turso-database-url`, `turso-auth-token`); non-secret state uses `turso.enabled`, `turso.includeDiagnostics`, `turso.lastSyncAt`, `turso.lastError`, and `turso.lastRowCount`. Uses `/health` for connection tests and `/v2/pipeline` for migrations/mirroring. It is push-only, generation-pruned, non-blocking, and never reads Turso back into SwiftData.
 - **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`, and optional Turso mirror credentials under `turso-database-url` / `turso-auth-token`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`, `hasTursoCredentials`, `tursoDatabaseURL`, `tursoAuthToken`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
@@ -84,9 +84,9 @@ User taps Scan → CameraController (AVCaptureSession) → 1-4 photos
   → Prompt overlay: review thumbnails, optionally add another angle or library photos
   → Food photo shows text input, label scan skips prompt
   → ScanService.scan(images, mode) → loads API key from KeychainService
-  → Resizes/JPEG-encodes each image and builds JSON request with one inline_data part per photo + prompt
-  → POST to https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?key={key}&alt=sse
-  → Loading overlay shows scan stage plus recent Gemini thought-summary parts (`part.thought == true`)
+  → Resizes/JPEG-encodes each image and builds an Interactions request with one image content block per photo + prompt
+  → POST to https://generativelanguage.googleapis.com/v1beta/interactions with x-goog-api-key header
+  → Loading overlay shows scan stage plus recent Gemini thought-summary deltas (`step.delta` / `delta.type == "thought_summary"`)
   → ContinuousClock measures full round-trip duration
   → Label mode: gemini-flash-latest (fast, minimal thinking)
   → Food photo mode: gemini-pro-latest (high thinking for estimation)
@@ -130,7 +130,7 @@ User taps "Search Open Food Facts" in Food Bank "+" menu
 User taps "AI Search" in Food Bank "+" menu
   → AIFoodSearchView with a search-style prompt row and arrow submit button
   → ScanService.searchNutrition(query, useProModel) loads API key from KeychainService
-  → Builds Gemini JSON request with tools: [{"google_search": {}}]
+  → Builds Gemini Interactions request with tools: [{"type": "google_search"}]
   → Uses gemini-flash-latest by default or gemini-pro-latest when Settings "Use Gemini Pro for AI" is enabled
   → Parses JSON nutrition response → NutritionEntry (NOT inserted yet)
   → ManualEntryView(defaultDate:, prefill:) opens for editable review
@@ -217,6 +217,17 @@ or update the OpenFoodJournal GitHub Projects v2 kanban board. The helper wraps
 `gh project` with repo defaults so agents can avoid retyping owner/repo/project
 arguments.
 
+**Script maintenance**: Treat the repo-local path above as the stable command
+entrypoint, but do not assume it is the canonical source file forever. This
+helper may later become a symlink to a shared GitHub Projects utility used by
+OpenFoodJournal and CodeGym. Before changing the script, resolve the real file
+with `realpath .agents/skills/openfoodjournal/scripts/github_project_board.py`
+or `readlink`, then modify the resolved canonical file and update this skill if
+the shared location changes. Do not patch a stale copied script while another
+project points at the shared target. If this is centralized, prefer a neutral
+shared-tools location near the sibling repos instead of making one app repo own
+the other app repo's utility.
+
 Requirements:
 - `gh auth status` must show `repo` and `project` scopes.
 - Default owner/repo: `kvn8888/OpenFoodJournal`.
@@ -237,6 +248,8 @@ python .agents/skills/openfoodjournal/scripts/github_project_board.py add-issue 
 python .agents/skills/openfoodjournal/scripts/github_project_board.py move 4 "In Progress"
 python .agents/skills/openfoodjournal/scripts/github_project_board.py create-issue --title "Bug title" --body-file /tmp/body.md --label area:healthkit,type:bug,priority:p0 --status Todo --priority P0 --size M
 python .agents/skills/openfoodjournal/scripts/github_project_board.py edit-issue 10 --body-file /tmp/body.md --add-label area:healthkit --status Todo --priority P0
+python .agents/skills/openfoodjournal/scripts/github_project_board.py check-criteria 10 --all
+python .agents/skills/openfoodjournal/scripts/github_project_board.py check-criteria 10 "AI Search overlay"
 python .agents/skills/openfoodjournal/scripts/github_project_board.py set-fields 10 --status "In Progress" --priority P0 --size M
 ```
 
@@ -294,7 +307,7 @@ Settings → Data → Export Gemini Logs
 16. **Day UI depends on `DailyLog.entries`; CSV export fetches `NutritionEntry` directly** — if entries export but older days look empty, suspect orphaned or duplicate `DailyLog` relationships, not deleted food data. `repairDailyLogEntryRelationships()` runs on launch and is intentionally idempotent so it can reattach entries after CloudKit sync catches up.
 17. **`KnownMicronutrient.Category` cases are `.vitamin`/`.mineral`** — not `.vitamins`/`.minerals`. The enum raw values are plural ("Vitamins"/"Minerals") but the Swift case names are singular.
 18. **`@Observable` should only track UI state** — mark framework infrastructure with `@ObservationIgnored` (`ModelContext`, `URLSession`, `HKHealthStore`, `AVCaptureSession`, `AVCaptureDevice/Input`, continuations). Leaving dispatch/AVFoundation/HealthKit internals observable can surface runtime-only Objective-C selector crashes such as `_setContext:` on dispatch-backed objects. For `NSObject` delegate controllers like `CameraController`, prefer `ObservableObject` + `@StateObject` with `@Published` UI state instead of `@Observable`.
-19. **Gemini SSE payloads may batch multiple JSON objects** — `streamGenerateContent?alt=sse` can deliver several `data:` JSON objects before a blank event separator. `ScanService.consumeGeminiStreamEvent` must handle both a single JSON object and newline-separated JSON fragments; otherwise logs show `parseStage=stream_event_decode`, HTTP 200, and raw response JSON containing multiple valid objects.
+19. **Gemini Interactions streams typed events** — `ScanService` should parse `event:` + `data:` lines and route `step.delta` by `delta.type`: `thought_summary` updates the visible thinking trace, `text` accumulates final JSON, and `interaction.completed` / `step.stop` usage updates cost and grounding metadata. Do not wait for blank SSE separators before consuming Interactions `data:` JSON; observed responses can arrive as newline-delimited data lines and blank-line batching delays every visible update until `[DONE]`. The API still does not guarantee multiple progressive thought-summary chunks; for many scans it may emit one late summary. Do not add artificial post-summary delays as a substitute for real streaming. Keep DEBUG timing logs and attempt timing fields useful enough to prove whether summaries arrived before or alongside final text. Keep API keys in the `x-goog-api-key` header rather than query strings so exported diagnostics never contain secrets.
 
 ## What's New Sheet Pattern
 
@@ -357,7 +370,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 - Keyboard UX: tapping outside a text input dismisses the keyboard app-wide via `CursorEndModifier`, while taps still pass through to buttons/lists.
 - Settings Data: spreadsheet CSV export plus versioned JSON backup export/import. JSON import is idempotent by UUID.
 - Apple Health repair: Settings can force-rewrite OpenFoodJournal-owned HealthKit nutrition samples for every entry, using deterministic sync identifiers so historical macro-only writes can be replaced without duplicating samples.
-- **Gemini scan UX**: loading overlay can show streamed thought-summary trace, result sheet and scan page can redo the last submitted photo set, and camera view has 0.5x/1x/2x zoom controls
+- **Gemini scan UX**: loading overlay shows Interactions API streamed thought-summary trace, result sheet and scan page can redo the last submitted photo set, and camera view has 0.5x/1x/2x zoom controls
 - **Open Food Facts integration**: Enter-only search, zero-calorie/no-usable-nutrition rows filtered out, add to journal/food bank, per-serving nutrition
 - **Food Bank "+" toolbar menu**: AI Search, Composite Food, Nutrition Calculator, Search Open Food Facts, Manual Entry, Archive (replaces empty-state-only guidance)
 - **Settings: OFF contribute toggle/status** (`off.contributeEnabled`, default off; `off.contributionSuccessCount` and `off.lastContributionAt` show confirmed on-device upload history)

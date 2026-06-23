@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from typing import Any
 DEFAULT_OWNER = "kvn8888"
 DEFAULT_REPO = "OpenFoodJournal"
 DEFAULT_PROJECT_TITLE = "OpenFoodJournal"
+CHECKBOX_RE = re.compile(r"^(\s*[-*]\s+\[)( |x|X)(\]\s+)(.*)$")
+HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 
 
 class BoardError(RuntimeError):
@@ -34,9 +37,9 @@ class Project:
     url: str
 
 
-def run_gh(*args: str, json_output: bool = False) -> Any:
+def run_gh(*args: str, json_output: bool = False, input_text: str | None = None) -> Any:
     command = ["gh", *args]
-    result = subprocess.run(command, text=True, capture_output=True, check=False)
+    result = subprocess.run(command, text=True, input=input_text, capture_output=True, check=False)
     if result.returncode != 0:
         message = result.stderr.strip() or result.stdout.strip()
         raise BoardError(f"{' '.join(command)} failed: {message}")
@@ -230,6 +233,85 @@ def issue_body(body: str | None, body_file: str | None) -> str:
     return body or ""
 
 
+def fetch_issue_body(args: argparse.Namespace, number: int) -> str:
+    data = run_gh(
+        "issue",
+        "view",
+        str(number),
+        "--repo",
+        repo_slug(args),
+        "--json",
+        "body",
+        json_output=True,
+    )
+    return data.get("body") or ""
+
+
+def update_issue_body(args: argparse.Namespace, number: int, body: str) -> None:
+    run_gh(
+        "issue",
+        "edit",
+        str(number),
+        "--repo",
+        repo_slug(args),
+        "--body-file",
+        "-",
+        input_text=body,
+    )
+
+
+def normalize_heading(value: str) -> str:
+    return value.strip().strip("#").strip().lower()
+
+
+def section_bounds(lines: list[str], section: str | None) -> tuple[int, int]:
+    if not section:
+        return 0, len(lines)
+
+    target = normalize_heading(section)
+    start: int | None = None
+    level: int | None = None
+
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line)
+        if not match:
+            continue
+        if normalize_heading(match.group(2)) == target:
+            start = index + 1
+            level = len(match.group(1))
+            break
+
+    if start is None or level is None:
+        raise BoardError(f"No Markdown section matching {section!r}.")
+
+    end = len(lines)
+    for index in range(start, len(lines)):
+        match = HEADING_RE.match(lines[index])
+        if match and len(match.group(1)) <= level:
+            end = index
+            break
+
+    return start, end
+
+
+def criteria_matches(text: str, patterns: list[str], regex: bool) -> bool:
+    if not patterns:
+        return False
+    if regex:
+        return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+    lowered = text.lower()
+    return any(pattern.lower() in lowered for pattern in patterns)
+
+
+@dataclass(frozen=True)
+class ChecklistUpdate:
+    body: str
+    matched: int
+    changed: int
+    checked: int
+    unchecked: int
+
+
 def split_labels(labels: list[str] | None) -> list[str]:
     if not labels:
         return []
@@ -237,6 +319,63 @@ def split_labels(labels: list[str] | None) -> list[str]:
     for label in labels:
         values.extend(part.strip() for part in label.split(",") if part.strip())
     return values
+
+
+def update_checklist_items(
+    body: str,
+    *,
+    patterns: list[str],
+    all_items: bool,
+    section: str | None,
+    checked: bool,
+    regex: bool,
+) -> ChecklistUpdate:
+    if not all_items and not patterns:
+        raise BoardError("Pass --all or at least one checklist text pattern.")
+
+    had_trailing_newline = body.endswith("\n")
+    lines = body.splitlines()
+    start, end = section_bounds(lines, section)
+    matched = 0
+    changed = 0
+    checked_count = 0
+    unchecked_count = 0
+    target_marker = "x" if checked else " "
+
+    for index in range(start, end):
+        match = CHECKBOX_RE.match(lines[index])
+        if not match:
+            continue
+        text = match.group(4)
+        if not all_items and not criteria_matches(text, patterns, regex):
+            continue
+
+        matched += 1
+        current_marker = match.group(2).lower()
+        if current_marker == "x":
+            checked_count += 1
+        else:
+            unchecked_count += 1
+
+        if current_marker != target_marker:
+            lines[index] = f"{match.group(1)}{target_marker}{match.group(3)}{text}"
+            changed += 1
+
+    if matched == 0:
+        scope = "the issue body" if section is None else f"section {section!r}"
+        raise BoardError(f"No checklist items matched in {scope}.")
+
+    new_body = "\n".join(lines)
+    if had_trailing_newline:
+        new_body += "\n"
+
+    return ChecklistUpdate(
+        body=new_body,
+        matched=matched,
+        changed=changed,
+        checked=checked_count,
+        unchecked=unchecked_count,
+    )
 
 
 def issue_number_from_url(url: str) -> int:
@@ -387,6 +526,41 @@ def cmd_edit_issue(args: argparse.Namespace) -> None:
         print(f"Updated project item: `{item_id}`")
 
 
+def cmd_check_criteria(args: argparse.Namespace) -> None:
+    section = None if args.all_sections else args.section
+    update = update_checklist_items(
+        fetch_issue_body(args, args.number),
+        patterns=args.pattern,
+        all_items=args.all,
+        section=section,
+        checked=not args.uncheck,
+        regex=args.regex,
+    )
+    action = "checked" if not args.uncheck else "unchecked"
+    scope = "entire issue body" if section is None else f"{section!r}"
+
+    if args.dry_run:
+        print(
+            f"Dry run: would set {update.changed} of {update.matched} matched "
+            f"checklist item(s) to {action} in {scope}."
+        )
+        print(f"Currently checked: {update.checked}; currently unchecked: {update.unchecked}.")
+        return
+
+    if update.changed == 0:
+        print(
+            f"No issue update needed: {update.matched} matched checklist item(s) "
+            f"already {action} in {scope}."
+        )
+        return
+
+    update_issue_body(args, args.number, update.body)
+    print(
+        f"Updated issue #{args.number}: set {update.changed} of {update.matched} "
+        f"matched checklist item(s) to {action} in {scope}."
+    )
+
+
 def cmd_set_fields(args: argparse.Namespace) -> None:
     project = resolve_project(args.owner, args.project_title, args.project_number)
     item = resolve_item(item_list(args.owner, project), args.item)
@@ -467,6 +641,29 @@ def build_parser() -> argparse.ArgumentParser:
     edit_issue.add_argument("--priority")
     edit_issue.add_argument("--size")
     edit_issue.set_defaults(func=cmd_edit_issue)
+
+    check_criteria = sub.add_parser(
+        "check-criteria",
+        help="Check or uncheck Markdown task-list items in an issue's Acceptance Criteria section.",
+    )
+    add_common_args(check_criteria)
+    check_criteria.add_argument("number", type=int)
+    check_criteria.add_argument("pattern", nargs="*", help="Text fragments to match against checklist item text.")
+    check_criteria.add_argument("--all", action="store_true", help="Update every checklist item in the target section.")
+    check_criteria.add_argument("--uncheck", action="store_true", help="Clear matching checklist items instead of checking them.")
+    check_criteria.add_argument("--regex", action="store_true", help="Treat patterns as case-insensitive regular expressions.")
+    check_criteria.add_argument(
+        "--section",
+        default="Acceptance Criteria",
+        help="Markdown heading to search under. Defaults to 'Acceptance Criteria'.",
+    )
+    check_criteria.add_argument(
+        "--all-sections",
+        action="store_true",
+        help="Search the entire issue body instead of a specific section.",
+    )
+    check_criteria.add_argument("--dry-run", action="store_true", help="Report what would change without editing GitHub.")
+    check_criteria.set_defaults(func=cmd_check_criteria)
 
     set_fields = sub.add_parser("set-fields", help="Set project single-select fields for an item.")
     add_common_args(set_fields)

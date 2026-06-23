@@ -140,7 +140,12 @@ struct DailyLogView: View {
                 ZStack {
                     Color.black.opacity(0.4)
                         .ignoresSafeArea()
-                    ScanProgressOverlay(scanService: scanService)
+                    ScanProgressOverlay(
+                        progressMessage: scanService.scanProgressMessage,
+                        thinkingTrace: scanService.thinkingTrace,
+                        thinkingTraceUpdateCount: scanService.thinkingTraceUpdateCount,
+                        expectsThinkingTrace: scanService.expectsThinkingTrace
+                    )
                 }
                 .transition(.opacity)
                 .animation(.easeInOut(duration: 0.3), value: scanService.isScanning)
@@ -267,7 +272,10 @@ private struct ScanResultSheet: View {
 // MARK: - Scan Progress Overlay
 
 private struct ScanProgressOverlay: View {
-    let scanService: ScanService
+    let progressMessage: String
+    let thinkingTrace: [String]
+    let thinkingTraceUpdateCount: Int
+    let expectsThinkingTrace: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -280,24 +288,34 @@ private struct ScanProgressOverlay: View {
                     Text("Analyzing...")
                         .font(.headline)
                         .foregroundStyle(.white)
-                    Text(scanService.scanProgressMessage)
+                    Text(progressMessage)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.75))
                 }
             }
 
-            if !scanService.thinkingTrace.isEmpty {
+            if expectsThinkingTrace || !thinkingTrace.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Gemini thought summaries", systemImage: "brain.head.profile")
+                    Label("Gemini is thinking", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.9))
 
-                    ForEach(Array(scanService.thinkingTrace.enumerated()), id: \.offset) { _, trace in
-                        Text(trace)
+                    Text("Thought summaries: \(thinkingTraceUpdateCount)")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.65))
+
+                    if thinkingTrace.isEmpty {
+                        Text("Waiting for Gemini thought summaries...")
                             .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.78))
-                            .lineLimit(4)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(.white.opacity(0.65))
+                    } else {
+                        ForEach(Array(thinkingTrace.enumerated()), id: \.offset) { _, trace in
+                            Text(trace)
+                                .font(.caption2)
+                                .foregroundStyle(.white.opacity(0.78))
+                                .lineLimit(4)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                 }
                 .padding(.top, 2)

@@ -75,159 +75,218 @@ struct CalculatorIngredientDraft: Codable, Sendable {
     var portions: [CalculatorPortionDraft]
 }
 
-// MARK: - Gemini REST API Types
+// MARK: - Gemini Interactions API Types
 
-/// The top-level request body sent to Gemini's generateContent endpoint.
-/// Contains an array of "contents" (each with "parts") and generation config.
-private struct GeminiRequest: Codable {
-    let contents: [GeminiContent]
+/// App-level request payload before the model is injected for a specific attempt.
+/// The wire body is `GeminiInteractionRequest`, built by `interactionBody(model:)`.
+private struct GeminiRequest: Encodable {
+    let input: [GeminiContent]
     let tools: [GeminiTool]?
+    let responseFormat: GeminiResponseFormat
     let generationConfig: GeminiGenerationConfig
+    let stream: Bool
+    let store: Bool
 
     init(
-        contents: [GeminiContent],
+        input: [GeminiContent],
         generationConfig: GeminiGenerationConfig,
-        tools: [GeminiTool]? = nil
+        tools: [GeminiTool]? = nil,
+        responseFormat: GeminiResponseFormat = .jsonText,
+        stream: Bool = true,
+        store: Bool = false
     ) {
-        self.contents = contents
-        self.tools = tools
+        self.input = input
+        self.tools = tools?.isEmpty == true ? nil : tools
+        self.responseFormat = responseFormat
         self.generationConfig = generationConfig
+        self.stream = stream
+        self.store = store
+    }
+
+    func interactionBody(model: String) -> GeminiInteractionRequest {
+        GeminiInteractionRequest(
+            model: model,
+            input: input,
+            tools: tools,
+            responseFormat: responseFormat,
+            generationConfig: generationConfig,
+            stream: stream,
+            store: store
+        )
     }
 }
 
-/// A single content block in the Gemini request — represents one "turn" in the conversation.
-/// For our use case, there's always exactly one content with role "user".
-private struct GeminiContent: Codable {
-    let role: String
-    let parts: [GeminiPart]
+/// The top-level Interactions request body sent over the wire.
+private struct GeminiInteractionRequest: Encodable {
+    let model: String
+    let input: [GeminiContent]
+    let tools: [GeminiTool]?
+    let responseFormat: GeminiResponseFormat
+    let generationConfig: GeminiGenerationConfig
+    let stream: Bool
+    let store: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case input
+        case tools
+        case responseFormat = "response_format"
+        case generationConfig = "generation_config"
+        case stream
+        case store
+    }
 }
 
-/// A part within a content block — either text (the prompt) or inline image data.
-/// Gemini accepts both in a single request for multimodal understanding.
-private enum GeminiPart: Codable {
+/// A single Interactions content block. Unlike generateContent parts, each block
+/// is first-class and typed (`text`, `image`, etc.).
+private enum GeminiContent: Codable {
     case text(String)
-    case inlineData(mimeType: String, data: String) // base64
+    case image(mimeType: String, data: String)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case text
+        case data
+        case mimeType = "mime_type"
+    }
 
     func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
+        var container = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .text(let text):
-            try container.encode(["text": text])
-        case .inlineData(let mimeType, let data):
-            try container.encode([
-                "inline_data": [
-                    "mime_type": mimeType,
-                    "data": data
-                ]
-            ])
+            try container.encode("text", forKey: .type)
+            try container.encode(text, forKey: .text)
+        case .image(let mimeType, let data):
+            try container.encode("image", forKey: .type)
+            try container.encode(data, forKey: .data)
+            try container.encode(mimeType, forKey: .mimeType)
         }
     }
 
     init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        let dict = try container.decode([String: AnyCodableValue].self)
-        if let text = dict["text"]?.stringValue {
-            self = .text(text)
-        } else {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let type = try container.decode(String.self, forKey: .type)
+        switch type {
+        case "text":
+            self = .text(try container.decode(String.self, forKey: .text))
+        case "image":
+            self = .image(
+                mimeType: try container.decode(String.self, forKey: .mimeType),
+                data: try container.decode(String.self, forKey: .data)
+            )
+        default:
             self = .text("")
         }
     }
 }
 
-/// Simple wrapper for decoding heterogeneous JSON values in GeminiPart.
-/// Only used for the Codable conformance — we never decode incoming Parts.
-private struct AnyCodableValue: Codable {
-    let stringValue: String?
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        stringValue = try? container.decode(String.self)
-    }
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        try container.encode(stringValue ?? "")
-    }
-}
-
-/// Built-in Gemini tools. Google Search grounding lets Gemini pull current
-/// public web data for text searches without adding a separate app-side API.
+/// Built-in Gemini tools. Interactions represents tools by a `type` discriminator.
 private struct GeminiTool: Codable {
-    let googleSearch: GoogleSearch?
+    let type: String
 
-    static let googleSearch = GeminiTool(googleSearch: GoogleSearch())
+    static let googleSearch = GeminiTool(type: "google_search")
+}
+
+private struct GeminiResponseFormat: Encodable {
+    let type: String
+    let mimeType: String
+
+    static let jsonText = GeminiResponseFormat(type: "text", mimeType: "application/json")
 
     enum CodingKeys: String, CodingKey {
-        case googleSearch = "google_search"
+        case type
+        case mimeType = "mime_type"
     }
 }
 
-private struct GoogleSearch: Codable {}
-
-/// Generation config tells Gemini what format to return and how to "think".
+/// Controls response shape and thought-summary streaming for Interactions.
 private struct GeminiGenerationConfig: Codable {
-    let responseMimeType: String
-    let thinkingConfig: GeminiThinkingConfig?
-
-    enum CodingKeys: String, CodingKey {
-        case responseMimeType
-        case thinkingConfig
-    }
-}
-
-/// Controls how much reasoning/thinking the model does before responding.
-/// "minimal" = fast (labels), "high" = thorough (food photos).
-private struct GeminiThinkingConfig: Codable {
     let thinkingLevel: String
-    let includeThoughts: Bool
+    let thinkingSummaries: String
 
     enum CodingKeys: String, CodingKey {
-        case thinkingLevel
-        case includeThoughts
+        case thinkingLevel = "thinking_level"
+        case thinkingSummaries = "thinking_summaries"
     }
 
-    init(thinkingLevel: String, includeThoughts: Bool = true) {
+    init(thinkingLevel: String, thinkingSummaries: String = "auto") {
         self.thinkingLevel = thinkingLevel
-        self.includeThoughts = includeThoughts
+        self.thinkingSummaries = thinkingSummaries
     }
 }
 
-/// The top-level response from Gemini's generateContent endpoint.
-/// Contains an array of candidates — we always use the first one.
-private struct GeminiAPIResponse: Codable {
-    let candidates: [GeminiCandidate]?
+private struct GeminiInteractionSSEEvent: Decodable {
+    let eventType: String?
+    let interaction: GeminiInteractionResource?
+    let step: GeminiInteractionStep?
+    let delta: GeminiInteractionDelta?
+    let usage: GeminiInteractionUsage?
+    let metadata: GeminiStreamMetadata?
     let error: GeminiAPIError?
-    let usageMetadata: GeminiUsageMetadata?
-    let modelVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case eventType = "event_type"
+        case interaction
+        case step
+        case delta
+        case usage
+        case metadata
+        case error
+    }
 }
 
-/// A single candidate response from Gemini.
-private struct GeminiCandidate: Codable {
-    let content: GeminiResponseContent?
-    let groundingMetadata: GeminiGroundingMetadata?
+private struct GeminiInteractionResource: Decodable {
+    let id: String?
+    let model: String?
+    let status: String?
+    let usage: GeminiInteractionUsage?
 }
 
-private struct GeminiGroundingMetadata: Codable {
-    let webSearchQueries: [String]?
-    let groundingChunks: [GeminiGroundingChunk]?
+private struct GeminiInteractionStep: Decodable {
+    let type: String?
 }
 
-private struct GeminiGroundingChunk: Codable {
-    let web: GeminiGroundingWebSource?
-}
-
-private struct GeminiGroundingWebSource: Codable {
-    let uri: String?
-    let title: String?
-}
-
-/// The content of a candidate response.
-private struct GeminiResponseContent: Codable {
-    let parts: [GeminiResponsePart]?
-}
-
-/// A part in the response — we only care about text parts containing our JSON.
-private struct GeminiResponsePart: Codable {
+private struct GeminiInteractionDelta: Decodable {
+    let type: String?
     let text: String?
-    let thought: Bool?
+    let signature: String?
+    let content: GeminiInteractionContentBlock?
+}
+
+private struct GeminiInteractionContentBlock: Decodable {
+    let type: String?
+    let text: String?
+}
+
+private struct GeminiStreamMetadata: Decodable {
+    let totalUsage: GeminiInteractionUsage?
+
+    enum CodingKeys: String, CodingKey {
+        case totalUsage = "total_usage"
+    }
+}
+
+private struct GeminiInteractionUsage: Codable {
+    let totalInputTokens: Int?
+    let totalOutputTokens: Int?
+    let totalThoughtTokens: Int?
+    let totalTokens: Int?
+    let totalToolUseTokens: Int?
+    let groundingToolCount: [GeminiGroundingToolCount]?
+
+    enum CodingKeys: String, CodingKey {
+        case totalInputTokens = "total_input_tokens"
+        case totalOutputTokens = "total_output_tokens"
+        case totalThoughtTokens = "total_thought_tokens"
+        case totalTokens = "total_tokens"
+        case totalToolUseTokens = "total_tool_use_tokens"
+        case groundingToolCount = "grounding_tool_count"
+    }
+}
+
+private struct GeminiGroundingToolCount: Codable {
+    let type: String?
+    let count: Int?
 }
 
 /// Error response from the Gemini API (e.g. invalid key, quota exceeded).
@@ -237,11 +296,8 @@ private struct GeminiAPIError: Codable {
     let status: String?
 }
 
-private struct GeminiUsageMetadata: Codable {
-    let promptTokenCount: Int?
-    let candidatesTokenCount: Int?
-    let thoughtsTokenCount: Int?
-    let totalTokenCount: Int?
+private struct GeminiAPIErrorEnvelope: Decodable {
+    let error: GeminiAPIError?
 }
 
 // MARK: - Nutrition Response Shape
@@ -296,6 +352,10 @@ private struct ModelConfig {
     let primary: String       // Primary model name
     let fallback: String      // Fallback if primary returns 500/503
     let thinkingLevel: String // "minimal" for speed, "high" for accuracy
+
+    var expectsThinkingTrace: Bool {
+        thinkingLevel != "minimal"
+    }
 
     // Keep these on Google's latest aliases. Do not replace them with concrete
     // dated, preview, or versioned Gemini model slugs unless Google removes the
@@ -395,6 +455,10 @@ private struct GeminiModelAttemptLog: Codable {
     var streamEventCount: Int = 0
     var thoughtPartCount: Int = 0
     var nonThoughtPartCount: Int = 0
+    var firstThoughtSummaryMs: Int?
+    var lastThoughtSummaryMs: Int?
+    var firstTextDeltaMs: Int?
+    var lastTextDeltaMs: Int?
     var searchGroundingUsed: Bool = false
     var webSearchQueries: [String] = []
     var groundingSourceURLs: [String] = []
@@ -524,6 +588,10 @@ final class ScanService {
     var scanProgressMessage = "Preparing scan..."
     /// Gemini thought summaries streamed back during the current scan.
     var thinkingTrace: [String] = []
+    /// Total distinct thought-summary chunks received during the current scan.
+    var thinkingTraceUpdateCount = 0
+    /// True while the current request asks Gemini for high-thinking summaries.
+    var expectsThinkingTrace = false
     /// Last image set and scan settings submitted to Gemini, used for redo.
     var lastSubmittedScan: ScanRedoRequest?
 
@@ -537,8 +605,8 @@ final class ScanService {
 
     // MARK: Configuration
 
-    /// Base URL for the Gemini REST API. All model endpoints are under this path.
-    private static let geminiBaseURL = "https://generativelanguage.googleapis.com/v1beta/models"
+    /// Gemini Interactions endpoint. The model is supplied in the JSON body.
+    private static let geminiInteractionsURL = "https://generativelanguage.googleapis.com/v1beta/interactions"
 
     @ObservationIgnored
     private let session: URLSession = {
@@ -600,8 +668,13 @@ final class ScanService {
         isScanning = true
         error = nil
         thinkingTrace = []
+        thinkingTraceUpdateCount = 0
+        expectsThinkingTrace = false
         scanProgressMessage = "Preparing photos..."
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            expectsThinkingTrace = false
+        }
         let scanStart = ContinuousClock.now
 
         guard !images.isEmpty else {
@@ -714,27 +787,19 @@ final class ScanService {
             finalPrompt += "\n\nAdditional context from user: \(prompt)"
         }
 
-        // Encode each photo as its own inline_data part. Gemini can reason over
-        // multiple image parts in the same user message.
+        // Encode each photo as its own Interactions image block. Gemini can
+        // reason over multiple image blocks in one user input.
         let imageParts = jpegData.map {
-            GeminiPart.inlineData(mimeType: "image/jpeg", data: $0.base64EncodedString())
+            GeminiContent.image(mimeType: "image/jpeg", data: $0.base64EncodedString())
         }
 
-        // Build the Gemini request body
+        // Build the Gemini Interactions request payload.
         let request = GeminiRequest(
-            contents: [
-                GeminiContent(
-                    role: "user",
-                    parts: [.text(finalPrompt)] + imageParts
-                )
-            ],
-            generationConfig: GeminiGenerationConfig(
-                responseMimeType: "application/json",
-                thinkingConfig: GeminiThinkingConfig(thinkingLevel: modelConfig.thinkingLevel)
-            )
+            input: [.text(finalPrompt)] + imageParts,
+            generationConfig: GeminiGenerationConfig(thinkingLevel: modelConfig.thinkingLevel)
         )
         let requestMetadata = GeminiRequestLogMetadata(
-            apiMethod: "streamGenerateContent",
+            apiMethod: "interactions.create.stream",
             responseMimeType: "application/json",
             thinkingLevel: modelConfig.thinkingLevel,
             includeThoughts: true,
@@ -751,7 +816,7 @@ final class ScanService {
         )
 
         // Try primary model, fall back on 500/503
-        scanProgressMessage = "Waiting for Gemini..."
+        prepareGeminiWait(for: modelConfig)
         let nutritionData: GeminiNutritionResponse
         do {
             nutritionData = try await callGemini(
@@ -821,8 +886,13 @@ final class ScanService {
         isScanning = true
         error = nil
         thinkingTrace = []
+        thinkingTraceUpdateCount = 0
+        expectsThinkingTrace = false
         scanProgressMessage = "Searching nutrition sources..."
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            expectsThinkingTrace = false
+        }
         let searchStart = ContinuousClock.now
 
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -856,20 +926,12 @@ final class ScanService {
         let finalPrompt = Self.aiSearchPrompt + "\n\nUser search prompt: \(trimmed)"
 
         let request = GeminiRequest(
-            contents: [
-                GeminiContent(
-                    role: "user",
-                    parts: [.text(finalPrompt)]
-                )
-            ],
-            generationConfig: GeminiGenerationConfig(
-                responseMimeType: "application/json",
-                thinkingConfig: GeminiThinkingConfig(thinkingLevel: modelConfig.thinkingLevel)
-            ),
+            input: [.text(finalPrompt)],
+            generationConfig: GeminiGenerationConfig(thinkingLevel: modelConfig.thinkingLevel),
             tools: [.googleSearch]
         )
         let requestMetadata = GeminiRequestLogMetadata(
-            apiMethod: "streamGenerateContent",
+            apiMethod: "interactions.create.stream",
             responseMimeType: "application/json",
             thinkingLevel: modelConfig.thinkingLevel,
             includeThoughts: true,
@@ -885,7 +947,7 @@ final class ScanService {
             searchGroundingRequested: true
         )
 
-        scanProgressMessage = "Waiting for Gemini..."
+        prepareGeminiWait(for: modelConfig)
         var nutritionData: GeminiNutritionResponse
         do {
             nutritionData = try await callGemini(
@@ -943,20 +1005,12 @@ final class ScanService {
                 validation: validation
             )
             let retryRequest = GeminiRequest(
-                contents: [
-                    GeminiContent(
-                        role: "user",
-                        parts: [.text(retryPrompt)]
-                    )
-                ],
-                generationConfig: GeminiGenerationConfig(
-                    responseMimeType: "application/json",
-                    thinkingConfig: GeminiThinkingConfig(thinkingLevel: modelConfig.thinkingLevel)
-                ),
+                input: [.text(retryPrompt)],
+                generationConfig: GeminiGenerationConfig(thinkingLevel: modelConfig.thinkingLevel),
                 tools: [.googleSearch]
             )
             let retryMetadata = GeminiRequestLogMetadata(
-                apiMethod: "streamGenerateContent",
+                apiMethod: "interactions.create.stream",
                 responseMimeType: "application/json",
                 thinkingLevel: modelConfig.thinkingLevel,
                 includeThoughts: true,
@@ -1060,8 +1114,13 @@ final class ScanService {
         isScanning = true
         error = nil
         thinkingTrace = []
+        thinkingTraceUpdateCount = 0
+        expectsThinkingTrace = false
         scanProgressMessage = "Reading ingredient image..."
-        defer { isScanning = false }
+        defer {
+            isScanning = false
+            expectsThinkingTrace = false
+        }
         let start = ContinuousClock.now
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1112,22 +1171,14 @@ final class ScanService {
         let modelConfig = ModelConfig.aiSearch(useProModel: useProModel)
         let prompt = Self.calculatorIngredientPrompt(name: trimmedName)
         let imageParts = preparedImages.map {
-            GeminiPart.inlineData(mimeType: "image/jpeg", data: $0.data.base64EncodedString())
+            GeminiContent.image(mimeType: "image/jpeg", data: $0.data.base64EncodedString())
         }
         let request = GeminiRequest(
-            contents: [
-                GeminiContent(
-                    role: "user",
-                    parts: [.text(prompt)] + imageParts
-                )
-            ],
-            generationConfig: GeminiGenerationConfig(
-                responseMimeType: "application/json",
-                thinkingConfig: GeminiThinkingConfig(thinkingLevel: modelConfig.thinkingLevel)
-            )
+            input: [.text(prompt)] + imageParts,
+            generationConfig: GeminiGenerationConfig(thinkingLevel: modelConfig.thinkingLevel)
         )
         let requestMetadata = GeminiRequestLogMetadata(
-            apiMethod: "streamGenerateContent",
+            apiMethod: "interactions.create.stream",
             responseMimeType: "application/json",
             thinkingLevel: modelConfig.thinkingLevel,
             includeThoughts: true,
@@ -1143,7 +1194,7 @@ final class ScanService {
             searchGroundingRequested: false
         )
 
-        scanProgressMessage = "Waiting for Gemini..."
+        prepareGeminiWait(for: modelConfig)
         let text: String
         do {
             text = try await callGeminiText(
@@ -1216,9 +1267,8 @@ final class ScanService {
 
     // MARK: - Gemini API Call
 
-    /// Calls the Gemini generateContent endpoint. If the primary model fails with 500/503,
+    /// Calls Gemini Interactions. If the primary model fails with 500/503,
     /// automatically retries with the fallback model.
-    /// Returns the parsed nutrition data and whether the fallback was used.
     private func callGemini(
         request: GeminiRequest,
         apiKey: String,
@@ -1230,10 +1280,7 @@ final class ScanService {
             return try await callGeminiModel(request: request, apiKey: apiKey, model: primaryModel, trace: trace)
         } catch {
             let visible = visibleError(from: error)
-            // Check if it's a retryable server error (500/503)
-            if let scanError = visible as? ScanError,
-               case .serverError(let code, _) = scanError,
-               (code == 500 || code == 503) {
+            if let code = retryableFallbackStatusCode(visible) {
                 scanProgressMessage = "Retrying with Gemini Flash..."
                 print("⚠️ Primary model failed (\(code)), falling back to \(fallbackModel)...")
                 trace.usedFallback = true
@@ -1261,9 +1308,7 @@ final class ScanService {
             return try await callGeminiTextModel(request: request, apiKey: apiKey, model: primaryModel, trace: trace)
         } catch {
             let visible = visibleError(from: error)
-            if let scanError = visible as? ScanError,
-               case .serverError(let code, _) = scanError,
-               (code == 500 || code == 503) {
+            if retryableFallbackStatusCode(visible) != nil {
                 scanProgressMessage = "Retrying with Gemini Flash..."
                 trace.usedFallback = true
                 do {
@@ -1279,14 +1324,30 @@ final class ScanService {
         }
     }
 
+    private func callGeminiModel(
+        request: GeminiRequest,
+        apiKey: String,
+        model: String,
+        trace: GeminiCallTrace
+    ) async throws -> GeminiNutritionResponse {
+        let text = try await callGeminiTextModel(request: request, apiKey: apiKey, model: model, trace: trace)
+        do {
+            return try JSONDecoder().decode(GeminiNutritionResponse.self, from: Data(text.utf8))
+        } catch {
+            let err = ScanError.decodingError(error)
+            trace.parseStage = "nutrition_json_decode"
+            self.error = err
+            throw GeminiCallFailure(underlying: err, trace: trace)
+        }
+    }
+
     private func callGeminiTextModel(
         request: GeminiRequest,
         apiKey: String,
         model: String,
         trace: GeminiCallTrace
     ) async throws -> String {
-        let urlString = "\(Self.geminiBaseURL)/\(model):streamGenerateContent?key=\(apiKey)&alt=sse"
-        let redactedEndpoint = "\(Self.geminiBaseURL)/\(model):streamGenerateContent?alt=sse"
+        let redactedEndpoint = Self.geminiInteractionsURL
         let attemptStart = ContinuousClock.now
         var attempt = GeminiModelAttemptLog(model: model, endpoint: redactedEndpoint)
 
@@ -1303,15 +1364,19 @@ final class ScanService {
             throw GeminiCallFailure(underlying: visible, trace: trace)
         }
 
-        guard let url = URL(string: urlString) else {
+        guard let url = URL(string: Self.geminiInteractionsURL) else {
             try fail(ScanError.invalidResponse, stage: "build_url")
         }
 
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "POST"
         httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        httpRequest.httpBody = try JSONEncoder().encode(request)
+        httpRequest.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
+        httpRequest.httpBody = try JSONEncoder().encode(request.interactionBody(model: model))
         trace.requestPayloadBytes = httpRequest.httpBody?.count
+        #if DEBUG
+        print("🧠 Gemini stream start model=\(model) payloadBytes=\(trace.requestPayloadBytes ?? 0)")
+        #endif
 
         let (bytes, response): (URLSession.AsyncBytes, URLResponse)
         do {
@@ -1324,42 +1389,50 @@ final class ScanService {
             try fail(ScanError.invalidResponse, stage: "http_response")
         }
         attempt.httpStatus = httpResponse.statusCode
+        #if DEBUG
+        print("🧠 Gemini stream HTTP \(httpResponse.statusCode) model=\(model) +\(msFrom(attemptStart.duration(to: ContinuousClock.now)))ms")
+        #endif
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             let data = try await collectData(from: bytes)
             attempt.rawErrorBody = String(data: data, encoding: .utf8)
-            let apiResponse = try? JSONDecoder().decode(GeminiAPIResponse.self, from: data)
+            let apiResponse = try? JSONDecoder().decode(GeminiAPIErrorEnvelope.self, from: data)
             let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
             try fail(ScanError.serverError(httpResponse.statusCode, message), stage: "http_error")
         }
 
         var jsonText = ""
-        var eventPayloadLines: [String] = []
+        var currentEventName: String?
         var rawEventPayloads: [String] = []
 
         do {
             for try await rawLine in bytes.lines {
                 let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
                 if line.isEmpty {
-                    let payload = eventPayloadLines.joined(separator: "\n")
-                    if !payload.isEmpty {
-                        rawEventPayloads.append(payload)
-                    }
-                    try consumeGeminiStreamEvent(payload, jsonText: &jsonText, attempt: &attempt)
-                    eventPayloadLines.removeAll()
+                    currentEventName = nil
                     continue
                 }
 
-                guard line.hasPrefix("data:") else { continue }
-                let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
-                guard payload != "[DONE]" else { break }
-                eventPayloadLines.append(String(payload))
-            }
-
-            if !eventPayloadLines.isEmpty {
-                let payload = eventPayloadLines.joined(separator: "\n")
-                rawEventPayloads.append(payload)
-                try consumeGeminiStreamEvent(payload, jsonText: &jsonText, attempt: &attempt)
+                if line.hasPrefix("event:") {
+                    currentEventName = String(line.dropFirst("event:".count)).trimmingCharacters(in: .whitespaces)
+                } else if line.hasPrefix("data:") {
+                    let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+                    if payload == "[DONE]" {
+                        #if DEBUG
+                        print("🧠 Gemini stream done model=\(model) +\(msFrom(attemptStart.duration(to: ContinuousClock.now)))ms")
+                        #endif
+                        break
+                    }
+                    rawEventPayloads.append(payload)
+                    try await consumeGeminiInteractionStreamEvent(
+                        payload,
+                        eventName: currentEventName,
+                        attemptStartedAt: attemptStart,
+                        jsonText: &jsonText,
+                        attempt: &attempt
+                    )
+                    currentEventName = nil
+                }
             }
         } catch let scanError as ScanError {
             attempt.rawResponseJSON = encodedJSONString(rawEventPayloads)
@@ -1384,226 +1457,115 @@ final class ScanService {
         attempt.succeeded = true
         attempt.parseStage = "complete"
         attempt.durationMs = msFrom(ContinuousClock.now.duration(to: attemptStart))
+        #if DEBUG
+        print("🧠 Gemini stream complete model=\(model) duration=\(attempt.durationMs ?? 0)ms events=\(attempt.streamEventCount) thoughtSummaries=\(attempt.thoughtPartCount) textDeltas=\(attempt.nonThoughtPartCount) firstThoughtMs=\(attempt.firstThoughtSummaryMs.map(String.init) ?? "nil") firstTextMs=\(attempt.firstTextDeltaMs.map(String.init) ?? "nil") jsonChars=\(jsonText.count)")
+        #endif
         trace.absorb(attempt)
         return jsonText
     }
 
-    /// Makes a single HTTP request to Gemini's generateContent endpoint for a specific model.
-    /// Parses the response, extracts the JSON text, and decodes it into GeminiNutritionResponse.
-    private func callGeminiModel(
-        request: GeminiRequest,
-        apiKey: String,
-        model: String,
-        trace: GeminiCallTrace
-    ) async throws -> GeminiNutritionResponse {
-        // Build the URL: /v1beta/models/{model}:streamGenerateContent?key={apiKey}&alt=sse
-        // Streaming lets the UI show Gemini thought summaries before the final JSON arrives.
-        let urlString = "\(Self.geminiBaseURL)/\(model):streamGenerateContent?key=\(apiKey)&alt=sse"
-        let redactedEndpoint = "\(Self.geminiBaseURL)/\(model):streamGenerateContent?alt=sse"
-        let attemptStart = ContinuousClock.now
-        var attempt = GeminiModelAttemptLog(model: model, endpoint: redactedEndpoint)
-
-        func fail(_ error: Error, stage: String? = nil) throws -> Never {
-            let visible = visibleError(from: error)
-            attempt.durationMs = msFrom(ContinuousClock.now.duration(to: attemptStart))
-            attempt.errorCode = errorCode(from: visible)
-            attempt.errorMessage = errorMessage(from: visible)
-            if let stage {
-                attempt.parseStage = stage
-            }
-            trace.absorb(attempt)
-            self.error = visible as? ScanError
-            throw GeminiCallFailure(underlying: visible, trace: trace)
-        }
-
-        guard let url = URL(string: urlString) else {
-            try fail(ScanError.invalidResponse, stage: "build_url")
-        }
-
-        // Create the HTTP request
-        var httpRequest = URLRequest(url: url)
-        httpRequest.httpMethod = "POST"
-        httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        // Encode the request body
-        let encoder = JSONEncoder()
-        httpRequest.httpBody = try encoder.encode(request)
-        trace.requestPayloadBytes = httpRequest.httpBody?.count
-
-        // Make the streaming network call.
-        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
-        do {
-            (bytes, response) = try await session.bytes(for: httpRequest)
-        } catch {
-            let err = ScanError.networkError(error)
-            try fail(err, stage: "network")
-        }
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            let err = ScanError.invalidResponse
-            try fail(err, stage: "http_response")
-        }
-        attempt.httpStatus = httpResponse.statusCode
-
-        // Handle HTTP errors
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            // Try to parse Gemini's error response for a useful message
-            let data = try await collectData(from: bytes)
-            attempt.rawErrorBody = String(data: data, encoding: .utf8)
-            let apiResponse = try? JSONDecoder().decode(GeminiAPIResponse.self, from: data)
-            let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
-            let err = ScanError.serverError(httpResponse.statusCode, message)
-            try fail(err, stage: "http_error")
-        }
-
-        var jsonText = ""
-        var eventPayloadLines: [String] = []
-        var rawEventPayloads: [String] = []
-
-        do {
-            for try await rawLine in bytes.lines {
-                let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if line.isEmpty {
-                    let payload = eventPayloadLines.joined(separator: "\n")
-                    if !payload.isEmpty {
-                        rawEventPayloads.append(payload)
-                    }
-                    try consumeGeminiStreamEvent(payload, jsonText: &jsonText, attempt: &attempt)
-                    eventPayloadLines.removeAll()
-                    continue
-                }
-
-                guard line.hasPrefix("data:") else { continue }
-                let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
-                guard payload != "[DONE]" else { break }
-                eventPayloadLines.append(String(payload))
-            }
-
-            if !eventPayloadLines.isEmpty {
-                let payload = eventPayloadLines.joined(separator: "\n")
-                rawEventPayloads.append(payload)
-                try consumeGeminiStreamEvent(payload, jsonText: &jsonText, attempt: &attempt)
-            }
-        } catch let scanError as ScanError {
-            attempt.rawResponseJSON = encodedJSONString(rawEventPayloads)
-            attempt.responseText = jsonText
-            attempt.responseTextCharacters = jsonText.count
-            try fail(scanError, stage: attempt.parseStage ?? "stream")
-        } catch {
-            let err = ScanError.decodingError(error)
-            attempt.rawResponseJSON = encodedJSONString(rawEventPayloads)
-            attempt.responseText = jsonText
-            attempt.responseTextCharacters = jsonText.count
-            try fail(err, stage: attempt.parseStage ?? "stream_decode")
-        }
-
-        attempt.rawResponseJSON = encodedJSONString(rawEventPayloads)
-        attempt.responseText = jsonText
-        attempt.responseTextCharacters = jsonText.count
-
-        guard !jsonText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            let err = ScanError.invalidResponse
-            try fail(err, stage: "empty_response_text")
-        }
-
-        // Parse the nutrition JSON from Gemini's response text
-        let nutritionResponse: GeminiNutritionResponse
-        do {
-            guard let jsonData = jsonText.data(using: .utf8) else {
-                throw ScanError.invalidResponse
-            }
-            nutritionResponse = try JSONDecoder().decode(GeminiNutritionResponse.self, from: jsonData)
-        } catch {
-            let err = ScanError.decodingError(error)
-            try fail(err, stage: "nutrition_json_decode")
-        }
-
-        attempt.succeeded = true
-        attempt.parseStage = "complete"
-        attempt.durationMs = msFrom(ContinuousClock.now.duration(to: attemptStart))
-        trace.absorb(attempt)
-        return nutritionResponse
-    }
-
-    private func consumeGeminiStreamEvent(
+    private func consumeGeminiInteractionStreamEvent(
         _ payload: String,
+        eventName: String?,
+        attemptStartedAt: ContinuousClock.Instant,
         jsonText: inout String,
         attempt: inout GeminiModelAttemptLog
-    ) throws {
+    ) async throws {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
+        let previousThinkingUpdateCount = thinkingTraceUpdateCount
         attempt.parseStage = "stream_event_decode"
-        if let data = trimmed.data(using: .utf8),
-           let apiResponse = try? JSONDecoder().decode(GeminiAPIResponse.self, from: data) {
-            try consumeGeminiAPIResponse(apiResponse, jsonText: &jsonText, attempt: &attempt)
-            return
-        }
-
         let eventFragments = trimmed
             .split(whereSeparator: \.isNewline)
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && $0 != "[DONE]" }
 
         for fragment in eventFragments {
             guard let data = fragment.data(using: .utf8) else { continue }
-            let apiResponse = try JSONDecoder().decode(GeminiAPIResponse.self, from: data)
-            try consumeGeminiAPIResponse(apiResponse, jsonText: &jsonText, attempt: &attempt)
+            let event = try JSONDecoder().decode(GeminiInteractionSSEEvent.self, from: data)
+            try consumeGeminiInteractionEvent(
+                event,
+                eventName: event.eventType ?? eventName,
+                elapsedMs: msFrom(attemptStartedAt.duration(to: ContinuousClock.now)),
+                jsonText: &jsonText,
+                attempt: &attempt
+            )
         }
+
+        await yieldForThinkingTraceRenderIfNeeded(previousUpdateCount: previousThinkingUpdateCount)
     }
 
-    private func consumeGeminiAPIResponse(
-        _ apiResponse: GeminiAPIResponse,
+    private func consumeGeminiInteractionEvent(
+        _ event: GeminiInteractionSSEEvent,
+        eventName: String?,
+        elapsedMs: Int,
         jsonText: inout String,
         attempt: inout GeminiModelAttemptLog
     ) throws {
         attempt.streamEventCount += 1
-        applyUsageMetadata(apiResponse.usageMetadata, modelVersion: apiResponse.modelVersion, to: &attempt)
-        applyGroundingMetadata(apiResponse.candidates, to: &attempt)
+        applyInteractionUsageMetadata(event.usage, to: &attempt)
+        applyInteractionUsageMetadata(event.interaction?.usage, to: &attempt)
+        applyInteractionUsageMetadata(event.metadata?.totalUsage, to: &attempt)
 
-        if let apiError = apiResponse.error {
-            attempt.parseStage = "stream_api_error"
+        if let apiError = event.error {
+            attempt.parseStage = "interaction_stream_error"
             throw ScanError.serverError(apiError.code ?? 500, apiError.message ?? "Unknown Gemini error")
         }
 
-        attempt.parseStage = "stream_parts"
-        guard let parts = apiResponse.candidates?.first?.content?.parts else { return }
-        for part in parts {
-            guard let text = part.text, !text.isEmpty else { continue }
-            if part.thought == true {
+        if let model = event.interaction?.model, model != attempt.model {
+            attempt.modelVersion = model
+        }
+
+        if let stepType = event.step?.type, stepType.contains("google_search") {
+            attempt.searchGroundingUsed = true
+            appendUnique("Google Search grounding", to: &attempt.groundingSourceTitles)
+        }
+
+        attempt.parseStage = eventName ?? "interaction_event"
+        #if DEBUG
+        if eventName != "step.delta" {
+            let stepType = event.step?.type ?? "none"
+            let usageTokens = event.usage?.totalTokens
+                ?? event.interaction?.usage?.totalTokens
+                ?? event.metadata?.totalUsage?.totalTokens
+            print("🧠 Gemini stream event=\(eventName ?? "unknown") step=\(stepType) +\(elapsedMs)ms usageTotal=\(usageTokens.map(String.init) ?? "nil")")
+        }
+        #endif
+        guard eventName == "step.delta", let delta = event.delta else { return }
+
+        switch delta.type {
+        case "thought_summary":
+            if let text = delta.content?.text, !text.isEmpty {
                 attempt.thoughtPartCount += 1
+                attempt.firstThoughtSummaryMs = attempt.firstThoughtSummaryMs ?? elapsedMs
+                attempt.lastThoughtSummaryMs = elapsedMs
                 recordThinkingTrace(text)
-            } else {
+                #if DEBUG
+                print("🧠 Gemini stream thought_summary #\(attempt.thoughtPartCount) +\(elapsedMs)ms chars=\(text.count)")
+                #endif
+            }
+        case "text":
+            if let text = delta.text, !text.isEmpty {
                 attempt.nonThoughtPartCount += 1
+                attempt.firstTextDeltaMs = attempt.firstTextDeltaMs ?? elapsedMs
+                attempt.lastTextDeltaMs = elapsedMs
                 jsonText += text
+                #if DEBUG
+                print("🧠 Gemini stream text_delta #\(attempt.nonThoughtPartCount) +\(elapsedMs)ms chars=\(text.count) totalJSONChars=\(jsonText.count)")
+                #endif
             }
+        case "thought_signature":
+            #if DEBUG
+            print("🧠 Gemini stream thought_signature +\(elapsedMs)ms")
+            #endif
+            break
+        default:
+            #if DEBUG
+            print("🧠 Gemini stream delta=\(delta.type ?? "unknown") event=\(eventName ?? "unknown") +\(elapsedMs)ms")
+            #endif
+            break
         }
-    }
-
-    private func applyGroundingMetadata(
-        _ candidates: [GeminiCandidate]?,
-        to attempt: inout GeminiModelAttemptLog
-    ) {
-        guard let metadata = candidates?.compactMap(\.groundingMetadata), !metadata.isEmpty else { return }
-
-        for item in metadata {
-            for query in item.webSearchQueries ?? [] {
-                appendUnique(query.trimmingCharacters(in: .whitespacesAndNewlines), to: &attempt.webSearchQueries)
-            }
-
-            for chunk in item.groundingChunks ?? [] {
-                if let url = chunk.web?.uri?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                    appendUnique(url, to: &attempt.groundingSourceURLs)
-                }
-                if let title = chunk.web?.title?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                    appendUnique(title, to: &attempt.groundingSourceTitles)
-                }
-            }
-        }
-
-        attempt.searchGroundingUsed = !attempt.webSearchQueries.isEmpty || !attempt.groundingSourceURLs.isEmpty || !attempt.groundingSourceTitles.isEmpty
-        attempt.groundingMetadataJSON = encodedJSONString(metadata)
     }
 
     private func appendUnique(_ value: String, to values: inout [String]) {
@@ -1611,26 +1573,24 @@ final class ScanService {
         values.append(value)
     }
 
-    private func applyUsageMetadata(
-        _ usage: GeminiUsageMetadata?,
-        modelVersion: String?,
+    private func applyInteractionUsageMetadata(
+        _ usage: GeminiInteractionUsage?,
         to attempt: inout GeminiModelAttemptLog
     ) {
         guard let usage else { return }
 
-        let inputTokens = usage.promptTokenCount ?? 0
-        let thinkingTokens = usage.thoughtsTokenCount ?? 0
-        let candidateTokens = usage.candidatesTokenCount ?? 0
-        let totalTokens = usage.totalTokenCount ?? inputTokens + candidateTokens + thinkingTokens
-        let outputTokens = max(candidateTokens + thinkingTokens, totalTokens - inputTokens)
-        let modelIdentifier = modelVersion ?? attempt.model
+        let inputTokens = usage.totalInputTokens ?? 0
+        let thinkingTokens = usage.totalThoughtTokens ?? 0
+        let responseTokens = usage.totalOutputTokens ?? 0
+        let totalTokens = usage.totalTokens ?? inputTokens + responseTokens + thinkingTokens + (usage.totalToolUseTokens ?? 0)
+        let outputTokens = max(responseTokens + thinkingTokens, totalTokens - inputTokens)
+        let modelIdentifier = attempt.modelVersion ?? attempt.model
         let estimate = estimateGeminiTokenCost(
             modelIdentifier: modelIdentifier,
             inputTokens: inputTokens,
             outputTokens: outputTokens
         )
 
-        attempt.modelVersion = modelVersion
         attempt.inputTokenCount = inputTokens
         attempt.outputTokenCount = outputTokens
         attempt.thinkingTokenCount = thinkingTokens
@@ -1639,6 +1599,24 @@ final class ScanService {
         attempt.pricingModel = estimate.pricingModel
         attempt.inputRatePerMillionTokens = estimate.inputRatePerMillionTokens
         attempt.outputRatePerMillionTokens = estimate.outputRatePerMillionTokens
+
+        let searchCount = usage.groundingToolCount?
+            .filter { $0.type == "google_search" }
+            .compactMap(\.count)
+            .reduce(0, +) ?? 0
+        if searchCount > 0 {
+            attempt.searchGroundingUsed = true
+            appendUnique("Google Search grounding (\(searchCount) call\(searchCount == 1 ? "" : "s"))", to: &attempt.groundingSourceTitles)
+            attempt.groundingMetadataJSON = encodedJSONString(usage.groundingToolCount)
+        }
+    }
+
+    private func retryableFallbackStatusCode(_ error: Error) -> Int? {
+        guard let scanError = error as? ScanError else { return nil }
+        if case .serverError(let code, _) = scanError {
+            return code == 500 || code == 503 ? code : nil
+        }
+        return nil
     }
 
     private func estimateGeminiTokenCost(
@@ -1838,11 +1816,37 @@ final class ScanService {
             : cleaned
 
         if thinkingTrace.last == clipped { return }
-        thinkingTrace.append(clipped)
-        if thinkingTrace.count > 4 {
-            thinkingTrace.removeFirst(thinkingTrace.count - 4)
+
+        var updatedTrace = thinkingTrace
+        updatedTrace.append(clipped)
+        if updatedTrace.count > 4 {
+            updatedTrace.removeFirst(updatedTrace.count - 4)
         }
-        scanProgressMessage = "Gemini is reasoning..."
+        thinkingTrace = updatedTrace
+        thinkingTraceUpdateCount += 1
+        scanProgressMessage = thinkingProgressMessage(updateCount: thinkingTraceUpdateCount)
+    }
+
+    private func yieldForThinkingTraceRenderIfNeeded(previousUpdateCount: Int) async {
+        guard thinkingTraceUpdateCount > previousUpdateCount else { return }
+
+        // URLSession can hand us several already-buffered SSE events in one
+        // MainActor turn. Yield once so real early thought summaries can render
+        // while the stream continues, without delaying the final result screen.
+        await Task.yield()
+    }
+
+    private func prepareGeminiWait(for modelConfig: ModelConfig) {
+        expectsThinkingTrace = modelConfig.expectsThinkingTrace
+        scanProgressMessage = expectsThinkingTrace
+            ? thinkingProgressMessage(updateCount: thinkingTraceUpdateCount)
+            : "Waiting for Gemini..."
+    }
+
+    private func thinkingProgressMessage(updateCount: Int) -> String {
+        guard updateCount > 0 else { return "Gemini is thinking..." }
+        let suffix = updateCount == 1 ? "summary" : "summaries"
+        return "Gemini is thinking... \(updateCount) thought \(suffix)"
     }
 
     private func collectData(from bytes: URLSession.AsyncBytes) async throws -> Data {
