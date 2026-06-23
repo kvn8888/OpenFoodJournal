@@ -57,6 +57,43 @@ struct MicronutrientValue: Codable, Hashable, Sendable {
     var value: Double
     /// The unit string (e.g. "g", "mg", "mcg", "%DV", "IU")
     var unit: String
+
+    private enum CodingKeys: String, CodingKey {
+        case value
+        case unit
+    }
+
+    init(value: Double, unit: String) {
+        self.value = value
+        self.unit = unit
+    }
+
+    init(from decoder: Decoder) throws {
+        if let container = try? decoder.container(keyedBy: CodingKeys.self) {
+            value = try container.decode(Double.self, forKey: .value)
+            unit = try container.decode(String.self, forKey: .unit)
+            return
+        }
+
+        let container = try decoder.singleValueContainer()
+        value = try container.decode(Double.self)
+        unit = Self.inferredUnit(for: decoder.codingPath.last?.stringValue)
+    }
+
+    private static func inferredUnit(for nutrientKey: String?) -> String {
+        guard let nutrientKey, !nutrientKey.isEmpty else { return "" }
+
+        if let nutrient = KnownMicronutrients.find(nutrientKey) {
+            return nutrient.unit
+        }
+
+        switch KnownMicronutrients.normalize(nutrientKey) {
+        case "sugar":
+            return "g"
+        default:
+            return ""
+        }
+    }
 }
 
 // MARK: - ServingAmount

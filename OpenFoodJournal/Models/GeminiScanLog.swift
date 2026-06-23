@@ -49,7 +49,12 @@ final class GeminiScanLog {
     var totalTokenCount: Int = 0
     var estimatedTokenCostUSD: Double = 0
     var pricingModel: String?
+    var searchGroundingRequested: Bool = false
     var searchGroundingUsed: Bool = false
+    var webSearchQueries: [String] = []
+    var groundingSourceURLs: [String] = []
+    var groundingSourceTitles: [String] = []
+    var groundingMetadataJSON: String?
     var streamEventCount: Int = 0
     var thoughtPartCount: Int = 0
     var nonThoughtPartCount: Int = 0
@@ -97,7 +102,12 @@ final class GeminiScanLog {
         totalTokenCount: Int = 0,
         estimatedTokenCostUSD: Double = 0,
         pricingModel: String? = nil,
+        searchGroundingRequested: Bool = false,
         searchGroundingUsed: Bool = false,
+        webSearchQueries: [String] = [],
+        groundingSourceURLs: [String] = [],
+        groundingSourceTitles: [String] = [],
+        groundingMetadataJSON: String? = nil,
         streamEventCount: Int = 0,
         thoughtPartCount: Int = 0,
         nonThoughtPartCount: Int = 0,
@@ -144,7 +154,12 @@ final class GeminiScanLog {
         self.totalTokenCount = totalTokenCount
         self.estimatedTokenCostUSD = estimatedTokenCostUSD
         self.pricingModel = pricingModel
+        self.searchGroundingRequested = searchGroundingRequested
         self.searchGroundingUsed = searchGroundingUsed
+        self.webSearchQueries = webSearchQueries
+        self.groundingSourceURLs = groundingSourceURLs
+        self.groundingSourceTitles = groundingSourceTitles
+        self.groundingMetadataJSON = groundingMetadataJSON
         self.streamEventCount = streamEventCount
         self.thoughtPartCount = thoughtPartCount
         self.nonThoughtPartCount = nonThoughtPartCount
@@ -212,7 +227,9 @@ extension GeminiScanLog {
             "Parse Stage", "Response Text Characters", "Raw Response Text",
             "Raw Response JSON", "Model Attempts JSON", "Input Tokens",
             "Output Tokens", "Thinking Tokens", "Total Tokens",
-            "Estimated Token Cost USD", "Pricing Model", "Search Grounding Used",
+            "Estimated Token Cost USD", "Pricing Model", "Search Grounding Requested",
+            "Search Grounding Used", "Web Search Queries", "Grounding Source URLs",
+            "Grounding Source Titles", "Grounding Metadata JSON",
             "Stream Event Count",
             "Thought Part Count", "Non Thought Part Count",
             "Result Name", "Calories", "Protein (g)", "Carbs (g)", "Fat (g)",
@@ -253,7 +270,12 @@ extension GeminiScanLog {
             fields.append(String(log.totalTokenCount))
             fields.append(Self.usd(log.estimatedTokenCostUSD))
             fields.append(log.pricingModel ?? "")
+            fields.append(log.searchGroundingRequested ? "true" : "false")
             fields.append(log.searchGroundingUsed ? "true" : "false")
+            fields.append(log.webSearchQueries.joined(separator: " | "))
+            fields.append(log.groundingSourceURLs.joined(separator: " | "))
+            fields.append(log.groundingSourceTitles.joined(separator: " | "))
+            fields.append(log.groundingMetadataJSON ?? "")
             fields.append(String(log.streamEventCount))
             fields.append(String(log.thoughtPartCount))
             fields.append(String(log.nonThoughtPartCount))

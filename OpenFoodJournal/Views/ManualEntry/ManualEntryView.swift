@@ -253,13 +253,23 @@ struct ManualEntryView: View {
                     // default values where names match, then add any extras.
                     for i in micronutrientTexts.indices {
                         let microName = micronutrientTexts[i].name
-                        if let sourceValue = prefill.micronutrients[microName] {
+                        let sourceValue: MicronutrientValue?
+                        if let known = KnownMicronutrients.find(microName) {
+                            sourceValue = KnownMicronutrients.value(
+                                in: prefill.micronutrients,
+                                forID: known.id,
+                                aliases: [microName]
+                            )
+                        } else {
+                            sourceValue = prefill.micronutrients[microName]
+                        }
+                        if let sourceValue {
                             micronutrientTexts[i].text = formatValue(sourceValue.value)
                         }
                     }
                     // Add any source micronutrients not in the default set.
-                    let existingNames = Set(micronutrientTexts.map(\.name))
-                    for (nutrientName, value) in prefill.micronutrients where !existingNames.contains(nutrientName) {
+                    let existingIDs = Set(micronutrientTexts.map { KnownMicronutrients.normalize($0.name) })
+                    for (nutrientName, value) in prefill.micronutrients where !existingIDs.contains(KnownMicronutrients.normalize(nutrientName)) {
                         micronutrientTexts.append((name: nutrientName, unit: value.unit, text: formatValue(value.value)))
                     }
 

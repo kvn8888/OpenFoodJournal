@@ -325,7 +325,7 @@ private struct NutrientPickerSheet: View {
                                     HStack {
                                         Text(nutrient.name)
                                         Spacer()
-                                        Text("\(nutrient.dailyValue, specifier: "%.0f") \(nutrient.unit)/day")
+                                        Text(nutrientDailyValueText(nutrient))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                         if nutrient.id == currentID {
@@ -548,7 +548,7 @@ private struct InlineNutrientPicker: View {
                                 HStack {
                                     Text(nutrient.name)
                                     Spacer()
-                                    Text("\(nutrient.dailyValue, specifier: "%.0f") \(nutrient.unit)/day")
+                                    Text(nutrientDailyValueText(nutrient))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if nutrient.id == currentID {
@@ -567,6 +567,11 @@ private struct InlineNutrientPicker: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $searchText, prompt: "Search nutrients")
     }
+}
+
+private func nutrientDailyValueText(_ nutrient: KnownMicronutrient) -> String {
+    guard nutrient.dailyValue > 0 else { return "No DV" }
+    return "\(nutrient.dailyValue.formatted(.number.precision(.fractionLength(0)))) \(nutrient.unit)/day"
 }
 
 #Preview {

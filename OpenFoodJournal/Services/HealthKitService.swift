@@ -47,17 +47,25 @@ final class HealthKitService {
         SampleDefinition(key: "dietaryProtein", quantityTypeIdentifier: .dietaryProtein, unit: .gram()) { $0.protein },
         SampleDefinition(key: "dietaryCarbohydrates", quantityTypeIdentifier: .dietaryCarbohydrates, unit: .gram()) { $0.carbs },
         SampleDefinition(key: "dietaryFatTotal", quantityTypeIdentifier: .dietaryFatTotal, unit: .gram()) { $0.fat },
-        SampleDefinition(key: "dietaryFiber", quantityTypeIdentifier: .dietaryFiber, unit: .gram()) { $0.micronutrients["Fiber"]?.value },
-        SampleDefinition(key: "dietarySugar", quantityTypeIdentifier: .dietarySugar, unit: .gram()) { $0.micronutrients["Sugar"]?.value },
-        SampleDefinition(key: "dietarySodium", quantityTypeIdentifier: .dietarySodium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Sodium"]?.value },
-        SampleDefinition(key: "dietaryCholesterol", quantityTypeIdentifier: .dietaryCholesterol, unit: .gramUnit(with: .milli)) { $0.micronutrients["Cholesterol"]?.value },
-        SampleDefinition(key: "dietaryFatSaturated", quantityTypeIdentifier: .dietaryFatSaturated, unit: .gram()) { $0.micronutrients["Saturated Fat"]?.value },
-        SampleDefinition(key: "dietaryVitaminA", quantityTypeIdentifier: .dietaryVitaminA, unit: .gramUnit(with: .micro)) { $0.micronutrients["Vitamin A"]?.value },
-        SampleDefinition(key: "dietaryVitaminC", quantityTypeIdentifier: .dietaryVitaminC, unit: .gramUnit(with: .milli)) { $0.micronutrients["Vitamin C"]?.value },
-        SampleDefinition(key: "dietaryCalcium", quantityTypeIdentifier: .dietaryCalcium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Calcium"]?.value },
-        SampleDefinition(key: "dietaryIron", quantityTypeIdentifier: .dietaryIron, unit: .gramUnit(with: .milli)) { $0.micronutrients["Iron"]?.value },
-        SampleDefinition(key: "dietaryPotassium", quantityTypeIdentifier: .dietaryPotassium, unit: .gramUnit(with: .milli)) { $0.micronutrients["Potassium"]?.value },
+        SampleDefinition(key: "dietaryFiber", quantityTypeIdentifier: .dietaryFiber, unit: .gram()) { micronutrientValue($0, id: "fiber") },
+        SampleDefinition(key: "dietarySugar", quantityTypeIdentifier: .dietarySugar, unit: .gram()) { micronutrientValue($0, id: "sugar", aliases: ["Sugar", "Total Sugar", "Total Sugars"]) },
+        SampleDefinition(key: "dietarySodium", quantityTypeIdentifier: .dietarySodium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "sodium") },
+        SampleDefinition(key: "dietaryCholesterol", quantityTypeIdentifier: .dietaryCholesterol, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "cholesterol") },
+        SampleDefinition(key: "dietaryFatSaturated", quantityTypeIdentifier: .dietaryFatSaturated, unit: .gram()) { micronutrientValue($0, id: "saturated_fat") },
+        SampleDefinition(key: "dietaryVitaminA", quantityTypeIdentifier: .dietaryVitaminA, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "vitamin_a") },
+        SampleDefinition(key: "dietaryVitaminC", quantityTypeIdentifier: .dietaryVitaminC, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "vitamin_c") },
+        SampleDefinition(key: "dietaryCalcium", quantityTypeIdentifier: .dietaryCalcium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "calcium") },
+        SampleDefinition(key: "dietaryIron", quantityTypeIdentifier: .dietaryIron, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "iron") },
+        SampleDefinition(key: "dietaryPotassium", quantityTypeIdentifier: .dietaryPotassium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "potassium") },
     ]
+
+    private static func micronutrientValue(
+        _ entry: NutritionEntry,
+        id: String,
+        aliases: [String] = []
+    ) -> Double? {
+        KnownMicronutrients.value(in: entry.micronutrients, forID: id, aliases: aliases)?.value
+    }
 
     @ObservationIgnored
     private let store = HKHealthStore()
@@ -156,11 +164,15 @@ final class HealthKitService {
         }
     }
 
-    func syncMissingEntries(_ entries: [NutritionEntry], in modelContext: ModelContext) async -> SyncSummary {
+    func syncMissingEntries(
+        _ entries: [NutritionEntry],
+        in modelContext: ModelContext,
+        force: Bool = false
+    ) async -> SyncSummary {
         var summary = SyncSummary()
 
         for entry in entries {
-            let result = await sync(entry, in: modelContext)
+            let result = await sync(entry, in: modelContext, force: force)
             switch result {
             case .synced:
                 summary.synced += 1

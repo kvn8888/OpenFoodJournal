@@ -202,6 +202,21 @@ private struct GeminiAPIResponse: Codable {
 /// A single candidate response from Gemini.
 private struct GeminiCandidate: Codable {
     let content: GeminiResponseContent?
+    let groundingMetadata: GeminiGroundingMetadata?
+}
+
+private struct GeminiGroundingMetadata: Codable {
+    let webSearchQueries: [String]?
+    let groundingChunks: [GeminiGroundingChunk]?
+}
+
+private struct GeminiGroundingChunk: Codable {
+    let web: GeminiGroundingWebSource?
+}
+
+private struct GeminiGroundingWebSource: Codable {
+    let uri: String?
+    let title: String?
 }
 
 /// The content of a candidate response.
@@ -380,13 +395,18 @@ private struct GeminiModelAttemptLog: Codable {
     var streamEventCount: Int = 0
     var thoughtPartCount: Int = 0
     var nonThoughtPartCount: Int = 0
+    var searchGroundingUsed: Bool = false
+    var webSearchQueries: [String] = []
+    var groundingSourceURLs: [String] = []
+    var groundingSourceTitles: [String] = []
+    var groundingMetadataJSON: String?
 }
 
 private final class GeminiCallTrace {
     let requestPrompt: String?
     let requestMetadataJSON: String?
     let imageMetadataJSON: String?
-    let usesSearchGrounding: Bool
+    let searchGroundingRequested: Bool
     var requestPayloadBytes: Int?
     var resolvedModel: String?
     var resolvedModelVersion: String?
@@ -405,18 +425,23 @@ private final class GeminiCallTrace {
     var streamEventCount: Int = 0
     var thoughtPartCount: Int = 0
     var nonThoughtPartCount: Int = 0
+    var searchGroundingUsed: Bool = false
+    var webSearchQueries: [String] = []
+    var groundingSourceURLs: [String] = []
+    var groundingSourceTitles: [String] = []
+    var groundingMetadataJSON: String?
     var attempts: [GeminiModelAttemptLog] = []
 
     init(
         requestPrompt: String?,
         requestMetadataJSON: String?,
         imageMetadataJSON: String?,
-        usesSearchGrounding: Bool
+        searchGroundingRequested: Bool
     ) {
         self.requestPrompt = requestPrompt
         self.requestMetadataJSON = requestMetadataJSON
         self.imageMetadataJSON = imageMetadataJSON
-        self.usesSearchGrounding = usesSearchGrounding
+        self.searchGroundingRequested = searchGroundingRequested
     }
 
     var requestPromptCharacterCount: Int {
@@ -439,6 +464,11 @@ private final class GeminiCallTrace {
         streamEventCount = attempt.streamEventCount
         thoughtPartCount = attempt.thoughtPartCount
         nonThoughtPartCount = attempt.nonThoughtPartCount
+        searchGroundingUsed = attempt.searchGroundingUsed
+        webSearchQueries = attempt.webSearchQueries
+        groundingSourceURLs = attempt.groundingSourceURLs
+        groundingSourceTitles = attempt.groundingSourceTitles
+        groundingMetadataJSON = attempt.groundingMetadataJSON
         resolvedModel = attempt.model
         if let modelVersion = attempt.modelVersion {
             resolvedModelVersion = modelVersion
@@ -447,6 +477,19 @@ private final class GeminiCallTrace {
         if attempt.succeeded {
             resolvedModelVersion = attempt.modelVersion
         }
+    }
+}
+
+private struct AISearchValidationResult {
+    let reasons: [String]
+    let retryNutrientIDs: [String]
+
+    var requiresRetry: Bool {
+        !reasons.isEmpty
+    }
+
+    var reasonSummary: String {
+        reasons.joined(separator: "; ")
     }
 }
 
@@ -704,7 +747,7 @@ final class ScanService {
             requestPrompt: finalPrompt,
             requestMetadataJSON: encodedJSONString(requestMetadata),
             imageMetadataJSON: encodedJSONString(preparedImages.map(\.metadata)),
-            usesSearchGrounding: false
+            searchGroundingRequested: false
         )
 
         // Try primary model, fall back on 500/503
@@ -839,11 +882,11 @@ final class ScanService {
             requestPrompt: finalPrompt,
             requestMetadataJSON: encodedJSONString(requestMetadata),
             imageMetadataJSON: nil,
-            usesSearchGrounding: true
+            searchGroundingRequested: true
         )
 
         scanProgressMessage = "Waiting for Gemini..."
-        let nutritionData: GeminiNutritionResponse
+        var nutritionData: GeminiNutritionResponse
         do {
             nutritionData = try await callGemini(
                 request: request,
@@ -869,6 +912,116 @@ final class ScanService {
             throw visibleError
         }
 
+        scanProgressMessage = "Validating nutrition data..."
+        let validation = validateAISearchResponse(nutritionData, query: trimmed, trace: trace)
+        #if DEBUG
+        if validation.requiresRetry {
+            print("⚠️ AI nutrition search suspicious first pass: \(validation.reasonSummary)")
+        } else {
+            print("✅ AI nutrition search validation passed")
+        }
+        #endif
+
+        if validation.requiresRetry {
+            recordGeminiScanLog(
+                operation: .aiSearch,
+                status: .success,
+                primaryModel: modelConfig.primary,
+                fallbackModel: modelConfig.fallback,
+                resolvedModel: trace.resolvedModel ?? modelConfig.primary,
+                usedFallback: trace.usedFallback,
+                userPrompt: "\(trimmed) [first pass; validation retry: \(validation.reasonSummary)]",
+                durationMs: msFrom(ContinuousClock.now.duration(to: searchStart)),
+                debugTrace: trace,
+                response: nutritionData
+            )
+
+            scanProgressMessage = "Checking missing nutrients..."
+            let retryPrompt = Self.aiSearchValidationRetryPrompt(
+                query: trimmed,
+                firstPass: nutritionData,
+                validation: validation
+            )
+            let retryRequest = GeminiRequest(
+                contents: [
+                    GeminiContent(
+                        role: "user",
+                        parts: [.text(retryPrompt)]
+                    )
+                ],
+                generationConfig: GeminiGenerationConfig(
+                    responseMimeType: "application/json",
+                    thinkingConfig: GeminiThinkingConfig(thinkingLevel: modelConfig.thinkingLevel)
+                ),
+                tools: [.googleSearch]
+            )
+            let retryMetadata = GeminiRequestLogMetadata(
+                apiMethod: "streamGenerateContent",
+                responseMimeType: "application/json",
+                thinkingLevel: modelConfig.thinkingLevel,
+                includeThoughts: true,
+                tools: ["google_search"],
+                imageCount: 0,
+                maxImageDimension: nil,
+                jpegQuality: nil
+            )
+            let retryTrace = GeminiCallTrace(
+                requestPrompt: retryPrompt,
+                requestMetadataJSON: encodedJSONString(retryMetadata),
+                imageMetadataJSON: nil,
+                searchGroundingRequested: true
+            )
+
+            do {
+                let retryData = try await callGemini(
+                    request: retryRequest,
+                    apiKey: apiKey,
+                    primaryModel: modelConfig.primary,
+                    fallbackModel: modelConfig.fallback,
+                    trace: retryTrace
+                )
+                let merge = mergeAISearchRetry(
+                    firstPass: nutritionData,
+                    retry: retryData,
+                    validation: validation,
+                    retryTrace: retryTrace
+                )
+                nutritionData = merge.response
+                let mergeSummary = merge.mergedNutrientIDs.isEmpty
+                    ? "no better sourced non-zero nutrients"
+                    : "merged \(merge.mergedNutrientIDs.sorted().joined(separator: ", "))"
+                recordGeminiScanLog(
+                    operation: .aiSearch,
+                    status: .success,
+                    primaryModel: modelConfig.primary,
+                    fallbackModel: modelConfig.fallback,
+                    resolvedModel: retryTrace.resolvedModel ?? modelConfig.primary,
+                    usedFallback: retryTrace.usedFallback,
+                    userPrompt: "\(trimmed) [validation retry: \(validation.reasonSummary); \(mergeSummary)]",
+                    durationMs: msFrom(ContinuousClock.now.duration(to: searchStart)),
+                    debugTrace: retryTrace,
+                    response: retryData
+                )
+            } catch {
+                let visibleError = visibleError(from: error)
+                recordGeminiScanLog(
+                    operation: .aiSearch,
+                    status: .failure,
+                    primaryModel: modelConfig.primary,
+                    fallbackModel: modelConfig.fallback,
+                    resolvedModel: retryTrace.resolvedModel ?? modelConfig.primary,
+                    usedFallback: retryTrace.usedFallback,
+                    userPrompt: "\(trimmed) [validation retry failed: \(validation.reasonSummary)]",
+                    durationMs: msFrom(ContinuousClock.now.duration(to: searchStart)),
+                    debugTrace: retryTrace,
+                    error: visibleError
+                )
+                #if DEBUG
+                print("⚠️ AI nutrition validation retry failed; using first pass: \(visibleError.localizedDescription)")
+                #endif
+            }
+        }
+
         let totalMs = msFrom(ContinuousClock.now.duration(to: searchStart))
         scanProgressMessage = "Building nutrition entry..."
         lastScanDurationMs = totalMs
@@ -886,9 +1039,11 @@ final class ScanService {
             fallbackModel: modelConfig.fallback,
             resolvedModel: trace.resolvedModel ?? modelConfig.primary,
             usedFallback: trace.usedFallback,
-            userPrompt: trimmed,
+            userPrompt: validation.requiresRetry
+                ? "\(trimmed) [merged result after validation: \(validation.reasonSummary)]"
+                : "\(trimmed) [validation passed]",
             durationMs: totalMs,
-            debugTrace: trace,
+            debugTrace: validation.requiresRetry ? nil : trace,
             response: nutritionData
         )
         return entry
@@ -985,7 +1140,7 @@ final class ScanService {
             requestPrompt: prompt,
             requestMetadataJSON: encodedJSONString(requestMetadata),
             imageMetadataJSON: encodedJSONString(preparedImages.map(\.metadata)),
-            usesSearchGrounding: false
+            searchGroundingRequested: false
         )
 
         scanProgressMessage = "Waiting for Gemini..."
@@ -1405,6 +1560,7 @@ final class ScanService {
     ) throws {
         attempt.streamEventCount += 1
         applyUsageMetadata(apiResponse.usageMetadata, modelVersion: apiResponse.modelVersion, to: &attempt)
+        applyGroundingMetadata(apiResponse.candidates, to: &attempt)
 
         if let apiError = apiResponse.error {
             attempt.parseStage = "stream_api_error"
@@ -1423,6 +1579,36 @@ final class ScanService {
                 jsonText += text
             }
         }
+    }
+
+    private func applyGroundingMetadata(
+        _ candidates: [GeminiCandidate]?,
+        to attempt: inout GeminiModelAttemptLog
+    ) {
+        guard let metadata = candidates?.compactMap(\.groundingMetadata), !metadata.isEmpty else { return }
+
+        for item in metadata {
+            for query in item.webSearchQueries ?? [] {
+                appendUnique(query.trimmingCharacters(in: .whitespacesAndNewlines), to: &attempt.webSearchQueries)
+            }
+
+            for chunk in item.groundingChunks ?? [] {
+                if let url = chunk.web?.uri?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    appendUnique(url, to: &attempt.groundingSourceURLs)
+                }
+                if let title = chunk.web?.title?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    appendUnique(title, to: &attempt.groundingSourceTitles)
+                }
+            }
+        }
+
+        attempt.searchGroundingUsed = !attempt.webSearchQueries.isEmpty || !attempt.groundingSourceURLs.isEmpty || !attempt.groundingSourceTitles.isEmpty
+        attempt.groundingMetadataJSON = encodedJSONString(metadata)
+    }
+
+    private func appendUnique(_ value: String, to values: inout [String]) {
+        guard !value.isEmpty, !values.contains(value) else { return }
+        values.append(value)
     }
 
     private func applyUsageMetadata(
@@ -1497,6 +1683,144 @@ final class ScanService {
             outputRatePerMillionTokens: outputRate,
             estimatedCostUSD: inputCost + outputCost
         )
+    }
+
+    private func validateAISearchResponse(
+        _ response: GeminiNutritionResponse,
+        query: String,
+        trace: GeminiCallTrace
+    ) -> AISearchValidationResult {
+        let micros = normalizedMicronutrients(response.micronutrients ?? [:])
+        var reasons: [String] = []
+        var retryNutrientIDs = Set<String>()
+        let hasRealNutrition = response.calories > 20 && (response.protein + response.carbs + response.fat) > 0
+        let labelLikely = hasRealNutrition && isLikelyBrandedOrRestaurantResult(response: response, query: query)
+
+        if trace.searchGroundingRequested && !trace.searchGroundingUsed {
+            reasons.append("no grounding metadata returned")
+            retryNutrientIDs.formUnion(Self.aiSearchCoreLabelNutrientIDs)
+        }
+
+        if labelLikely && !hasPositiveMicronutrient("sodium", in: micros) {
+            reasons.append("branded/restaurant-like result has missing or zero sodium")
+            retryNutrientIDs.insert("sodium")
+        }
+
+        if labelLikely && response.carbs > 0 && !hasPositiveMicronutrient("fiber", in: micros) {
+            reasons.append("branded/restaurant-like result has missing or zero fiber")
+            retryNutrientIDs.insert("fiber")
+        }
+
+        if labelLikely && response.carbs > 0 && !hasPositiveSugar(in: micros) {
+            reasons.append("branded/restaurant-like result has missing or zero sugar")
+            retryNutrientIDs.formUnion(["sugar", "added_sugars"])
+        }
+
+        let criticalValues = Self.aiSearchCriticalMicronutrientIDs.compactMap { micros[$0]?.value }
+        if hasRealNutrition && !criticalValues.isEmpty && criticalValues.allSatisfy({ $0 <= 0 }) {
+            reasons.append("all critical micronutrients are zero")
+            retryNutrientIDs.formUnion(Self.aiSearchCriticalMicronutrientIDs)
+        }
+
+        return AISearchValidationResult(
+            reasons: reasons,
+            retryNutrientIDs: Array(retryNutrientIDs).sorted()
+        )
+    }
+
+    private func mergeAISearchRetry(
+        firstPass: GeminiNutritionResponse,
+        retry: GeminiNutritionResponse,
+        validation: AISearchValidationResult,
+        retryTrace: GeminiCallTrace
+    ) -> (response: GeminiNutritionResponse, mergedNutrientIDs: [String]) {
+        guard retryTrace.searchGroundingUsed else {
+            return (firstPass, [])
+        }
+
+        var mergedMicros = normalizedMicronutrients(firstPass.micronutrients ?? [:])
+        let retryMicros = normalizedMicronutrients(retry.micronutrients ?? [:])
+        var mergedIDs: [String] = []
+
+        for nutrientID in validation.retryNutrientIDs {
+            guard let retryValue = retryMicros[nutrientID], retryValue.value > 0 else { continue }
+            if (mergedMicros[nutrientID]?.value ?? 0) <= 0 {
+                mergedMicros[nutrientID] = retryValue
+                mergedIDs.append(nutrientID)
+            }
+        }
+
+        guard !mergedIDs.isEmpty else {
+            return (firstPass, [])
+        }
+
+        return (
+            GeminiNutritionResponse(
+                name: firstPass.name,
+                brand: firstPass.brand,
+                confidence: firstPass.confidence,
+                servingSize: firstPass.servingSize,
+                servingQuantity: firstPass.servingQuantity,
+                servingUnit: firstPass.servingUnit,
+                servingWeightGrams: firstPass.servingWeightGrams,
+                servingsPerContainer: firstPass.servingsPerContainer,
+                servingType: firstPass.servingType,
+                servingGrams: firstPass.servingGrams,
+                servingMl: firstPass.servingMl,
+                calories: firstPass.calories,
+                protein: firstPass.protein,
+                carbs: firstPass.carbs,
+                fat: firstPass.fat,
+                micronutrients: mergedMicros,
+                scanMode: firstPass.scanMode
+            ),
+            mergedIDs
+        )
+    }
+
+    private func normalizedMicronutrients(
+        _ micronutrients: [String: MicronutrientValue]
+    ) -> [String: MicronutrientValue] {
+        var normalized: [String: MicronutrientValue] = [:]
+        for (key, value) in micronutrients {
+            normalized[normalizedMicronutrientID(key)] = value
+        }
+        return normalized
+    }
+
+    private func normalizedMicronutrientID(_ id: String) -> String {
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased().replacingOccurrences(of: " ", with: "_")
+        switch lower {
+        case "total_sugar", "total_sugars", "sugars":
+            return "sugar"
+        default:
+            return KnownMicronutrients.normalize(trimmed)
+        }
+    }
+
+    private func hasPositiveMicronutrient(
+        _ id: String,
+        in micronutrients: [String: MicronutrientValue]
+    ) -> Bool {
+        (micronutrients[id]?.value ?? 0) > 0
+    }
+
+    private func hasPositiveSugar(in micronutrients: [String: MicronutrientValue]) -> Bool {
+        hasPositiveMicronutrient("sugar", in: micronutrients)
+            || hasPositiveMicronutrient("added_sugars", in: micronutrients)
+    }
+
+    private func isLikelyBrandedOrRestaurantResult(
+        response: GeminiNutritionResponse,
+        query: String
+    ) -> Bool {
+        if response.brand?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return true
+        }
+
+        let text = "\(query) \(response.name) \(response.servingSize ?? "")".lowercased()
+        return Self.aiSearchBrandedRestaurantSignals.contains { text.contains($0) }
     }
 
     private func recordThinkingTrace(_ text: String) {
@@ -1579,7 +1903,12 @@ final class ScanService {
             totalTokenCount: debugTrace?.totalTokenCount ?? 0,
             estimatedTokenCostUSD: debugTrace?.estimatedCostUSD ?? 0,
             pricingModel: debugTrace?.pricingModel,
-            searchGroundingUsed: debugTrace?.usesSearchGrounding ?? false,
+            searchGroundingRequested: debugTrace?.searchGroundingRequested ?? false,
+            searchGroundingUsed: debugTrace?.searchGroundingUsed ?? false,
+            webSearchQueries: debugTrace?.webSearchQueries ?? [],
+            groundingSourceURLs: debugTrace?.groundingSourceURLs ?? [],
+            groundingSourceTitles: debugTrace?.groundingSourceTitles ?? [],
+            groundingMetadataJSON: debugTrace?.groundingMetadataJSON,
             streamEventCount: debugTrace?.streamEventCount ?? 0,
             thoughtPartCount: debugTrace?.thoughtPartCount ?? 0,
             nonThoughtPartCount: debugTrace?.nonThoughtPartCount ?? 0,
@@ -1622,7 +1951,7 @@ final class ScanService {
             thinkingTokens: debugTrace.thinkingTokenCount,
             model: debugTrace.resolvedModelVersion ?? debugTrace.resolvedModel,
             pricingModel: debugTrace.pricingModel,
-            usedSearchGrounding: debugTrace.usesSearchGrounding,
+            usedSearchGrounding: debugTrace.searchGroundingUsed,
             succeeded: status == .success
         )
     }
@@ -1674,6 +2003,31 @@ private extension String {
 /// These prompts are identical to what the server used — moved on-device for BYOK.
 /// Both modes return the same JSON structure; the prompts differ in what they ask Gemini to do.
 extension ScanService {
+    private static let aiSearchCriticalMicronutrientIDs = [
+        "sodium", "fiber", "sugar", "added_sugars", "cholesterol",
+        "saturated_fat", "calcium", "iron", "potassium"
+    ]
+
+    private static let aiSearchCoreLabelNutrientIDs = [
+        "sodium", "fiber", "sugar", "added_sugars", "cholesterol", "saturated_fat"
+    ]
+
+    private static let aiSearchBrandedRestaurantSignals = [
+        "restaurant", "menu", "brand", "nutrition facts", "label",
+        "bar", "cereal", "chips", "cracker", "cookie", "soda",
+        "drink", "bottle", "can", "package", "frozen", "fast food",
+        "mcdonald", "starbucks", "chipotle", "taco bell", "wendy",
+        "burger king", "subway", "panera", "chick-fil-a", "domino",
+        "pizza hut"
+    ]
+
+    private static func encodedPromptJSON<T: Encodable>(_ value: T) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        guard let data = try? encoder.encode(value) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
 
     /// Prompt for label scan mode — OCR of nutrition facts panels.
     static let labelPrompt = """
@@ -1820,6 +2174,35 @@ extension ScanService {
     - For "% Daily Value" only nutrients, convert to actual amounts if possible, otherwise use "%" as unit
     - Return only the JSON object. Do not include citations, markdown, comments, or prose outside the JSON
     """
+
+    private static func aiSearchValidationRetryPrompt(
+        query: String,
+        firstPass: GeminiNutritionResponse,
+        validation: AISearchValidationResult
+    ) -> String {
+        let brandText = firstPass.brand ?? "null"
+        let servingText = firstPass.servingSize ?? "unknown serving"
+        let nutrients = validation.retryNutrientIDs.joined(separator: ", ")
+        let firstPassMicros = firstPass.micronutrients ?? [:]
+
+        return """
+        You are validating missing or suspicious nutrients for an existing AI Search nutrition result. Use Google Search grounding.
+
+        Original user search: \(query)
+        Existing result: \(firstPass.name)
+        Brand/restaurant/manufacturer: \(brandText)
+        Serving: \(servingText)
+        Existing macros: \(firstPass.calories) calories, \(firstPass.protein)g protein, \(firstPass.carbs)g carbs, \(firstPass.fat)g fat
+        Existing micronutrients JSON: \(encodedPromptJSON(firstPassMicros) ?? "{}")
+        Suspicious signals: \(validation.reasonSummary)
+
+        Find only these missing or suspicious nutrients for the exact same food and serving: \(nutrients).
+
+        Return a JSON object with the same shape as the original AI Search response. Keep the existing name, brand, serving, calories, protein, carbs, and fat unless a source is needed only to make the JSON valid. In "micronutrients", include only source-reported values for the requested nutrient IDs. Do not regenerate the full nutrition profile. Do not include zero values unless the source explicitly reports 0. Omit nutrients you cannot verify from official product labels, manufacturer pages, restaurant nutrition PDFs, USDA FoodData Central, or Open Food Facts.
+
+        Return only JSON. No markdown, comments, citations, or prose.
+        """
+    }
 
     /// Prompt for calculator OCR import — extracts one named ingredient only.
     static func calculatorIngredientPrompt(name: String) -> String {

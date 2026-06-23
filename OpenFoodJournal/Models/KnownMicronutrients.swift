@@ -185,6 +185,11 @@ enum KnownMicronutrients {
         dailyValue: 28, isCommon: true, category: .other
     )
 
+    static let totalSugars = KnownMicronutrient(
+        id: "sugar", name: "Total Sugars", unit: "g",
+        dailyValue: 0, isCommon: true, category: .other
+    )
+
     static let addedSugars = KnownMicronutrient(
         id: "added_sugars", name: "Added Sugars", unit: "g",
         dailyValue: 50, isCommon: true, category: .other
@@ -217,7 +222,7 @@ enum KnownMicronutrients {
         calcium, iron, magnesium, phosphorus, potassium, sodium,
         zinc, copper, manganese, selenium, chromium, molybdenum, iodine, chloride,
         // Other
-        fiber, addedSugars, cholesterol, saturatedFat, transFat
+        fiber, totalSugars, addedSugars, cholesterol, saturatedFat, transFat
     ]
 
     /// Only the nutrients commonly shown on nutrition labels (isCommon == true)
@@ -253,6 +258,14 @@ enum KnownMicronutrients {
         map["b6"] = vitaminB6
         map["dietary fiber"] = fiber
         map["fibre"] = fiber
+        map["sugar"] = totalSugars
+        map["sugars"] = totalSugars
+        map["total sugar"] = totalSugars
+        map["total sugars"] = totalSugars
+        map["dietary sugar"] = totalSugars
+        map["dietary sugars"] = totalSugars
+        map["added sugar"] = addedSugars
+        map["added sugars"] = addedSugars
         map["sat fat"] = saturatedFat
         map["sat. fat"] = saturatedFat
         return map
@@ -261,12 +274,17 @@ enum KnownMicronutrients {
     /// Attempts to find a known micronutrient matching a free-text name from Gemini.
     /// Returns nil if the name doesn't match any known nutrient.
     static func find(_ name: String) -> KnownMicronutrient? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
         // Try exact ID match first
-        if let nutrient = byID[name.lowercased()] {
+        let idKey = trimmed.lowercased()
+        if let nutrient = byID[idKey] {
             return nutrient
         }
+
         // Then try name match
-        return byName[name.lowercased()]
+        return byName[idKey.replacingOccurrences(of: "_", with: " ")]
     }
 
     /// Grouped by category for display in the summary view
@@ -280,18 +298,42 @@ enum KnownMicronutrients {
     /// Look up a nutrient by its canonical ID (e.g. "sodium", "fiber").
     /// Returns nil if the ID doesn't match any known nutrient or is empty.
     static func nutrient(forID id: String) -> KnownMicronutrient? {
-        guard !id.isEmpty else { return nil }
-        return Self.byID[id]
+        let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return Self.byID[trimmed.lowercased()]
+    }
+
+    /// Reads a micronutrient dictionary with both canonical IDs and legacy
+    /// display-name keys. Existing app data contains both shapes.
+    static func value(
+        in micronutrients: [String: MicronutrientValue],
+        forID id: String,
+        aliases: [String] = []
+    ) -> MicronutrientValue? {
+        let canonicalID = normalize(id)
+        let directKeys = [id, Self.byID[canonicalID]?.name].compactMap(\.self) + aliases
+
+        for key in directKeys {
+            if let value = micronutrients[key] {
+                return value
+            }
+        }
+
+        for (key, value) in micronutrients where normalize(key) == canonicalID {
+            return value
+        }
+
+        return nil
     }
 
     /// Normalize a micronutrient key from entry data to a canonical ID.
     /// Tries: exact ID match → name-based lookup → lowercase fallback.
     static func normalize(_ key: String) -> String {
-        let lower = key.lowercased()
+        let lower = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         // Direct ID match
         if Self.byID[lower] != nil { return lower }
         // Name-based lookup
-        if let nutrient = byName[lower] { return nutrient.id }
+        if let nutrient = byName[lower.replacingOccurrences(of: "_", with: " ")] { return nutrient.id }
         // Fallback — return lowercased key as-is
         return lower
     }

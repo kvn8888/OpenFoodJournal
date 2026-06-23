@@ -41,6 +41,7 @@ struct SettingsView: View {
     @State private var isSyncingHealthKit = false
     @State private var showHealthKitSyncResult = false
     @State private var healthKitSyncResultMessage = ""
+    @State private var showHealthKitRepairConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -154,7 +155,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Gemini Usage")
                 } footer: {
-                    Text("Estimated from Gemini token usage and Google Standard paid-tier prices checked June 19, 2026. Google Search grounding fees are not included because the API response does not expose the number of billable search queries.")
+                    Text("Estimated from Gemini token usage and Google Standard paid-tier prices checked June 22, 2026. Google Search grounding fees are not included because the API response does not expose the number of billable search queries.")
                 }
 
                 // MARK: Integrations
@@ -188,6 +189,13 @@ struct SettingsView: View {
                     }
                     .disabled(!healthKitEnabled || isSyncingHealthKit)
 
+                    Button {
+                        showHealthKitRepairConfirmation = true
+                    } label: {
+                        Label("Repair Apple Health Nutrition", systemImage: "wrench.and.screwdriver")
+                    }
+                    .disabled(!healthKitEnabled || isSyncingHealthKit)
+
                     Toggle(isOn: $offContributeEnabled) {
                         Label("Contribute to Open Food Facts", systemImage: "globe.americas")
                     }
@@ -201,7 +209,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Integrations")
                 } footer: {
-                    Text("Apple Health sync only replaces samples written by OpenFoodJournal. OpenFoodJournal records successful Open Food Facts uploads on this device; if the status stays at zero, no contribution has been confirmed.")
+                    Text("Apple Health repair rewrites OpenFoodJournal-owned nutrition samples for existing entries without touching nutrition data from other apps. OpenFoodJournal records successful Open Food Facts uploads on this device; if the status stays at zero, no contribution has been confirmed.")
                 }
 
                 // MARK: Data
@@ -332,6 +340,18 @@ struct SettingsView: View {
             Text(healthKitSyncResultMessage)
         }
         .confirmationDialog(
+            "Repair Apple Health Nutrition?",
+            isPresented: $showHealthKitRepairConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Repair Nutrition History") {
+                performHealthKitBackfill(force: true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This rewrites Apple Health nutrition samples for all OpenFoodJournal entries using the app's sync identifiers. It replaces OpenFoodJournal-owned samples instead of duplicating them, and does not modify nutrition data from other apps.")
+        }
+        .confirmationDialog(
             "Reset Gemini Usage Total?",
             isPresented: $showResetGeminiCostConfirmation,
             titleVisibility: .visible
@@ -453,7 +473,7 @@ struct SettingsView: View {
         return "\(countText). Last confirmed \(date.formatted(date: .abbreviated, time: .shortened))."
     }
 
-    private func performHealthKitBackfill() {
+    private func performHealthKitBackfill(force: Bool = false) {
         Task {
             isSyncingHealthKit = true
             defer { isSyncingHealthKit = false }
@@ -468,9 +488,11 @@ struct SettingsView: View {
                 return
             }
 
-            let entries = entriesNeedingHealthKitSync
-            let summary = await healthKit.syncMissingEntries(entries, in: modelContext)
-            healthKitSyncResultMessage = summary.message
+            let entries = force ? nutritionStore.fetchAllEntries() : entriesNeedingHealthKitSync
+            let summary = await healthKit.syncMissingEntries(entries, in: modelContext, force: force)
+            healthKitSyncResultMessage = force
+                ? "Repair complete. \(summary.message)"
+                : summary.message
             showHealthKitSyncResult = true
         }
     }

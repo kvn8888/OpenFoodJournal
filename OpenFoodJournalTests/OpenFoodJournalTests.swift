@@ -69,4 +69,77 @@ struct OpenFoodJournalTests {
         #expect(statement.args.count == 3)
     }
 
+    @Test func micronutrientValueDecodesBareNumbersWithKnownUnits() throws {
+        let json = """
+        {
+            "sodium": 1007.4,
+            "fiber": 12.5,
+            "sugar": 8.25,
+            "added_sugars": 3.5,
+            "mystery_nutrient": 2
+        }
+        """.data(using: .utf8)!
+
+        let values = try JSONDecoder().decode([String: MicronutrientValue].self, from: json)
+
+        #expect(values["sodium"]?.value == 1007.4)
+        #expect(values["sodium"]?.unit == "mg")
+        #expect(values["fiber"]?.value == 12.5)
+        #expect(values["fiber"]?.unit == "g")
+        #expect(values["sugar"]?.value == 8.25)
+        #expect(values["sugar"]?.unit == "g")
+        #expect(values["added_sugars"]?.value == 3.5)
+        #expect(values["added_sugars"]?.unit == "g")
+        #expect(values["mystery_nutrient"]?.value == 2)
+        #expect(values["mystery_nutrient"]?.unit == "")
+    }
+
+    @Test func micronutrientValueDecodesObjectShape() throws {
+        let json = """
+        {
+            "sodium": {
+                "value": 1007.4,
+                "unit": "mg"
+            },
+            "fiber": {
+                "value": 12.5,
+                "unit": "g"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let values = try JSONDecoder().decode([String: MicronutrientValue].self, from: json)
+
+        #expect(values["sodium"]?.value == 1007.4)
+        #expect(values["sodium"]?.unit == "mg")
+        #expect(values["fiber"]?.value == 12.5)
+        #expect(values["fiber"]?.unit == "g")
+    }
+
+    @Test func micronutrientLookupBridgesCanonicalAndDisplayKeys() throws {
+        let canonical: [String: MicronutrientValue] = [
+            "sodium": MicronutrientValue(value: 980, unit: "mg"),
+            "fiber": MicronutrientValue(value: 8, unit: "g"),
+            "sugar": MicronutrientValue(value: 12, unit: "g"),
+            "saturated_fat": MicronutrientValue(value: 6, unit: "g")
+        ]
+
+        #expect(KnownMicronutrients.value(in: canonical, forID: "sodium")?.value == 980)
+        #expect(KnownMicronutrients.value(in: canonical, forID: "fiber")?.value == 8)
+        #expect(KnownMicronutrients.value(in: canonical, forID: "sugar", aliases: ["Sugar"])?.value == 12)
+        #expect(KnownMicronutrients.value(in: canonical, forID: "saturated_fat")?.value == 6)
+
+        let display: [String: MicronutrientValue] = [
+            "Sodium": MicronutrientValue(value: 1360, unit: "mg"),
+            "Fiber": MicronutrientValue(value: 2, unit: "g"),
+            "Sugar": MicronutrientValue(value: 10, unit: "g"),
+            "Saturated Fat": MicronutrientValue(value: 14, unit: "g")
+        ]
+
+        #expect(KnownMicronutrients.value(in: display, forID: "sodium")?.value == 1360)
+        #expect(KnownMicronutrients.value(in: display, forID: "fiber")?.value == 2)
+        #expect(KnownMicronutrients.value(in: display, forID: "sugar", aliases: ["Sugar"])?.value == 10)
+        #expect(KnownMicronutrients.value(in: display, forID: "saturated_fat")?.value == 14)
+    }
+
 }

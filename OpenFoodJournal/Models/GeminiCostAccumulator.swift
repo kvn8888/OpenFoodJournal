@@ -28,7 +28,7 @@ final class GeminiCostAccumulator {
     var lastPricingModel: String?
     var lastRecordedAt: Date?
 
-    var pricingSource: String = "Google Gemini API pricing, Standard paid tier, checked 2026-06-19"
+    var pricingSource: String = "Google Gemini API pricing, Standard paid tier, checked 2026-06-22"
 
     init() {}
 
