@@ -288,7 +288,7 @@ private struct ScanProgressOverlay: View {
 
             if !scanService.thinkingTrace.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Thinking trace", systemImage: "brain.head.profile")
+                    Label("Gemini thought summaries", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.9))
 
@@ -296,7 +296,7 @@ private struct ScanProgressOverlay: View {
                         Text(trace)
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.78))
-                            .lineLimit(3)
+                            .lineLimit(4)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
