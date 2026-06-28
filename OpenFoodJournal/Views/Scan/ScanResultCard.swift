@@ -12,8 +12,25 @@ struct ScanResultCard: View {
     let onConfirmAndSave: () -> Void     // Log + save to Food Bank
     let onRetake: () -> Void
     let onRedo: (() -> Void)?
+    let onMealTypeEdited: () -> Void
 
     @State private var showExtended = true
+
+    init(
+        entry: NutritionEntry,
+        onConfirm: @escaping () -> Void,
+        onConfirmAndSave: @escaping () -> Void,
+        onRetake: @escaping () -> Void,
+        onRedo: (() -> Void)? = nil,
+        onMealTypeEdited: @escaping () -> Void = {}
+    ) {
+        self.entry = entry
+        self.onConfirm = onConfirm
+        self.onConfirmAndSave = onConfirmAndSave
+        self.onRetake = onRetake
+        self.onRedo = onRedo
+        self.onMealTypeEdited = onMealTypeEdited
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -58,7 +75,7 @@ struct ScanResultCard: View {
                         }
                         Spacer()
                         // Meal type picker
-                        Picker("Meal", selection: $entry.mealType) {
+                        Picker("Meal", selection: mealTypeBinding) {
                             ForEach(MealType.allCases) { type in
                                 Label(type.rawValue, systemImage: type.systemImage)
                                     .tag(type)
@@ -153,6 +170,15 @@ struct ScanResultCard: View {
                     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
                 }
             }
+        }
+    }
+
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            entry.mealType
+        } set: { newValue in
+            entry.mealType = newValue
+            onMealTypeEdited()
         }
     }
 }

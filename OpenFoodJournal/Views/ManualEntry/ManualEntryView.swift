@@ -73,6 +73,7 @@ struct ManualEntryPrefill: Identifiable, Hashable {
 struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(TursoMirrorService.self) private var tursoMirror
@@ -88,6 +89,8 @@ struct ManualEntryView: View {
     @State private var name = ""
     @State private var brand = ""
     @State private var mealType: MealType = .snack
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
     @State private var calories = ""
     @State private var protein = ""
     @State private var carbs = ""
@@ -157,7 +160,7 @@ struct ManualEntryView: View {
                         .submitLabel(.next)
                         .onSubmit { focusedField = .calories }
 
-                    Picker("Meal", selection: $mealType) {
+                    Picker("Meal", selection: mealTypeBinding) {
                         ForEach(MealType.allCases) { type in
                             Label(type.rawValue, systemImage: type.systemImage)
                                 .tag(type)
@@ -239,6 +242,7 @@ struct ManualEntryView: View {
                 }
             }
             .onAppear {
+                applyDefaultMealTypeIfNeeded()
                 // Pre-fill form from search data if provided.
                 if let prefill {
                     name = prefill.name
@@ -302,6 +306,25 @@ struct ManualEntryView: View {
         }
     }
 
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            mealType
+        } set: { newValue in
+            mealType = newValue
+            mealTypeWasEdited = true
+        }
+    }
+
+    private var mealTypeForLog: MealType {
+        mealTypeWasEdited ? mealType : mealTimeSettings.mealType()
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        mealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
+    }
+
     /// Formats a Double for display in text fields — drops ".0" for whole numbers
     private func formatValue(_ value: Double) -> String {
         value.truncatingRemainder(dividingBy: 1) == 0
@@ -329,7 +352,7 @@ struct ManualEntryView: View {
 
         let entry = NutritionEntry(
             name: name.trimmingCharacters(in: .whitespaces),
-            mealType: mealType,
+            mealType: mealTypeForLog,
             scanMode: .manual,
             calories: caloriesVal,
             protein: proteinVal,
@@ -397,4 +420,5 @@ private struct MacroInputRow: View {
         .modelContainer(container)
         .environment(NutritionStore(modelContext: container.mainContext))
         .environment(HealthKitService())
+        .environment(MealTimeSettings())
 }

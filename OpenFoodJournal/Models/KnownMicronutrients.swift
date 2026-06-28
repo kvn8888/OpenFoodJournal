@@ -205,9 +205,29 @@ enum KnownMicronutrients {
         dailyValue: 20, isCommon: true, category: .other
     )
 
+    static let monounsaturatedFat = KnownMicronutrient(
+        id: "monounsaturated_fat", name: "Monounsaturated Fat", unit: "g",
+        dailyValue: 0, isCommon: false, category: .other
+    )
+
+    static let polyunsaturatedFat = KnownMicronutrient(
+        id: "polyunsaturated_fat", name: "Polyunsaturated Fat", unit: "g",
+        dailyValue: 0, isCommon: false, category: .other
+    )
+
     static let transFat = KnownMicronutrient(
         id: "trans_fat", name: "Trans Fat", unit: "g",
         dailyValue: 0, isCommon: true, category: .other  // No safe level; DV = 0
+    )
+
+    static let water = KnownMicronutrient(
+        id: "water", name: "Water", unit: "mL",
+        dailyValue: 0, isCommon: false, category: .other
+    )
+
+    static let caffeine = KnownMicronutrient(
+        id: "caffeine", name: "Caffeine", unit: "mg",
+        dailyValue: 0, isCommon: false, category: .other
     )
 
     // ── Collection Helpers ────────────────────────────────────────
@@ -222,7 +242,8 @@ enum KnownMicronutrients {
         calcium, iron, magnesium, phosphorus, potassium, sodium,
         zinc, copper, manganese, selenium, chromium, molybdenum, iodine, chloride,
         // Other
-        fiber, totalSugars, addedSugars, cholesterol, saturatedFat, transFat
+        fiber, totalSugars, addedSugars, cholesterol, saturatedFat,
+        monounsaturatedFat, polyunsaturatedFat, transFat, water, caffeine
     ]
 
     /// Only the nutrients commonly shown on nutrition labels (isCommon == true)
@@ -248,6 +269,7 @@ enum KnownMicronutrients {
         }
         // Common aliases people and Gemini might use
         map["vitamin b1"] = thiamin
+        map["thiamine"] = thiamin
         map["vitamin b2"] = riboflavin
         map["vitamin b3"] = niacin
         map["vitamin b5"] = pantothenicAcid
@@ -268,6 +290,10 @@ enum KnownMicronutrients {
         map["added sugars"] = addedSugars
         map["sat fat"] = saturatedFat
         map["sat. fat"] = saturatedFat
+        map["mono fat"] = monounsaturatedFat
+        map["monounsaturated fatty acids"] = monounsaturatedFat
+        map["poly fat"] = polyunsaturatedFat
+        map["polyunsaturated fatty acids"] = polyunsaturatedFat
         return map
     }()
 

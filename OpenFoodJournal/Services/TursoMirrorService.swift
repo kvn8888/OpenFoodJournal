@@ -158,6 +158,7 @@ enum TursoSchema {
             .init(name: "id", type: "TEXT PRIMARY KEY"),
             .init(name: "name", type: "TEXT"),
             .init(name: "brand", type: "TEXT"),
+            .init(name: "emoji", type: "TEXT"),
             .init(name: "created_at", type: "TEXT"),
             .init(name: "last_used_at", type: "TEXT"),
             .init(name: "archived_at", type: "TEXT"),
@@ -217,9 +218,13 @@ enum TursoSchema {
         TursoTableDefinition(name: "ofj_app_settings", columns: [
             .init(name: "id", type: "TEXT PRIMARY KEY"),
             .init(name: "use_gemini_pro", type: "INTEGER"),
+            .init(name: "food_bank_auto_generate_emojis", type: "INTEGER"),
             .init(name: "off_contribute_enabled", type: "INTEGER"),
             .init(name: "off_contribution_success_count", type: "INTEGER"),
             .init(name: "off_last_contribution_at", type: "TEXT"),
+            .init(name: "meal_breakfast_start_minutes", type: "INTEGER"),
+            .init(name: "meal_lunch_start_minutes", type: "INTEGER"),
+            .init(name: "meal_dinner_start_minutes", type: "INTEGER"),
             .init(name: "healthkit_enabled", type: "INTEGER"),
             .init(name: "turso_enabled", type: "INTEGER"),
             .init(name: "turso_include_diagnostics", type: "INTEGER"),
@@ -772,6 +777,7 @@ final class TursoMirrorService {
                 "id": .text(food.id.uuidString),
                 "name": .text(food.name),
                 "brand": optionalString(food.brand),
+                "emoji": optionalString(food.emoji),
                 "created_at": .text(iso(food.createdAt)),
                 "last_used_at": .text(iso(food.lastUsedAt)),
                 "archived_at": optionalDate(food.archivedAt),
@@ -838,9 +844,13 @@ final class TursoMirrorService {
         append(TursoMirrorRow(table: "ofj_app_settings", columns: [
             "id": .text("default"),
             "use_gemini_pro": .bool(defaults.bool(forKey: "scan.useProModel")),
+            "food_bank_auto_generate_emojis": .bool(defaults.bool(forKey: FoodBankEmojiSettings.autoGenerateKey)),
             "off_contribute_enabled": .bool(defaults.bool(forKey: "off.contributeEnabled")),
             "off_contribution_success_count": .integer(defaults.integer(forKey: "off.contributionSuccessCount")),
             "off_last_contribution_at": optionalDate(timestamp: defaults.double(forKey: "off.lastContributionAt")),
+            "meal_breakfast_start_minutes": .integer(defaults.integerOrDefault(forKey: "mealSchedule.breakfastStartMinutes", default: MealScheduleDefaults.breakfastStartMinutes)),
+            "meal_lunch_start_minutes": .integer(defaults.integerOrDefault(forKey: "mealSchedule.lunchStartMinutes", default: MealScheduleDefaults.lunchStartMinutes)),
+            "meal_dinner_start_minutes": .integer(defaults.integerOrDefault(forKey: "mealSchedule.dinnerStartMinutes", default: MealScheduleDefaults.dinnerStartMinutes)),
             "healthkit_enabled": .bool(defaults.bool(forKey: "healthkit.enabled")),
             "turso_enabled": .bool(isEnabled),
             "turso_include_diagnostics": .bool(includeDiagnostics),
@@ -1130,5 +1140,9 @@ private extension Array {
 private extension UserDefaults {
     func doubleOrDefault(forKey key: String, default defaultValue: Double) -> Double {
         object(forKey: key) == nil ? defaultValue : double(forKey: key)
+    }
+
+    func integerOrDefault(forKey key: String, default defaultValue: Int) -> Int {
+        object(forKey: key) == nil ? defaultValue : integer(forKey: key)
     }
 }

@@ -217,6 +217,7 @@ private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(TursoMirrorService.self) private var tursoMirror
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
@@ -224,12 +225,15 @@ private struct ScanResultSheet: View {
 
     @Bindable var entry: NutritionEntry
     let logDate: Date
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
 
     var body: some View {
         ScanResultCard(
             entry: entry,
             onConfirm: {
                 // Log entry only — no Food Bank save
+                applyMealTypeForLog()
                 nutritionStore.log(entry, to: logDate)
                 syncToHealthKitIfNeeded(entry)
                 scanService.pendingResult = nil
@@ -237,6 +241,7 @@ private struct ScanResultSheet: View {
             },
             onConfirmAndSave: {
                 // Log entry to journal
+                applyMealTypeForLog()
                 nutritionStore.log(entry, to: logDate)
                 syncToHealthKitIfNeeded(entry)
 
@@ -257,8 +262,25 @@ private struct ScanResultSheet: View {
                 scanService.pendingResult = nil
                 scanService.redoLastScanInBackground()
                 dismiss()
+            },
+            onMealTypeEdited: {
+                mealTypeWasEdited = true
             }
         )
+        .onAppear {
+            applyDefaultMealTypeIfNeeded()
+        }
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        entry.mealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
+    }
+
+    private func applyMealTypeForLog() {
+        guard !mealTypeWasEdited else { return }
+        entry.mealType = mealTimeSettings.mealType()
     }
 
     private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
@@ -296,16 +318,16 @@ private struct ScanProgressOverlay: View {
 
             if expectsThinkingTrace || !thinkingTrace.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Gemini is thinking", systemImage: "brain.head.profile")
+                    Label("Analyzing", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.9))
 
-                    Text("Thought summaries: \(thinkingTraceUpdateCount)")
+                    Text("Analysis steps: \(thinkingTraceUpdateCount)")
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.65))
 
                     if thinkingTrace.isEmpty {
-                        Text("Waiting for Gemini thought summaries...")
+                        Text("Waiting for analysis...")
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.65))
                     } else {
@@ -356,6 +378,7 @@ private struct EmptyLogView: View {
         .environment(store)
         .environment(HealthKitService())
         .environment(UserGoals())
+        .environment(MealTimeSettings())
 }
 
 #Preview("Empty") {
@@ -368,4 +391,5 @@ private struct EmptyLogView: View {
         .environment(store)
         .environment(HealthKitService())
         .environment(UserGoals())
+        .environment(MealTimeSettings())
 }

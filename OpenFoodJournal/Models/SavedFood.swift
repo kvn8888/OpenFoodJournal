@@ -225,6 +225,7 @@ final class SavedFood {
     var id: UUID = UUID()
     var name: String = ""
     var brand: String?             // Product brand, separate from name
+    var emoji: String?             // Optional user-visible Food Bank icon
     var createdAt: Date = Date()
 
     // Core macros — always required (same four as NutritionEntry)
@@ -269,6 +270,7 @@ final class SavedFood {
         id: UUID = UUID(),
         name: String,
         brand: String? = nil,
+        emoji: String? = nil,
         createdAt: Date = .now,
         calories: Double,
         protein: Double,
@@ -290,6 +292,7 @@ final class SavedFood {
         self.id = id
         self.name = name
         self.brand = brand
+        self.emoji = emoji
         self.createdAt = createdAt
         self.calories = calories
         self.protein = protein
@@ -340,6 +343,18 @@ extension SavedFood {
     func markLoggedForFoodBank(now: Date = .now) {
         lastUsedAt = now
         archivedAt = nil
+    }
+
+    var normalizedEmoji: String? {
+        guard let emoji = emoji?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !emoji.isEmpty else {
+            return nil
+        }
+        return emoji
+    }
+
+    var needsFoodBankEmoji: Bool {
+        normalizedEmoji == nil
     }
 
     static func compositeTotals(for ingredients: [CompositeIngredientSnapshot]) -> CompositeNutritionTotals {

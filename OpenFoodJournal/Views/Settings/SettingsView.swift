@@ -9,12 +9,16 @@ struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(ScanService.self) private var scanService
     @Environment(UserGoals.self) private var goals
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(TursoMirrorService.self) private var tursoMirror
     @Query private var geminiCostAccumulators: [GeminiCostAccumulator]
+    @Query private var savedFoods: [SavedFood]
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage("scan.useProModel") private var useProModel: Bool = false
+    @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
     @AppStorage("off.contributionSuccessCount") private var offContributionSuccessCount: Int = 0
     @AppStorage("off.lastContributionAt") private var offLastContributionAt: Double = 0
@@ -64,6 +68,28 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                             .font(.subheadline)
                     }
+                }
+
+                // MARK: Meal Schedule
+                Section {
+                    DatePicker("Breakfast Starts", selection: breakfastStartBinding, displayedComponents: .hourAndMinute)
+                    DatePicker("Lunch Starts", selection: lunchStartBinding, displayedComponents: .hourAndMinute)
+                    DatePicker("Dinner Starts", selection: dinnerStartBinding, displayedComponents: .hourAndMinute)
+
+                    LabeledContent("Breakfast", value: mealTimeSettings.rangeText(for: .breakfast))
+                    LabeledContent("Lunch", value: mealTimeSettings.rangeText(for: .lunch))
+                    LabeledContent("Dinner", value: mealTimeSettings.rangeText(for: .dinner))
+
+                    Button {
+                        mealTimeSettings.resetToDefaults()
+                    } label: {
+                        Label("Restore Default Meal Times", systemImage: "arrow.counterclockwise")
+                    }
+                    .disabled(mealTimeSettings.isDefaultSchedule)
+                } header: {
+                    Text("Meal Schedule")
+                } footer: {
+                    Text("Food is assigned to Breakfast, Lunch, or Dinner from your device's local time when you tap Add. Dinner wraps overnight until Breakfast starts; Snack remains a manual override.")
                 }
 
                 // MARK: Gemini API Key
@@ -120,6 +146,54 @@ struct SettingsView: View {
                     Text("Scanning")
                 } footer: {
                     Text("When enabled, food photo scans and AI Search use Gemini Pro for more accurate estimates. Lite mode is faster and uses less API quota.")
+                }
+
+                // MARK: Food Bank
+                Section {
+                    Toggle(isOn: $autoGenerateFoodEmojis) {
+                        Label("Auto-Generate Food Emojis", systemImage: "face.smiling")
+                    }
+                    .onChange(of: autoGenerateFoodEmojis) { _, enabled in
+                        tursoMirror.scheduleMirror(reason: "food_emoji_setting_changed")
+                        if enabled {
+                            assignMissingFoodEmojis()
+                        }
+                    }
+
+                    LabeledContent("Missing Emojis", value: missingFoodEmojiCount.formatted())
+
+                    if scanService.isAssigningFoodEmojis {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ProgressView(
+                                value: Double(scanService.foodEmojiCompletedCount),
+                                total: Double(max(scanService.foodEmojiTotalCount, 1))
+                            )
+                            Text(foodEmojiProgressText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if !scanService.foodEmojiProgressMessage.isEmpty {
+                        Text(scanService.foodEmojiProgressMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button {
+                        assignMissingFoodEmojis()
+                    } label: {
+                        Label("Generate Missing Emojis Now", systemImage: "sparkles")
+                    }
+                    .disabled(!hasAPIKey || scanService.isAssigningFoodEmojis || missingFoodEmojiCount == 0)
+
+                    if !hasAPIKey {
+                        Label("Gemini API key required.", systemImage: "key")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Food Bank")
+                } footer: {
+                    Text("When enabled, saved foods without an emoji are assigned one with Gemini Flash latest. The app processes foods sequentially and never overwrites existing emojis.")
                 }
 
                 // MARK: Gemini Usage
@@ -209,7 +283,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Integrations")
                 } footer: {
-                    Text("Apple Health repair rewrites OpenFoodJournal-owned nutrition samples for existing entries without touching nutrition data from other apps. OpenFoodJournal records successful Open Food Facts uploads on this device; if the status stays at zero, no contribution has been confirmed.")
+                    Text("Apple Health repair rewrites nutrition data for existing entries without touching data from other apps. Apple Health does not support added sugars or trans fat, so those are tracked in OpenFoodJournal only. Successful Open Food Facts contributions are recorded on this device; if the count stays at zero, no upload has been confirmed.")
                 }
 
                 // MARK: Data
@@ -256,7 +330,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Data")
                 } footer: {
-                    Text("Your journal is stored locally and in your private iCloud database. Optional Turso mirroring sends a push-only copy to a Turso database you configure.")
+                    Text("Your journal is stored locally and in your private iCloud account. Optional Turso mirroring sends a read-only copy to an external database you configure.")
                 }
 
                 // MARK: About
@@ -322,7 +396,7 @@ struct SettingsView: View {
                 pendingBackup = nil
             }
         } message: {
-            Text("This upserts records by UUID, so importing the same backup again updates existing data instead of duplicating it.\n\n\(pendingBackup?.importSummaryText ?? "")")
+            Text("Importing the same backup again updates existing data instead of duplicating it.\n\n\(pendingBackup?.importSummaryText ?? "")")
         }
         .alert("Backup Imported", isPresented: $showBackupImportSuccess) {
             Button("OK", role: .cancel) {}
@@ -349,7 +423,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This rewrites Apple Health nutrition samples for all OpenFoodJournal entries using the app's sync identifiers. It replaces OpenFoodJournal-owned samples instead of duplicating them, and does not modify nutrition data from other apps.")
+            Text("This rewrites Apple Health nutrition data for all OpenFoodJournal entries. It replaces data previously written by this app instead of duplicating it, and does not modify nutrition data from other apps.")
         }
         .confirmationDialog(
             "Reset Gemini Usage Total?",
@@ -365,8 +439,42 @@ struct SettingsView: View {
         }
     }
 
+    private var breakfastStartBinding: Binding<Date> {
+        Binding {
+            mealTimeSettings.date(forMinuteOfDay: mealTimeSettings.breakfastStartMinutes)
+        } set: { newValue in
+            mealTimeSettings.breakfastStartMinutes = mealTimeSettings.minuteOfDay(from: newValue)
+        }
+    }
+
+    private var lunchStartBinding: Binding<Date> {
+        Binding {
+            mealTimeSettings.date(forMinuteOfDay: mealTimeSettings.lunchStartMinutes)
+        } set: { newValue in
+            mealTimeSettings.lunchStartMinutes = mealTimeSettings.minuteOfDay(from: newValue)
+        }
+    }
+
+    private var dinnerStartBinding: Binding<Date> {
+        Binding {
+            mealTimeSettings.date(forMinuteOfDay: mealTimeSettings.dinnerStartMinutes)
+        } set: { newValue in
+            mealTimeSettings.dinnerStartMinutes = mealTimeSettings.minuteOfDay(from: newValue)
+        }
+    }
+
     private var geminiTotalEstimatedCostUSD: Double {
         geminiCostAccumulators.reduce(0) { $0 + $1.totalEstimatedTokenCostUSD }
+    }
+
+    private var missingFoodEmojiCount: Int {
+        savedFoods.filter(\.needsFoodBankEmoji).count
+    }
+
+    private var foodEmojiProgressText: String {
+        let message = scanService.foodEmojiProgressMessage
+        guard scanService.foodEmojiTotalCount > 0 else { return message }
+        return "\(message) (\(scanService.foodEmojiCompletedCount.formatted())/\(scanService.foodEmojiTotalCount.formatted()))"
     }
 
     private var geminiTotalInputTokens: Int {
@@ -454,6 +562,12 @@ struct SettingsView: View {
         tursoMirror.scheduleMirror(reason: "gemini_cost_reset")
     }
 
+    private func assignMissingFoodEmojis() {
+        Task {
+            await scanService.backfillMissingFoodEmojis()
+        }
+    }
+
     private var offContributionStatusText: String {
         guard offContributionSuccessCount > 0 else {
             return offContributeEnabled
@@ -483,7 +597,7 @@ struct SettingsView: View {
             }
 
             guard healthKit.isAuthorized else {
-                healthKitSyncResultMessage = "Apple Health authorization is required before OpenFoodJournal can sync nutrition samples."
+                healthKitSyncResultMessage = "Apple Health authorization is required before OpenFoodJournal can sync nutrition data."
                 showHealthKitSyncResult = true
                 return
             }
@@ -538,7 +652,10 @@ struct SettingsView: View {
                 goals: goals,
                 appSettings: AppSettingsRecord(
                     useProModel: useProModel,
-                    offContributeEnabled: offContributeEnabled
+                    offContributeEnabled: offContributeEnabled,
+                    breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
+                    lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
+                    dinnerStartMinutes: mealTimeSettings.dinnerStartMinutes
                 )
             )
             let tmpURL = FileManager.default.temporaryDirectory
@@ -578,6 +695,9 @@ struct SettingsView: View {
             backupImportSummary = try nutritionStore.importBackup(backup, goals: goals)
             useProModel = backup.appSettings.useProModel
             offContributeEnabled = backup.appSettings.offContributeEnabled
+            mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
+            mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes
+            mealTimeSettings.dinnerStartMinutes = backup.appSettings.dinnerStartMinutes
             showBackupImportSuccess = true
         } catch {
             backupImportErrorMessage = error.localizedDescription
@@ -605,4 +725,5 @@ struct SettingsView: View {
         .environment(NutritionStore(modelContext: container.mainContext))
         .environment(HealthKitService())
         .environment(UserGoals())
+        .environment(MealTimeSettings())
 }

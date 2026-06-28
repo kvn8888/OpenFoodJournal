@@ -11,9 +11,17 @@ struct SavedFoodRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // ── Left: Calorie count as the primary identifier ──
+            // ── Left: Emoji when assigned, otherwise the existing calorie/type badge ──
             VStack(alignment: .center, spacing: 2) {
-                if food.kind == .calculator {
+                if let emoji = food.normalizedEmoji {
+                    Text(emoji)
+                        .font(.title3)
+                    Text("\(Int(food.calories)) cal")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                } else if food.kind == .calculator {
                     Image(systemName: "slider.horizontal.3")
                         .font(.headline)
                         .foregroundStyle(.teal)
@@ -30,7 +38,7 @@ struct SavedFoodRowView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 44)
+            .frame(width: 52)
 
             // ── Center: Food name + serving info ──
             VStack(alignment: .leading, spacing: 2) {

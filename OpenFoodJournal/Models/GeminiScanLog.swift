@@ -8,6 +8,7 @@ import SwiftData
 enum GeminiScanLogOperation: String, Codable, CaseIterable, Sendable {
     case scan
     case aiSearch
+    case foodEmoji
 }
 
 enum GeminiScanLogStatus: String, Codable, CaseIterable, Sendable {

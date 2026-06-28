@@ -108,9 +108,6 @@ struct ScanCaptureView: View {
                 .background(.black.opacity(0.5))
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: capturedPhotos.isEmpty)
-        .animation(.easeInOut(duration: 0.25), value: isCapturingAdditionalPhoto)
-        .animation(.easeInOut(duration: 0.3), value: hasSelectedMode)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()

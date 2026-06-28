@@ -12,6 +12,7 @@ struct MacrosApp: App {
     @State private var tursoMirrorService: TursoMirrorService
     @State private var healthKitService: HealthKitService
     @State private var userGoals = UserGoals()
+    @State private var mealTimeSettings = MealTimeSettings()
     @State private var offService = OpenFoodFactsService()
     @Environment(\.scenePhase) private var scenePhase
 
@@ -50,6 +51,7 @@ struct MacrosApp: App {
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("hasRetrolinkedMappings") private var hasRetrolinkedMappings = false
+    @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis = false
 
     var body: some Scene {
         WindowGroup {
@@ -62,6 +64,7 @@ struct MacrosApp: App {
                     .environment(tursoMirrorService)
                     .environment(healthKitService)
                     .environment(userGoals)
+                    .environment(mealTimeSettings)
                     .environment(offService)
                     .task {
                         // Request HealthKit auth on first launch if user has previously enabled it
@@ -76,6 +79,9 @@ struct MacrosApp: App {
                             nutritionStore.deduplicateAllMappings()
                             nutritionStore.retrolinkOrphanedEntries()
                             hasRetrolinkedMappings = true
+                        }
+                        if autoGenerateFoodEmojis {
+                            await scanService.backfillMissingFoodEmojis()
                         }
                         tursoMirrorService.scheduleMirror(reason: "app_launch")
                     }
@@ -92,6 +98,7 @@ struct MacrosApp: App {
                     .environment(tursoMirrorService)
                     .environment(healthKitService)
                     .environment(userGoals)
+                    .environment(mealTimeSettings)
                     .environment(offService)
             }
         }

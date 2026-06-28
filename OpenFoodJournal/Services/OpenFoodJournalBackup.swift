@@ -196,6 +196,7 @@ struct SavedFoodRecord: Codable {
     var id: UUID
     var name: String
     var brand: String?
+    var emoji: String?
     var createdAt: Date
     var calories: Double
     var protein: Double
@@ -219,6 +220,7 @@ struct SavedFoodRecord: Codable {
         id = food.id
         name = food.name
         brand = food.brand
+        emoji = food.emoji
         createdAt = food.createdAt
         calories = food.calories
         protein = food.protein
@@ -243,6 +245,7 @@ struct SavedFoodRecord: Codable {
         case id
         case name
         case brand
+        case emoji
         case createdAt
         case calories
         case protein
@@ -268,6 +271,7 @@ struct SavedFoodRecord: Codable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         brand = try container.decodeIfPresent(String.self, forKey: .brand)
+        emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         calories = try container.decode(Double.self, forKey: .calories)
         protein = try container.decode(Double.self, forKey: .protein)
@@ -299,6 +303,7 @@ struct SavedFoodRecord: Codable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(brand, forKey: .brand)
+        try container.encodeIfPresent(emoji, forKey: .emoji)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(calories, forKey: .calories)
         try container.encode(protein, forKey: .protein)
@@ -324,6 +329,7 @@ struct SavedFoodRecord: Codable {
             id: id,
             name: name,
             brand: brand,
+            emoji: emoji,
             createdAt: createdAt,
             calories: calories,
             protein: protein,
@@ -351,6 +357,7 @@ struct SavedFoodRecord: Codable {
     func apply(to food: SavedFood) {
         food.name = name
         food.brand = brand
+        food.emoji = emoji
         food.createdAt = createdAt
         food.calories = calories
         food.protein = protein
@@ -498,4 +505,38 @@ struct UserGoalsRecord: Codable {
 struct AppSettingsRecord: Codable {
     var useProModel: Bool
     var offContributeEnabled: Bool
+    var breakfastStartMinutes: Int
+    var lunchStartMinutes: Int
+    var dinnerStartMinutes: Int
+
+    init(
+        useProModel: Bool,
+        offContributeEnabled: Bool,
+        breakfastStartMinutes: Int = MealScheduleDefaults.breakfastStartMinutes,
+        lunchStartMinutes: Int = MealScheduleDefaults.lunchStartMinutes,
+        dinnerStartMinutes: Int = MealScheduleDefaults.dinnerStartMinutes
+    ) {
+        self.useProModel = useProModel
+        self.offContributeEnabled = offContributeEnabled
+        self.breakfastStartMinutes = breakfastStartMinutes
+        self.lunchStartMinutes = lunchStartMinutes
+        self.dinnerStartMinutes = dinnerStartMinutes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case useProModel
+        case offContributeEnabled
+        case breakfastStartMinutes
+        case lunchStartMinutes
+        case dinnerStartMinutes
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        useProModel = try container.decodeIfPresent(Bool.self, forKey: .useProModel) ?? false
+        offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false
+        breakfastStartMinutes = try container.decodeIfPresent(Int.self, forKey: .breakfastStartMinutes) ?? MealScheduleDefaults.breakfastStartMinutes
+        lunchStartMinutes = try container.decodeIfPresent(Int.self, forKey: .lunchStartMinutes) ?? MealScheduleDefaults.lunchStartMinutes
+        dinnerStartMinutes = try container.decodeIfPresent(Int.self, forKey: .dinnerStartMinutes) ?? MealScheduleDefaults.dinnerStartMinutes
+    }
 }

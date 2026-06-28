@@ -255,7 +255,7 @@ struct NutritionCalculatorEditorView: View {
                 fat: 0,
                 servingSize: ingredientCountText(ingredients.count),
                 servingQuantity: 1,
-                servingUnit: "build",
+                servingUnit: "meal",
                 kind: .calculator,
                 calculatorIngredients: ingredients
             )
@@ -275,12 +275,15 @@ struct NutritionCalculatorBuildView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
     @Environment(TursoMirrorService.self) private var tursoMirror
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var calculator: SavedFood
     let logDate: Date
 
     @State private var mealType: MealType = .snack
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
     @State private var buildName: String
     @State private var selections: [CalculatorSelection] = []
 
@@ -314,6 +317,9 @@ struct NutritionCalculatorBuildView: View {
                     Button("Cancel") { dismiss() }
                 }
             }
+            .onAppear {
+                applyDefaultMealTypeIfNeeded()
+            }
         }
     }
 
@@ -321,7 +327,7 @@ struct NutritionCalculatorBuildView: View {
         Section("Build") {
             TextField("Logged meal name", text: $buildName)
 
-            Picker("Meal", selection: $mealType) {
+            Picker("Meal", selection: mealTypeBinding) {
                 ForEach(MealType.allCases) { meal in
                     Text(meal.rawValue.capitalized).tag(meal)
                 }
@@ -394,7 +400,7 @@ struct NutritionCalculatorBuildView: View {
             } header: {
                 Text("Quantities")
             } footer: {
-                Text("Use quantities for adjustments like double portions or multiple scoops without changing the saved calculator.")
+                Text("Adjust quantities for double portions or multiple scoops without changing saved nutrition values.")
             }
         }
     }
@@ -411,7 +417,7 @@ struct NutritionCalculatorBuildView: View {
             .disabled(!canLog)
         } footer: {
             if selections.isEmpty {
-                Text("Choose at least one ingredient portion to log a calculator build.")
+                Text("Choose at least one ingredient to log this meal.")
             }
         }
     }
@@ -469,17 +475,17 @@ struct NutritionCalculatorBuildView: View {
         )
         let entry = NutritionEntry(
             name: trimmedName,
-            mealType: mealType,
+            mealType: mealTypeForLog,
             scanMode: .manual,
             calories: totals.calories,
             protein: totals.protein,
             carbs: totals.carbs,
             fat: totals.fat,
             micronutrients: totals.micronutrients,
-            servingSize: "1 calculator build",
+            servingSize: "1 meal",
             brand: calculator.brand ?? calculator.name,
             servingQuantity: 1,
-            servingUnit: "build",
+            servingUnit: "meal",
             savedFoodID: calculator.id
         )
         entry.selectionSummary = summary.nilIfEmpty
@@ -490,6 +496,25 @@ struct NutritionCalculatorBuildView: View {
         tursoMirror.scheduleMirror(reason: "nutrition_calculator_logged")
         syncToHealthKitIfNeeded(entry)
         dismiss()
+    }
+
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            mealType
+        } set: { newValue in
+            mealType = newValue
+            mealTypeWasEdited = true
+        }
+    }
+
+    private var mealTypeForLog: MealType {
+        mealTypeWasEdited ? mealType : mealTimeSettings.mealType()
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        mealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
     }
 
     private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
@@ -692,7 +717,7 @@ private struct CalculatorIngredientEditorSheet: View {
         } header: {
             Text("Import Nutrition")
         } footer: {
-            Text("Type the ingredient name first. After Gemini fills nutrients, name each portion.")
+            Text("Type the ingredient name first, then import nutrition from an image or add portions manually.")
         }
     }
 
@@ -724,7 +749,7 @@ private struct CalculatorIngredientEditorSheet: View {
     private var portionsSection: some View {
         Section("Portions") {
             if portions.isEmpty {
-                Text("Import nutrition from an image, then name the portions shown by the restaurant or brand.")
+                Text("Choose an image showing this ingredient's nutrition info. Portions will be filled in automatically.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
@@ -1132,4 +1157,5 @@ private extension String {
         .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
         .environment(HealthKitService())
         .environment(ScanService())
+        .environment(MealTimeSettings())
 }

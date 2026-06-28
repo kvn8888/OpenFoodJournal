@@ -165,6 +165,7 @@ extension NutritionEntry {
 
     var healthKitWriteHash: String {
         var parts = [
+            Self.healthKitWriteSchemaVersion,
             id.uuidString,
             String(format: "%.3f", healthKitSampleTimestamp.timeIntervalSince1970),
             name,
@@ -184,4 +185,6 @@ extension NutritionEntry {
 
         return parts.joined(separator: "|")
     }
+
+    private static let healthKitWriteSchemaVersion = "healthkit-dietary-export-v2"
 }

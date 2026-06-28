@@ -47,16 +47,46 @@ final class HealthKitService {
         SampleDefinition(key: "dietaryProtein", quantityTypeIdentifier: .dietaryProtein, unit: .gram()) { $0.protein },
         SampleDefinition(key: "dietaryCarbohydrates", quantityTypeIdentifier: .dietaryCarbohydrates, unit: .gram()) { $0.carbs },
         SampleDefinition(key: "dietaryFatTotal", quantityTypeIdentifier: .dietaryFatTotal, unit: .gram()) { $0.fat },
+        SampleDefinition(key: "dietaryBiotin", quantityTypeIdentifier: .dietaryBiotin, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "biotin") },
+        SampleDefinition(key: "dietaryCaffeine", quantityTypeIdentifier: .dietaryCaffeine, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "caffeine") },
+        SampleDefinition(key: "dietaryChloride", quantityTypeIdentifier: .dietaryChloride, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "chloride") },
+        SampleDefinition(key: "dietaryChromium", quantityTypeIdentifier: .dietaryChromium, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "chromium") },
+        SampleDefinition(key: "dietaryCopper", quantityTypeIdentifier: .dietaryCopper, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "copper") },
+        SampleDefinition(key: "dietaryFatMonounsaturated", quantityTypeIdentifier: .dietaryFatMonounsaturated, unit: .gram()) { micronutrientValue($0, id: "monounsaturated_fat") },
+        SampleDefinition(key: "dietaryFatPolyunsaturated", quantityTypeIdentifier: .dietaryFatPolyunsaturated, unit: .gram()) { micronutrientValue($0, id: "polyunsaturated_fat") },
         SampleDefinition(key: "dietaryFiber", quantityTypeIdentifier: .dietaryFiber, unit: .gram()) { micronutrientValue($0, id: "fiber") },
+        SampleDefinition(key: "dietaryFolate", quantityTypeIdentifier: .dietaryFolate, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "folate") },
+        SampleDefinition(key: "dietaryIodine", quantityTypeIdentifier: .dietaryIodine, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "iodine") },
+        SampleDefinition(key: "dietaryMagnesium", quantityTypeIdentifier: .dietaryMagnesium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "magnesium") },
+        SampleDefinition(key: "dietaryManganese", quantityTypeIdentifier: .dietaryManganese, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "manganese") },
+        SampleDefinition(key: "dietaryMolybdenum", quantityTypeIdentifier: .dietaryMolybdenum, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "molybdenum") },
+        SampleDefinition(key: "dietaryNiacin", quantityTypeIdentifier: .dietaryNiacin, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "niacin") },
+        SampleDefinition(key: "dietaryPantothenicAcid", quantityTypeIdentifier: .dietaryPantothenicAcid, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "pantothenic_acid") },
+        SampleDefinition(key: "dietaryPhosphorus", quantityTypeIdentifier: .dietaryPhosphorus, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "phosphorus") },
+        SampleDefinition(key: "dietaryRiboflavin", quantityTypeIdentifier: .dietaryRiboflavin, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "riboflavin") },
+        SampleDefinition(key: "dietarySelenium", quantityTypeIdentifier: .dietarySelenium, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "selenium") },
         SampleDefinition(key: "dietarySugar", quantityTypeIdentifier: .dietarySugar, unit: .gram()) { micronutrientValue($0, id: "sugar", aliases: ["Sugar", "Total Sugar", "Total Sugars"]) },
+        SampleDefinition(key: "dietaryThiamin", quantityTypeIdentifier: .dietaryThiamin, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "thiamin", aliases: ["Thiamine"]) },
         SampleDefinition(key: "dietarySodium", quantityTypeIdentifier: .dietarySodium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "sodium") },
         SampleDefinition(key: "dietaryCholesterol", quantityTypeIdentifier: .dietaryCholesterol, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "cholesterol") },
         SampleDefinition(key: "dietaryFatSaturated", quantityTypeIdentifier: .dietaryFatSaturated, unit: .gram()) { micronutrientValue($0, id: "saturated_fat") },
         SampleDefinition(key: "dietaryVitaminA", quantityTypeIdentifier: .dietaryVitaminA, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "vitamin_a") },
+        SampleDefinition(key: "dietaryVitaminB6", quantityTypeIdentifier: .dietaryVitaminB6, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "vitamin_b6") },
+        SampleDefinition(key: "dietaryVitaminB12", quantityTypeIdentifier: .dietaryVitaminB12, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "vitamin_b12") },
         SampleDefinition(key: "dietaryVitaminC", quantityTypeIdentifier: .dietaryVitaminC, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "vitamin_c") },
+        SampleDefinition(key: "dietaryVitaminD", quantityTypeIdentifier: .dietaryVitaminD, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "vitamin_d") },
+        SampleDefinition(key: "dietaryVitaminE", quantityTypeIdentifier: .dietaryVitaminE, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "vitamin_e") },
+        SampleDefinition(key: "dietaryVitaminK", quantityTypeIdentifier: .dietaryVitaminK, unit: .gramUnit(with: .micro)) { micronutrientValue($0, id: "vitamin_k") },
+        SampleDefinition(key: "dietaryWater", quantityTypeIdentifier: .dietaryWater, unit: .literUnit(with: .milli)) { micronutrientValue($0, id: "water") },
         SampleDefinition(key: "dietaryCalcium", quantityTypeIdentifier: .dietaryCalcium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "calcium") },
         SampleDefinition(key: "dietaryIron", quantityTypeIdentifier: .dietaryIron, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "iron") },
         SampleDefinition(key: "dietaryPotassium", quantityTypeIdentifier: .dietaryPotassium, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "potassium") },
+        SampleDefinition(key: "dietaryZinc", quantityTypeIdentifier: .dietaryZinc, unit: .gramUnit(with: .milli)) { micronutrientValue($0, id: "zinc") },
+    ]
+
+    static let unsupportedNutritionExportKeys: [String] = [
+        "added_sugars",
+        "trans_fat"
     ]
 
     private static func micronutrientValue(
@@ -65,6 +95,14 @@ final class HealthKitService {
         aliases: [String] = []
     ) -> Double? {
         KnownMicronutrients.value(in: entry.micronutrients, forID: id, aliases: aliases)?.value
+    }
+
+    static var healthKitSampleDefinitionKeys: [String] {
+        sampleDefinitions.map(\.key)
+    }
+
+    static func healthKitSampleValue(for entry: NutritionEntry, sampleKey: String) -> Double? {
+        sampleDefinitions.first { $0.key == sampleKey }?.value(entry)
     }
 
     @ObservationIgnored
@@ -125,6 +163,9 @@ final class HealthKitService {
 
         do {
             try await deleteExistingSamples(for: entry)
+            if force {
+                try await deleteLegacySamples(for: entry)
+            }
             if !samples.isEmpty {
                 try await store.save(samples)
             }
@@ -235,6 +276,36 @@ final class HealthKitService {
         }
     }
 
+    private func deleteLegacySamples(for entry: NutritionEntry) async throws {
+        let candidateDates = legacySampleCandidateDates(for: entry)
+
+        for definition in Self.sampleDefinitions {
+            guard let type = HKQuantityType.quantityType(forIdentifier: definition.quantityTypeIdentifier),
+                  definition.value(entry) != nil else { continue }
+
+            for date in candidateDates {
+                let samples = try await legacySamples(
+                    type: type,
+                    foodType: entry.name,
+                    dayContaining: date
+                )
+                if !samples.isEmpty {
+                    try await store.delete(samples)
+                }
+            }
+        }
+    }
+
+    private func legacySampleCandidateDates(for entry: NutritionEntry) -> [Date] {
+        let dates = [entry.healthKitSampleTimestamp, entry.timestamp]
+        return dates.reduce(into: [Date]()) { result, date in
+            let alreadyIncluded = result.contains { abs($0.timeIntervalSince(date)) < 0.001 }
+            if !alreadyIncluded {
+                result.append(date)
+            }
+        }
+    }
+
     private func samples(type: HKSampleType, syncIdentifier: String) async throws -> [HKSample] {
         try await withCheckedThrowingContinuation { continuation in
             let predicate = HKQuery.predicateForObjects(
@@ -255,6 +326,58 @@ final class HealthKitService {
                 }
             }
             store.execute(query)
+        }
+    }
+
+    private func legacySamples(
+        type: HKQuantityType,
+        foodType: String,
+        dayContaining date: Date
+    ) async throws -> [HKSample] {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: date)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else {
+            return []
+        }
+        let datePredicate = HKQuery.predicateForSamples(
+            withStart: start,
+            end: end,
+            options: .strictStartDate
+        )
+        let foodPredicate = HKQuery.predicateForObjects(
+            withMetadataKey: HKMetadataKeyFoodType,
+            operatorType: .equalTo,
+            value: foodType
+        )
+        let predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+            datePredicate,
+            foodPredicate
+        ])
+
+        let samples = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[HKSample], any Error>) in
+            let query = HKSampleQuery(
+                sampleType: type,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: samples ?? [])
+                }
+            }
+            store.execute(query)
+        }
+
+        let appBundleIdentifier = Bundle.main.bundleIdentifier
+        return samples.filter { sample in
+            let metadata = sample.metadata ?? [:]
+            let hasCurrentSyncID = metadata[HKMetadataKeySyncIdentifier] != nil
+            let hasCurrentEntryID = metadata["OpenFoodJournalEntryID"] != nil
+            let hasCurrentNutrientKey = metadata["OpenFoodJournalNutrient"] != nil
+            let wasWrittenByThisApp = sample.sourceRevision.source.bundleIdentifier == appBundleIdentifier
+            return wasWrittenByThisApp && !hasCurrentSyncID && !hasCurrentEntryID && !hasCurrentNutrientKey
         }
     }
 

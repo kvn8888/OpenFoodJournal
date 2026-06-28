@@ -12,6 +12,7 @@ struct CompleteContainerSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     // ── Input ─────────────────────────────────────────────────────
@@ -22,6 +23,8 @@ struct CompleteContainerSheet: View {
     // ── State ─────────────────────────────────────────────────────
     @State private var finalWeightText = ""
     @State private var selectedMealType: MealType = .snack
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
     @State private var showResults = false
     @FocusState private var isWeightFocused: Bool
 
@@ -55,6 +58,9 @@ struct CompleteContainerSheet: View {
                     Spacer()
                     Button("Done") { isWeightFocused = false }
                 }
+            }
+            .onAppear {
+                applyDefaultMealTypeIfNeeded()
             }
         }
     }
@@ -180,7 +186,7 @@ struct CompleteContainerSheet: View {
                 Text("Log as")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Picker("Meal", selection: $selectedMealType) {
+                Picker("Meal", selection: mealTypeBinding) {
                     ForEach(MealType.allCases) { meal in
                         Text(meal.rawValue.capitalized).tag(meal)
                     }
@@ -195,7 +201,7 @@ struct CompleteContainerSheet: View {
                 container.completedDate = .now
 
                 // Create a NutritionEntry for the consumed amount and log it
-                if let entry = container.toNutritionEntry(mealType: selectedMealType) {
+                if let entry = container.toNutritionEntry(mealType: mealTypeForLog) {
                     nutritionStore.log(entry, to: logDate)
                     syncToHealthKitIfNeeded(entry)
                 }
@@ -210,6 +216,25 @@ struct CompleteContainerSheet: View {
             .buttonStyle(.borderedProminent)
         }
         .transition(.opacity.combined(with: .move(edge: .bottom)))
+    }
+
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            selectedMealType
+        } set: { newValue in
+            selectedMealType = newValue
+            mealTypeWasEdited = true
+        }
+    }
+
+    private var mealTypeForLog: MealType {
+        mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType()
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        selectedMealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
     }
 
     private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {

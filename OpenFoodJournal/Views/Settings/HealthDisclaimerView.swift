@@ -80,7 +80,7 @@ struct HealthDisclaimerView: View {
 
                     Text("Factors that affect accuracy include portion size, food preparation method, lighting, image angle, and source quality. Always verify critical nutrition information against the product's official nutrition label or a certified nutrition database.")
 
-                    Text("Label scans read printed nutrition facts directly and are generally more accurate, but may still contain OCR errors. Review scanned values before logging.")
+                    Text("Label scans read printed nutrition facts directly and are generally more accurate, but may still contain reading errors. Review scanned values before logging.")
                 }
                 .font(.subheadline)
             } header: {

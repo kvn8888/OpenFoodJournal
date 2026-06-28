@@ -57,4 +57,5 @@ struct ContentView: View {
         .environment(ScanService())
         .environment(HealthKitService())
         .environment(UserGoals())
+        .environment(MealTimeSettings())
 }

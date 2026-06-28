@@ -161,15 +161,15 @@ private struct AIThinkingProgressView: View {
 
             if expectsThinkingTrace || !thinkingTrace.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Gemini is thinking", systemImage: "brain.head.profile")
+                    Label("Searching", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
 
-                    Text("Thought summaries: \(thinkingTraceUpdateCount)")
+                    Text("Search steps: \(thinkingTraceUpdateCount)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
                     if thinkingTrace.isEmpty {
-                        Text("Waiting for Gemini thought summaries...")
+                        Text("Waiting for search results...")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     } else {

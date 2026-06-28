@@ -14,6 +14,7 @@ struct LogFoodSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     // ── Input: the saved food to potentially log ──────────────────
@@ -22,8 +23,10 @@ struct LogFoodSheet: View {
     let logDate: Date
 
     // ── Local State ───────────────────────────────────────────────
-    // The meal type the user selects before logging (defaults to snack)
+    // The meal type the user selects before logging (defaults from local time)
     @State private var selectedMealType: MealType = .snack
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
     // Quantity of this food the user wants to log (in the selected unit)
     @State private var quantity: Double
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
@@ -171,6 +174,9 @@ struct LogFoodSheet: View {
                     }
                 }
             }
+            .onAppear {
+                applyDefaultMealTypeIfNeeded()
+            }
         }
     }
 
@@ -272,7 +278,7 @@ struct LogFoodSheet: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
 
-            Picker("Meal Type", selection: $selectedMealType) {
+            Picker("Meal Type", selection: mealTypeBinding) {
                 ForEach(MealType.allCases) { meal in
                     Text(meal.rawValue.capitalized).tag(meal)
                 }
@@ -289,7 +295,7 @@ struct LogFoodSheet: View {
     private var logButton: some View {
         Button {
             // Create the entry from the food template
-            let entry = food.toNutritionEntry(mealType: selectedMealType)
+            let entry = food.toNutritionEntry(mealType: mealTypeForLog)
             // Scale all macros by the ratio of (selected quantity / base serving size)
             let factor = quantity / unitFactor / converter.baseQuantity
             entry.calories *= factor
@@ -322,6 +328,25 @@ struct LogFoodSheet: View {
                 .padding(.vertical, 12)
         }
         .buttonStyle(.borderedProminent)
+    }
+
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            selectedMealType
+        } set: { newValue in
+            selectedMealType = newValue
+            mealTypeWasEdited = true
+        }
+    }
+
+    private var mealTypeForLog: MealType {
+        mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType()
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        selectedMealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
     }
 
     // MARK: - Serving Section

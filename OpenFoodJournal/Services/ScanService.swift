@@ -17,6 +17,7 @@ enum ScanError: LocalizedError {
     case emptySearchQuery
     case networkError(Error)
     case invalidResponse
+    case invalidEmojiResponse(String)
     case serverError(Int, String)
     case decodingError(Error)
     case noAPIKey
@@ -29,6 +30,7 @@ enum ScanError: LocalizedError {
         case .emptySearchQuery: "Enter a food or product to search for."
         case .networkError(let e): "Network error: \(e.localizedDescription)"
         case .invalidResponse: "Received an invalid response from the server."
+        case .invalidEmojiResponse(let text): "Gemini did not return a usable food emoji: \(text)"
         case .serverError(let code, let msg): "Server error \(code): \(msg)"
         case .decodingError(let e): "Failed to parse nutrition data: \(e.localizedDescription)"
         case .noAPIKey: "No Gemini API key configured. Add your key in Settings."
@@ -73,6 +75,10 @@ struct CalculatorPortionDraft: Codable, Sendable {
 struct CalculatorIngredientDraft: Codable, Sendable {
     var name: String
     var portions: [CalculatorPortionDraft]
+}
+
+private struct GeminiFoodEmojiResponse: Codable {
+    let emoji: String
 }
 
 // MARK: - Gemini Interactions API Types
@@ -351,10 +357,10 @@ private struct GeminiNutritionResponse: Codable {
 private struct ModelConfig {
     let primary: String       // Primary model name
     let fallback: String      // Fallback if primary returns 500/503
-    let thinkingLevel: String // "minimal" for speed, "high" for accuracy
+    let thinkingLevel: String // "low" for speed, "high" for accuracy
 
     var expectsThinkingTrace: Bool {
-        thinkingLevel != "minimal"
+        thinkingLevel != "none"
     }
 
     // Keep these on Google's latest aliases. Do not replace them with concrete
@@ -363,12 +369,12 @@ private struct ModelConfig {
     private static let flashLatest = "gemini-flash-latest"
     private static let proLatest = "gemini-pro-latest"
 
-    /// Label scans: latest Flash with minimal thinking.
+    /// Label scans: latest Flash with low thinking.
     /// Optimized for OCR — reads text accurately with low latency (~2-4s).
     static let label = ModelConfig(
         primary: flashLatest,
         fallback: flashLatest,
-        thinkingLevel: "minimal"
+        thinkingLevel: "low"
     )
 
     /// Food photo scans (Pro): latest Pro with high thinking.
@@ -384,7 +390,7 @@ private struct ModelConfig {
     static let foodPhotoLite = ModelConfig(
         primary: flashLatest,
         fallback: flashLatest,
-        thinkingLevel: "minimal"
+        thinkingLevel: "low"
     )
 
     /// AI Search uses the same user-facing model preference as food photos:
@@ -392,6 +398,16 @@ private struct ModelConfig {
     static func aiSearch(useProModel: Bool) -> ModelConfig {
         useProModel ? foodPhoto : foodPhotoLite
     }
+
+    /// Food Bank emoji assignment uses the lightweight latest Flash alias.
+    /// Never replace this with a concrete Flash-Lite preview/versioned slug.
+    /// If Google exposes a stable Flash-Lite latest alias, add that alias here
+    /// rather than pinning to a dated model.
+    static let foodEmoji = ModelConfig(
+        primary: flashLatest,
+        fallback: flashLatest,
+        thinkingLevel: "low"
+    )
 }
 
 struct ScanRedoRequest {
@@ -575,6 +591,7 @@ private struct GeminiCallFailure: Error {
 @MainActor
 final class ScanService {
     static let maxImagesPerScan = 4
+    private static let foodEmojiPersistenceBatchSize = 10
 
     // MARK: State
 
@@ -594,6 +611,11 @@ final class ScanService {
     var expectsThinkingTrace = false
     /// Last image set and scan settings submitted to Gemini, used for redo.
     var lastSubmittedScan: ScanRedoRequest?
+    /// Sequential Food Bank emoji assignment state shown in Settings.
+    var isAssigningFoodEmojis = false
+    var foodEmojiProgressMessage = ""
+    var foodEmojiCompletedCount = 0
+    var foodEmojiTotalCount = 0
 
     @ObservationIgnored private let modelContext: ModelContext?
     @ObservationIgnored private let tursoMirror: TursoMirrorService?
@@ -1103,6 +1125,221 @@ final class ScanService {
         return entry
     }
 
+    // MARK: - Food Bank Emoji Assignment
+
+    /// Assigns missing Food Bank emojis one at a time. This intentionally avoids
+    /// parallel Gemini calls so a large Food Bank cannot burst through the user's
+    /// BYOK quota or obscure which food caused a bad response.
+    func backfillMissingFoodEmojis() async {
+        guard !isAssigningFoodEmojis else { return }
+        guard let modelContext else { return }
+
+        guard let apiKey = KeychainService.geminiAPIKey else {
+            foodEmojiProgressMessage = "Add a Gemini API key to generate food emojis."
+            foodEmojiCompletedCount = 0
+            foodEmojiTotalCount = 0
+            return
+        }
+
+        let descriptor = FetchDescriptor<SavedFood>(
+            sortBy: [SortDescriptor(\.lastUsedAt, order: .reverse)]
+        )
+        let foods = (try? modelContext.fetch(descriptor)) ?? []
+        let targets = foods.filter(\.needsFoodBankEmoji)
+
+        guard !targets.isEmpty else {
+            foodEmojiProgressMessage = "All saved foods have emojis."
+            foodEmojiCompletedCount = 0
+            foodEmojiTotalCount = 0
+            return
+        }
+
+        isAssigningFoodEmojis = true
+        foodEmojiCompletedCount = 0
+        foodEmojiTotalCount = targets.count
+        foodEmojiProgressMessage = "Preparing food emoji assignment..."
+        var pendingPersistenceCount = 0
+
+        func savePendingEmojiBackfillChanges(reason: String) {
+            guard pendingPersistenceCount > 0 else { return }
+            do {
+                try modelContext.save()
+                tursoMirror?.scheduleMirror(reason: reason)
+                pendingPersistenceCount = 0
+            } catch {
+                #if DEBUG
+                print("⚠️ Food emoji persistence failed: \(error.localizedDescription)")
+                #endif
+            }
+        }
+
+        defer {
+            savePendingEmojiBackfillChanges(reason: "food_emoji_backfill_finished")
+            isAssigningFoodEmojis = false
+        }
+
+        for (index, food) in targets.enumerated() {
+            if !food.needsFoodBankEmoji {
+                foodEmojiCompletedCount = index + 1
+                continue
+            }
+
+            let displayName = food.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            foodEmojiProgressMessage = "Assigning \(index + 1) of \(targets.count): \(displayName.isEmpty ? "Saved food" : displayName)"
+
+            do {
+                let emoji = try await generateFoodEmoji(for: food, apiKey: apiKey)
+                pendingPersistenceCount += 1
+                if food.needsFoodBankEmoji {
+                    food.emoji = emoji
+                }
+            } catch {
+                pendingPersistenceCount += 1
+                #if DEBUG
+                print("⚠️ Food emoji assignment failed for \(food.name): \(error.localizedDescription)")
+                #endif
+            }
+
+            if pendingPersistenceCount >= Self.foodEmojiPersistenceBatchSize {
+                savePendingEmojiBackfillChanges(reason: "food_emoji_backfill_batch")
+            }
+            foodEmojiCompletedCount = index + 1
+        }
+
+        savePendingEmojiBackfillChanges(reason: "food_emoji_backfill_complete")
+        foodEmojiProgressMessage = "Food emoji assignment complete."
+    }
+
+    private func generateFoodEmoji(for food: SavedFood, apiKey: String) async throws -> String {
+        let modelConfig = ModelConfig.foodEmoji
+        let start = ContinuousClock.now
+        let prompt = Self.foodEmojiPrompt(
+            name: food.name,
+            brand: food.brand,
+            servingSize: food.servingSize
+        )
+        let request = GeminiRequest(
+            input: [.text(prompt)],
+            generationConfig: GeminiGenerationConfig(thinkingLevel: modelConfig.thinkingLevel)
+        )
+        let requestMetadata = GeminiRequestLogMetadata(
+            apiMethod: "interactions.create.stream",
+            responseMimeType: "application/json",
+            thinkingLevel: modelConfig.thinkingLevel,
+            includeThoughts: modelConfig.expectsThinkingTrace,
+            tools: [],
+            imageCount: 0,
+            maxImageDimension: nil,
+            jpegQuality: nil
+        )
+        let trace = GeminiCallTrace(
+            requestPrompt: prompt,
+            requestMetadataJSON: encodedJSONString(requestMetadata),
+            imageMetadataJSON: nil,
+            searchGroundingRequested: false
+        )
+        let userPrompt = [food.brand, food.name]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        thinkingTrace = []
+        thinkingTraceUpdateCount = 0
+
+        let text: String
+        do {
+            text = try await callGeminiText(
+                request: request,
+                apiKey: apiKey,
+                primaryModel: modelConfig.primary,
+                fallbackModel: modelConfig.fallback,
+                trace: trace
+            )
+        } catch {
+            let visibleError = visibleError(from: error)
+            recordGeminiScanLog(
+                operation: .foodEmoji,
+                status: .failure,
+                primaryModel: modelConfig.primary,
+                fallbackModel: modelConfig.fallback,
+                resolvedModel: trace.resolvedModel ?? modelConfig.primary,
+                usedFallback: trace.usedFallback,
+                userPrompt: userPrompt,
+                durationMs: msFrom(ContinuousClock.now.duration(to: start)),
+                debugTrace: trace,
+                error: visibleError,
+                persistImmediately: false
+            )
+            throw visibleError
+        }
+
+        let decoded: GeminiFoodEmojiResponse
+        do {
+            decoded = try JSONDecoder().decode(GeminiFoodEmojiResponse.self, from: Data(text.utf8))
+        } catch {
+            let err = ScanError.decodingError(error)
+            trace.parseStage = "food_emoji_json_decode"
+            recordGeminiScanLog(
+                operation: .foodEmoji,
+                status: .failure,
+                primaryModel: modelConfig.primary,
+                fallbackModel: modelConfig.fallback,
+                resolvedModel: trace.resolvedModel ?? modelConfig.primary,
+                usedFallback: trace.usedFallback,
+                userPrompt: userPrompt,
+                durationMs: msFrom(ContinuousClock.now.duration(to: start)),
+                debugTrace: trace,
+                error: err,
+                persistImmediately: false
+            )
+            throw err
+        }
+
+        guard let emoji = Self.extractFoodEmoji(from: decoded.emoji) else {
+            let err = ScanError.invalidEmojiResponse(Self.clippedForLog(text))
+            trace.parseStage = "food_emoji_parse"
+            recordGeminiScanLog(
+                operation: .foodEmoji,
+                status: .failure,
+                primaryModel: modelConfig.primary,
+                fallbackModel: modelConfig.fallback,
+                resolvedModel: trace.resolvedModel ?? modelConfig.primary,
+                usedFallback: trace.usedFallback,
+                userPrompt: userPrompt,
+                durationMs: msFrom(ContinuousClock.now.duration(to: start)),
+                debugTrace: trace,
+                error: err,
+                persistImmediately: false
+            )
+            throw err
+        }
+
+        recordGeminiScanLog(
+            operation: .foodEmoji,
+            status: .success,
+            primaryModel: modelConfig.primary,
+            fallbackModel: modelConfig.fallback,
+            resolvedModel: trace.resolvedModel ?? modelConfig.primary,
+            usedFallback: trace.usedFallback,
+            userPrompt: userPrompt,
+            durationMs: msFrom(ContinuousClock.now.duration(to: start)),
+            debugTrace: trace,
+            persistImmediately: false
+        )
+        return emoji
+    }
+
+    nonisolated static func extractFoodEmoji(from raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        for character in trimmed where character.isFoodBankEmojiCandidate {
+            return String(character)
+        }
+
+        return nil
+    }
+
     /// Extracts portions for one named calculator ingredient from restaurant
     /// nutrition images. The typed name anchors extraction; callers keep
     /// that name authoritative when mapping the id-less draft into local values.
@@ -1398,6 +1635,11 @@ final class ScanService {
             attempt.rawErrorBody = String(data: data, encoding: .utf8)
             let apiResponse = try? JSONDecoder().decode(GeminiAPIErrorEnvelope.self, from: data)
             let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
+            #if DEBUG
+            if let rawErrorBody = attempt.rawErrorBody {
+                print("🧠 Gemini stream HTTP error \(httpResponse.statusCode) model=\(model): \(rawErrorBody)")
+            }
+            #endif
             try fail(ScanError.serverError(httpResponse.statusCode, message), stage: "http_error")
         }
 
@@ -1870,7 +2112,8 @@ final class ScanService {
         durationMs: Int? = nil,
         debugTrace: GeminiCallTrace? = nil,
         response: GeminiNutritionResponse? = nil,
-        error: Error? = nil
+        error: Error? = nil,
+        persistImmediately: Bool = true
     ) {
         guard let modelContext else { return }
 
@@ -1933,6 +2176,7 @@ final class ScanService {
         modelContext.insert(log)
         recordGeminiCost(debugTrace, status: status, in: modelContext)
         GeminiScanLog.pruneExpired(in: modelContext)
+        guard persistImmediately else { return }
         do {
             try modelContext.save()
             tursoMirror?.scheduleMirror(reason: "gemini_log_saved")
@@ -1962,6 +2206,12 @@ final class ScanService {
 
     private func encodedResponseJSON(_ response: GeminiNutritionResponse) -> String? {
         encodedJSONString(response)
+    }
+
+    nonisolated private static func clippedForLog(_ text: String, maxCharacters: Int = 240) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxCharacters else { return trimmed }
+        return String(trimmed.prefix(maxCharacters)).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 
     private func encodedJSONString<T: Encodable>(_ value: T) -> String? {
@@ -2002,6 +2252,14 @@ private extension String {
     }
 }
 
+private extension Character {
+    nonisolated var isFoodBankEmojiCandidate: Bool {
+        unicodeScalars.contains { scalar in
+            scalar.value >= 0x1F000 && scalar.properties.isEmoji
+        }
+    }
+}
+
 // MARK: - Prompt Templates
 
 /// These prompts are identical to what the server used — moved on-device for BYOK.
@@ -2024,6 +2282,33 @@ extension ScanService {
         "burger king", "subway", "panera", "chick-fil-a", "domino",
         "pizza hut"
     ]
+
+    static func foodEmojiPrompt(name: String, brand: String?, servingSize: String?) -> String {
+        let trimmedBrand = brand
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap(\.nilIfEmpty)
+        let trimmedServingSize = servingSize
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .flatMap(\.nilIfEmpty)
+        let brandLine = trimmedBrand.map { "Brand: \($0)" } ?? "Brand: unknown"
+        let servingLine = trimmedServingSize.map { "Serving: \($0)" } ?? "Serving: unknown"
+
+        return """
+        Choose one familiar emoji icon for this saved food in a food journal.
+
+        Food: \(name)
+        \(brandLine)
+        \(servingLine)
+
+        Return JSON only, with exactly this shape:
+        {"emoji":"🍎"}
+
+        Rules:
+        - Return one emoji grapheme in the emoji field.
+        - Prefer concrete food emojis over generic plates when possible.
+        - Do not include words, markdown, explanations, multiple emojis, or skin-tone/person emojis.
+        """
+    }
 
     private static func encodedPromptJSON<T: Encodable>(_ value: T) -> String? {
         let encoder = JSONEncoder()

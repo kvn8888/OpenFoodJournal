@@ -69,6 +69,75 @@ struct OpenFoodJournalTests {
         #expect(statement.args.count == 3)
     }
 
+    @Test func mealTimeSettingsDefaultBoundariesMatchRequestedRanges() {
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 1 * 60 + 59) == .dinner)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 2 * 60) == .breakfast)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 11 * 60 + 59) == .breakfast)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 12 * 60) == .lunch)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 17 * 60 + 59) == .lunch)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 18 * 60) == .dinner)
+        #expect(MealTimeSettings.mealType(forMinuteOfDay: 23 * 60 + 59) == .dinner)
+    }
+
+    @MainActor
+    @Test func appSettingsRecordDecodesOlderBackupsWithDefaultMealSchedule() throws {
+        let json = """
+        {
+            "useProModel": true,
+            "offContributeEnabled": false
+        }
+        """.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(AppSettingsRecord.self, from: json)
+
+        #expect(record.useProModel)
+        #expect(!record.offContributeEnabled)
+        #expect(record.breakfastStartMinutes == MealScheduleDefaults.breakfastStartMinutes)
+        #expect(record.lunchStartMinutes == MealScheduleDefaults.lunchStartMinutes)
+        #expect(record.dinnerStartMinutes == MealScheduleDefaults.dinnerStartMinutes)
+    }
+
+    @Test func foodEmojiExtractionReturnsFirstEmojiOnly() throws {
+        #expect(ScanService.extractFoodEmoji(from: "🍎") == "🍎")
+        #expect(ScanService.extractFoodEmoji(from: "  🍽️  ") == "🍽️")
+        #expect(ScanService.extractFoodEmoji(from: "🍣 sushi") == "🍣")
+        #expect(ScanService.extractFoodEmoji(from: "apple") == nil)
+    }
+
+    @Test func savedFoodRecordDecodesOlderBackupsWithoutEmoji() throws {
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000020",
+            "name": "Milk",
+            "brand": "Dairy",
+            "createdAt": "2026-06-27T12:00:00Z",
+            "calories": 120,
+            "protein": 8,
+            "carbs": 12,
+            "fat": 5,
+            "micronutrients": {},
+            "servingSize": "1 cup",
+            "servingsPerContainer": null,
+            "serving": null,
+            "servingQuantity": 1,
+            "servingUnit": "cup",
+            "servingMappings": [],
+            "originalScanMode": "manual",
+            "lastUsedAt": "2026-06-27T12:00:00Z",
+            "kind": "single",
+            "compositeIngredients": [],
+            "calculatorIngredients": []
+        }
+        """.data(using: .utf8)!
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let record = try decoder.decode(SavedFoodRecord.self, from: json)
+
+        #expect(record.emoji == nil)
+        #expect(record.makeModel().emoji == nil)
+    }
+
     @Test func micronutrientValueDecodesBareNumbersWithKnownUnits() throws {
         let json = """
         {
@@ -140,6 +209,191 @@ struct OpenFoodJournalTests {
         #expect(KnownMicronutrients.value(in: display, forID: "fiber")?.value == 2)
         #expect(KnownMicronutrients.value(in: display, forID: "sugar", aliases: ["Sugar"])?.value == 10)
         #expect(KnownMicronutrients.value(in: display, forID: "saturated_fat")?.value == 14)
+    }
+
+    @MainActor
+    @Test func healthKitDefinitionsIncludeExpandedDietaryNutrients() {
+        let keys = Set(HealthKitService.healthKitSampleDefinitionKeys)
+        let expectedKeys = [
+            "dietaryBiotin",
+            "dietaryCaffeine",
+            "dietaryChloride",
+            "dietaryChromium",
+            "dietaryCopper",
+            "dietaryFatMonounsaturated",
+            "dietaryFatPolyunsaturated",
+            "dietaryFolate",
+            "dietaryIodine",
+            "dietaryMagnesium",
+            "dietaryManganese",
+            "dietaryMolybdenum",
+            "dietaryNiacin",
+            "dietaryPantothenicAcid",
+            "dietaryPhosphorus",
+            "dietaryRiboflavin",
+            "dietarySelenium",
+            "dietaryThiamin",
+            "dietaryVitaminB6",
+            "dietaryVitaminB12",
+            "dietaryVitaminD",
+            "dietaryVitaminE",
+            "dietaryVitaminK",
+            "dietaryWater",
+            "dietaryZinc"
+        ]
+
+        for key in expectedKeys {
+            #expect(keys.contains(key), "\(key) should be writable to HealthKit")
+        }
+
+        #expect(!keys.contains("dietaryAddedSugars"))
+        #expect(!keys.contains("dietaryTransFat"))
+        #expect(HealthKitService.unsupportedNutritionExportKeys == ["added_sugars", "trans_fat"])
+    }
+
+    @MainActor
+    @Test func healthKitSampleDefinitionsReadCanonicalAndDisplayKeys() {
+        let cases: [(sampleKey: String, canonical: String, display: String, value: Double, unit: String)] = [
+            ("dietaryBiotin", "biotin", "Biotin", 30, "mcg"),
+            ("dietaryCaffeine", "caffeine", "Caffeine", 95, "mg"),
+            ("dietaryChloride", "chloride", "Chloride", 230, "mg"),
+            ("dietaryChromium", "chromium", "Chromium", 35, "mcg"),
+            ("dietaryCopper", "copper", "Copper", 0.9, "mg"),
+            ("dietaryFatMonounsaturated", "monounsaturated_fat", "Monounsaturated Fat", 7, "g"),
+            ("dietaryFatPolyunsaturated", "polyunsaturated_fat", "Polyunsaturated Fat", 4, "g"),
+            ("dietaryFolate", "folate", "Folate", 400, "mcg"),
+            ("dietaryIodine", "iodine", "Iodine", 150, "mcg"),
+            ("dietaryMagnesium", "magnesium", "Magnesium", 420, "mg"),
+            ("dietaryManganese", "manganese", "Manganese", 2.3, "mg"),
+            ("dietaryMolybdenum", "molybdenum", "Molybdenum", 45, "mcg"),
+            ("dietaryNiacin", "niacin", "Niacin", 16, "mg"),
+            ("dietaryPantothenicAcid", "pantothenic_acid", "Pantothenic Acid", 5, "mg"),
+            ("dietaryPhosphorus", "phosphorus", "Phosphorus", 1250, "mg"),
+            ("dietaryRiboflavin", "riboflavin", "Riboflavin", 1.3, "mg"),
+            ("dietarySelenium", "selenium", "Selenium", 55, "mcg"),
+            ("dietaryThiamin", "thiamin", "Thiamine", 1.2, "mg"),
+            ("dietaryVitaminB6", "vitamin_b6", "Vitamin B6", 1.7, "mg"),
+            ("dietaryVitaminB12", "vitamin_b12", "Vitamin B12", 2.4, "mcg"),
+            ("dietaryVitaminD", "vitamin_d", "Vitamin D", 20, "mcg"),
+            ("dietaryVitaminE", "vitamin_e", "Vitamin E", 15, "mg"),
+            ("dietaryVitaminK", "vitamin_k", "Vitamin K", 120, "mcg"),
+            ("dietaryWater", "water", "Water", 500, "mL"),
+            ("dietaryZinc", "zinc", "Zinc", 11, "mg")
+        ]
+
+        let canonicalEntry = nutritionEntry(micronutrients: Dictionary(
+            uniqueKeysWithValues: cases.map {
+                ($0.canonical, MicronutrientValue(value: $0.value, unit: $0.unit))
+            }
+        ))
+        let displayEntry = nutritionEntry(micronutrients: Dictionary(
+            uniqueKeysWithValues: cases.map {
+                ($0.display, MicronutrientValue(value: $0.value, unit: $0.unit))
+            }
+        ))
+
+        for testCase in cases {
+            #expect(
+                HealthKitService.healthKitSampleValue(for: canonicalEntry, sampleKey: testCase.sampleKey) == testCase.value,
+                "\(testCase.sampleKey) should read \(testCase.canonical)"
+            )
+            #expect(
+                HealthKitService.healthKitSampleValue(for: displayEntry, sampleKey: testCase.sampleKey) == testCase.value,
+                "\(testCase.sampleKey) should read \(testCase.display)"
+            )
+        }
+    }
+
+    @Test func healthKitWriteHashIncludesExportSchemaVersion() {
+        let entry = nutritionEntry(micronutrients: [
+            "copper": MicronutrientValue(value: 0.9, unit: "mg")
+        ])
+
+        #expect(entry.healthKitWriteHash.hasPrefix("healthkit-dietary-export-v2|"))
+    }
+
+    @Test func foodBankBrandOptionsTrimAndCountBrands() throws {
+        let foods = [
+            savedFood(name: "Milk", brand: " Wegmans "),
+            savedFood(name: "Yogurt", brand: "Wegmans"),
+            savedFood(name: "Rice", brand: "Chipotle"),
+            savedFood(name: "Apple", brand: nil),
+            savedFood(name: "Banana", brand: " ")
+        ]
+
+        let options = FoodBankBrandCatalog.options(in: foods, includeUnbranded: true)
+
+        #expect(options.first?.name == "Unbranded")
+        #expect(options.first?.count == 2)
+        #expect(options.contains { $0.name == "Chipotle" && $0.count == 1 })
+        #expect(options.contains { $0.name == "Wegmans" && $0.count == 2 })
+    }
+
+    @Test func foodBankBrandFilterMatchesExactTrimmedBrandAndUnbranded() throws {
+        let wegmans = savedFood(name: "Milk", brand: " Wegmans ")
+        let lower = savedFood(name: "Yogurt", brand: "wegmans")
+        let unbranded = savedFood(name: "Apple", brand: "")
+
+        #expect(FoodBankBrandCatalog.matches(wegmans, filter: .brand("Wegmans")))
+        #expect(!FoodBankBrandCatalog.matches(lower, filter: .brand("Wegmans")))
+        #expect(FoodBankBrandCatalog.matches(unbranded, filter: .unbranded))
+        #expect(FoodBankBrandCatalog.matches(lower, filter: .all))
+    }
+
+    @Test func foodBankBrandSortGroupsNamedBrandsBeforeUnbranded() throws {
+        let foods = [
+            savedFood(name: "Banana", brand: nil),
+            savedFood(name: "Rice", brand: "Chipotle"),
+            savedFood(name: "Milk", brand: "Wegmans"),
+            savedFood(name: "Beans", brand: "Chipotle")
+        ]
+
+        let sorted = FoodBankBrandCatalog.sortByBrand(foods)
+
+        #expect(sorted.map(\.name) == ["Beans", "Rice", "Milk", "Banana"])
+    }
+
+    @Test func foodBankBrandConsolidationUpdatesOnlyExactSourceBrand() throws {
+        let foods = [
+            savedFood(name: "Milk", brand: "Wegman's"),
+            savedFood(name: "Yogurt", brand: "Wegman's"),
+            savedFood(name: "Cereal", brand: "wegmans"),
+            savedFood(name: "Rice", brand: "Chipotle")
+        ]
+
+        let updated = FoodBankBrandCatalog.consolidate(
+            sourceBrand: "Wegman's",
+            targetBrand: "Wegmans",
+            in: foods
+        )
+
+        #expect(updated == 2)
+        #expect(foods[0].brand == "Wegmans")
+        #expect(foods[1].brand == "Wegmans")
+        #expect(foods[2].brand == "wegmans")
+        #expect(foods[3].brand == "Chipotle")
+    }
+
+    private func savedFood(name: String, brand: String?) -> SavedFood {
+        SavedFood(
+            name: name,
+            brand: brand,
+            calories: 100,
+            protein: 5,
+            carbs: 10,
+            fat: 3
+        )
+    }
+
+    private func nutritionEntry(micronutrients: [String: MicronutrientValue]) -> NutritionEntry {
+        NutritionEntry(
+            name: "Test Food",
+            calories: 100,
+            protein: 5,
+            carbs: 10,
+            fat: 3,
+            micronutrients: micronutrients
+        )
     }
 
 }

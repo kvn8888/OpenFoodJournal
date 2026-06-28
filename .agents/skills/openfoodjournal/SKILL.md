@@ -35,7 +35,7 @@ MacrosApp (creates ModelContainer w/ CloudKit + @Observable services)
 
 **Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.
 
-**Service injection**: All services (`NutritionStore`, `ScanService`, `TursoMirrorService`, `HealthKitService`, `UserGoals`, `OpenFoodFactsService`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`. `SyncService` was removed — CloudKit handles sync natively via `ModelConfiguration(cloudKitDatabase:)`; Turso is an optional push-only mirror, not a source of truth.
+**Service injection**: All services (`NutritionStore`, `ScanService`, `TursoMirrorService`, `HealthKitService`, `UserGoals`, `MealTimeSettings`, `OpenFoodFactsService`) are created in `MacrosApp.init()` and passed via `.environment()`. Views consume them with `@Environment(ServiceType.self)`. `SyncService` was removed — CloudKit handles sync natively via `ModelConfiguration(cloudKitDatabase:)`; Turso is an optional push-only mirror, not a source of truth.
 
 **Sheet management**: `DailyLogView` uses a single `DailyLogSheet` enum with `.sheet(item:)` — never multiple booleans.
 
@@ -45,13 +45,14 @@ See [references/models.md](references/models.md) for full property lists.
 
 - **`DailyLog`** — `@Model`, keyed by `date` normalized to midnight (no `@Attribute(.unique)` — CloudKit can't enforce uniqueness; app-level dedup in `fetchOrCreateLog(for:)`). Owns `[NutritionEntry]?` (optional for CloudKit) via cascade delete. Uses `safeEntries` computed property for reads.
 - **`NutritionEntry`** — `@Model`, stores core macros (cal/protein/carbs/fat) + dynamic `micronutrients: [String: MicronutrientValue]` + brand/serving/servingCount/servingQuantity/servingUnit/servingMappings + optional `selectionSummary` for generated calculator builds. Includes HealthKit sync metadata (`healthKitSyncStatus`, `healthKitSyncedAt`, `healthKitSyncVersion`, `healthKitLastError`, `healthKitLastWriteHash`) so Apple Health writes are idempotent.
-- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes `kind: SavedFoodKind` (`.single`/`.composite`/`.calculator`), `compositeIngredients: [CompositeIngredientSnapshot]`, `calculatorIngredients: [CalculatorIngredient]`, `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting, and `archivedAt: Date?` for manual cosmetic archive state. Composite ingredients are copied snapshots, never live `SavedFood` references, so editing a composite only affects future logs. Nutrition calculators are also saved-food rows: flat ingredient/portion value snapshots, not SwiftData relationship trees. Foods auto-archive cosmetically when `lastUsedAt` is more than 14 days old; archived foods stay in SwiftData, remain searchable, and can be browsed from Food Bank "+" → Archive.
+- **`SavedFood`** — `@Model`, reusable food template in Food Bank. Same fields as NutritionEntry minus meal/log context. Includes optional `emoji: String?` for the Food Bank icon, `kind: SavedFoodKind` (`.single`/`.composite`/`.calculator`), `compositeIngredients: [CompositeIngredientSnapshot]`, `calculatorIngredients: [CalculatorIngredient]`, `lastUsedAt: Date` (defaults to `createdAt`) for "Last Used" sorting, and `archivedAt: Date?` for manual cosmetic archive state. Composite ingredients are copied snapshots, never live `SavedFood` references, so editing a composite only affects future logs. Nutrition calculators are also saved-food rows: flat ingredient/portion value snapshots, not SwiftData relationship trees. Foods auto-archive cosmetically when `lastUsedAt` is more than 14 days old; archived foods stay in SwiftData, remain searchable, and can be browsed from Food Bank "+" → Archive.
 - **`TrackedContainer`** — `@Model`, weight-based container tracking. Snapshots food nutrition at creation time. Start weight → final weight → derived consumption via `consumedServings` math.
   - `NewContainerSheet` shows the last completed `finalWeight` for the same `SavedFood` as the next container weight placeholder, so users continuing an open container can type/confirm the last end weight instead of re-entering it from memory.
   - The container food picker sorts all saved foods by most recent container activity first, then alphabetically for foods that have never been tracked.
 - **`GeminiScanLog`** — `@Model`, local diagnostic log for Gemini scan and AI Search calls. Stores operation/status, model selection, fallback use, scan mode, photo count, duration, user prompt/query, full text prompt, request metadata, image dimensions/JPEG sizes, request byte count, HTTP status, parse stage, raw non-image response text, raw SSE event payload JSON, per-model attempt JSON, parsed nutrition summary, response JSON, thinking trace, app/build/iOS version, and error details. Never stores API keys or raw image bytes. Export/prune window is 30 days.
 - **`GeminiCostAccumulator`** — `@Model`, singleton-style local running total of estimated Gemini token cost. Accumulates input/output/thinking tokens, request counts, success/failure counts, grounded AI Search prompt count, last model/cost, and total estimated USD. Estimates use Gemini `usageMetadata` plus local Google Standard paid-tier rates checked 2026-06-19. Google Search grounding fees are not included because Gemini does not return billable search-query count.
 - **`UserGoals`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for each goal property to avoid property-wrapper conflicts.
+- **`MealTimeSettings`** — `@Observable @MainActor`, uses `@ObservationIgnored @AppStorage` for configurable meal boundaries. Defaults are Breakfast 2:00 AM–12:00 PM, Lunch 12:00 PM–6:00 PM, Dinner 6:00 PM–2:00 AM. Logging flows call `mealTimeSettings.mealType()` using `Calendar.autoupdatingCurrent`, so the default meal is based on the device's local time zone at log time, not UTC. Snack remains a manual override.
 - **`Preferences`** — `@Model`, singleton row for UI customization. Stores `ringSlot1..5` (nutrient IDs for MacroSummaryBar configurable rings). `Preferences.current(in:)` static factory fetches-or-creates the singleton. Included in optional Turso mirroring as the `ofj_preferences` row. Added to `ModelContainer` in app init. Sheets use `@Bindable var prefs: Preferences` for direct binding.
 - **`MealType`** — enum: `.breakfast`, `.lunch`, `.dinner`, `.snack`
 - **`ScanMode`** — enum: `.label`, `.foodPhoto`, `.barcode`, `.manual`
@@ -64,11 +65,11 @@ See [references/models.md](references/models.md) for full property lists.
 See [references/services.md](references/services.md) for full API contracts.
 
 - **`NutritionStore`** — SwiftData CRUD. `log()`, `fetchLog()`, `fetchLogs()`, `delete()`, `saveEntry()`, `repairDailyLogEntryRelationships()`, `exportCSV()`, `exportBackup()`, `importBackup()`. CSV is spreadsheet/analytics only. Restore-grade backup uses versioned JSON DTOs in `OpenFoodJournalBackup.swift` and imports idempotently by UUID. Local/iCloud remain source of truth; successful saves schedule the optional Turso mirror when enabled.
-- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Interactions API `image` content block in one direct REST API call (`generativelanguage.googleapis.com/v1beta/interactions`) → `NutritionEntry` (not yet inserted). Uses streamed Interactions SSE with `generation_config.thinking_summaries = "auto"` so `step.delta` events with `delta.type == "thought_summary"` update `thinkingTrace` in the loading overlay while the scan/search is in flight; `delta.type == "text"` is accumulated as final nutrition JSON. Gemini may emit only one late thought-summary event for a request; do not fake streaming by delaying the final nutrition sheet just to display that late summary. DEBUG builds print compact SSE timing lines and attempt logs store first/last thought-summary and text-delta timings for diagnosing true stream behavior. Also supports Food Bank AI Search via Interactions `google_search` grounding and returns a reviewable `NutritionEntry`, plus nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)` which fills portions for one user-named ingredient at a time. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite scans and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
+- **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo as a separate Interactions API `image` content block in one direct REST API call (`generativelanguage.googleapis.com/v1beta/interactions`) → `NutritionEntry` (not yet inserted). Uses streamed Interactions SSE with `generation_config.thinking_summaries = "auto"` so `step.delta` events with `delta.type == "thought_summary"` update `thinkingTrace` in the loading overlay while the scan/search is in flight; `delta.type == "text"` is accumulated as final nutrition JSON. Gemini may emit only one late thought-summary event for a request; do not fake streaming by delaying the final nutrition sheet just to display that late summary. DEBUG builds print compact SSE timing lines and attempt logs store first/last thought-summary and text-delta timings for diagnosing true stream behavior. Also supports Food Bank AI Search via Interactions `google_search` grounding and returns a reviewable `NutritionEntry`, nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)`, and sequential Food Bank emoji backfill via `backfillMissingFoodEmojis()`. Emoji backfill uses `gemini-flash-latest`, returns one JSON emoji, logs operation `foodEmoji`, updates cost totals, and never overwrites existing `SavedFood.emoji` values. Uses `ModelConfig` static configs with latest Gemini aliases only: `gemini-flash-latest` for label/lite/emoji work and `gemini-pro-latest` for Pro food photo scans/search. Do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. Loads API key from `KeychainService`. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR/emoji duration via `ContinuousClock` and stores standard scan durations on `NutritionEntry.scanDurationMs`. Also writes comprehensive `GeminiScanLog` rows for success and failure diagnostics, including model-attempt history, usage metadata, estimated token cost, and raw non-image response text for parse failures; updates `GeminiCostAccumulator`; prunes logs older than 30 days; and keeps API keys/raw photos out of logs. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
 - **`TursoMirrorService`** — Optional `@Observable @MainActor` direct SQL-over-HTTP mirror to a user-provided Turso database. Credentials are Keychain-only (`turso-database-url`, `turso-auth-token`); non-secret state uses `turso.enabled`, `turso.includeDiagnostics`, `turso.lastSyncAt`, `turso.lastError`, and `turso.lastRowCount`. Uses `/health` for connection tests and `/v2/pipeline` for migrations/mirroring. It is push-only, generation-pruned, non-blocking, and never reads Turso back into SwiftData.
 - **`KeychainService`** — Static helper for secure Keychain storage (Security framework). Stores Gemini API key under service `k3vnc.OpenFoodJournal`, account `gemini-api-key`, and optional Turso mirror credentials under `turso-database-url` / `turso-auth-token`. Methods: `save(_:for:)`, `load(for:)`, `delete(for:)`, `hasGeminiAPIKey`, `geminiAPIKey`, `hasTursoCredentials`, `tursoDatabaseURL`, `tursoAuthToken`.
 - **`ServingConverter`** — Pure-value struct encapsulating all serving-unit conversion math. 4-strategy `factorFor(_:)` (ServingSize tables → direct mapping → chain → SI bridge), `availableUnits`, and `scaledCalories/Protein/Carbs/Fat`. Used by both `EditEntryView` and `LogFoodSheet` to eliminate duplicate conversion logic.
-- **`HealthKitService`** — Opt-in Apple Health sync. Writes calories/macros/select micronutrients as separate `HKQuantitySample`s using deterministic `HKMetadataKeySyncIdentifier` values (`entry.id + nutrient key`). Micronutrient lookup accepts both canonical IDs (`sodium`, `fiber`, `saturated_fat`) and legacy display-name keys (`Sodium`, `Fiber`, `Saturated Fat`) because historical entries contain both shapes. Sync deletes only OpenFoodJournal-owned samples for an entry before saving replacements, so retries/edits are idempotent. Settings includes "Sync Missing Nutrition to Apple Health" for incremental stale rows and "Repair Apple Health Nutrition" for a forced historical rewrite when entries were previously marked synced with macro-only writes. Reads `activeEnergyBurned`.
+- **`HealthKitService`** — Opt-in Apple Health sync. Writes calories/macros and every app-tracked dietary nutrient with an iOS 26.2 `HKQuantityTypeIdentifier` as separate `HKQuantitySample`s using deterministic `HKMetadataKeySyncIdentifier` values (`entry.id + nutrient key`). Supported writes include fiber, sugars, sodium, cholesterol, saturated/mono/polyunsaturated fat, vitamins A/C/D/E/K/B6/B12, thiamin, riboflavin, niacin, pantothenic acid, biotin, folate, calcium, iron, magnesium, phosphorus, potassium, zinc, copper, manganese, selenium, chromium, molybdenum, iodine, chloride, water, and caffeine. HealthKit does not expose separate write types for added sugars or trans fat; those stay in OpenFoodJournal only. Micronutrient lookup accepts both canonical IDs (`sodium`, `fiber`, `saturated_fat`) and legacy display-name keys (`Sodium`, `Fiber`, `Saturated Fat`) because historical entries contain both shapes. `NutritionEntry.healthKitWriteHash` includes a HealthKit export schema version so adding write mappings marks older successful exports stale for "Sync Missing Nutrition to Apple Health". Sync deletes only OpenFoodJournal-owned samples for an entry before saving replacements, so retries/edits are idempotent. Settings includes "Sync Missing Nutrition to Apple Health" for incremental stale rows and "Repair Apple Health Nutrition" for a forced historical rewrite when entries were previously marked synced with macro-only writes; forced repair also purges legacy no-sync samples written by this app by matching the entry food name across the affected local day before writing current samples. Reads `activeEnergyBurned`.
 - **`OpenFoodFactsService`** — Text search and barcode lookup against the Open Food Facts REST API. Search uses `search.openfoodfacts.org` (Elasticsearch-backed, the v1 CGI endpoint returns 503). Barcode lookup uses `world.openfoodfacts.org/api/v2/product/{code}`. `OFFProduct` model stores full nutrition and exposes `hasUsableNutrition`; text search and barcode lookup filter out zero-calorie/no-nutrition placeholder rows before showing or prefilling them. `lookupBarcode()` manages UI state (isLoading/errorMessage); internal `fetchProductByBarcode()` is stateless for batch use. Used by both `OpenFoodFactsSearchView` (text search) and `ScanCaptureView` (barcode camera scan). Settings has an Open Food Facts contribution status row backed by `off.contributionSuccessCount` and `off.lastContributionAt`; do not treat the contribution toggle itself as proof that a DB write happened.
 - **`UserGoals`** — Daily targets for cal/protein/carbs/fat, persisted in UserDefaults.
 
@@ -88,7 +89,7 @@ User taps Scan → CameraController (AVCaptureSession) → 1-4 photos
   → POST to https://generativelanguage.googleapis.com/v1beta/interactions with x-goog-api-key header
   → Loading overlay shows scan stage plus recent Gemini thought-summary deltas (`step.delta` / `delta.type == "thought_summary"`)
   → ContinuousClock measures full round-trip duration
-  → Label mode: gemini-flash-latest (fast, minimal thinking)
+  → Label mode: gemini-flash-latest (fast, low thinking)
   → Food photo mode: gemini-pro-latest (high thinking for estimation)
   → Fallback on 500/503: gemini-flash-latest
   → Accumulates non-thinking text parts only → JSON → GeminiNutritionResponse
@@ -137,6 +138,18 @@ User taps "AI Search" in Food Bank "+" menu
   → User chooses "Add to Journal" or "Add to Journal & Food Bank"
 ```
 
+## Food Bank Emoji Flow
+
+```
+Settings → Food Bank → Auto-Generate Food Emojis
+  → @AppStorage("foodBank.autoGenerateEmojis") enables app-launch/Food Bank appearance backfill
+  → ScanService.backfillMissingFoodEmojis() fetches all SavedFood rows with empty emoji
+  → Processes foods sequentially with gemini-flash-latest and a JSON-only one-emoji prompt
+  → Sets SavedFood.emoji only if it is still empty; existing/user-assigned emojis are not overwritten
+  → Writes GeminiScanLog(operation: .foodEmoji), updates GeminiCostAccumulator, and schedules optional Turso mirror
+  → SavedFoodRowView shows emoji above calories when assigned
+```
+
 ## Food Bank Archive Flow
 
 ```
@@ -151,6 +164,20 @@ Food Bank "+" → Archive
   → FoodBankArchiveView lists foods with `archivedAt != nil` or `lastUsedAt` older than 14 days
   → Users can search archived foods, log them, edit them, or unarchive them
   → Unarchive clears `archivedAt` and refreshes `lastUsedAt` so the item becomes visible in the active list
+```
+
+## Food Bank Brand Flow
+
+```
+Food Bank toolbar → Brand filter
+  → Lists runtime-derived brand buckets from visible saved foods, plus Unbranded for nil/blank brands
+  → Empty search uses active foods only; non-empty search uses all foods so archived search matches remain consistent with existing archive behavior
+  → Sort menu includes Brand Name, which groups named brands alphabetically before unbranded foods and sorts foods by name within each brand
+
+Food Bank toolbar or "+" menu → Manage Brands
+  → User selects one source brand and one target brand or types a new target
+  → Bulk consolidation updates SavedFood.brand snapshots for every matching saved food, including archived foods
+  → Existing journal entries remain unchanged because logged entries store copied brand/nutrition snapshots
 ```
 
 ## Composite Food Flow
@@ -232,10 +259,46 @@ Requirements:
 - `gh auth status` must show `repo` and `project` scopes.
 - Default owner/repo: `kvn8888/OpenFoodJournal`.
 - Default project title lookup: `OpenFoodJournal`.
+- Current Status columns are `Todo`, `In Progress`, and `Done`.
+- Current Category options are `Spikes`, `Frontend / UX`, `Backend / API`,
+  `AI / Gemini`, `Data / Sync`, `Health / Integrations`, and
+  `Project / Process`.
+- Current Priority options are `P0`, `P1`, and `P2`; Size options are `XS`,
+  `S`, `M`, `L`, and `XL`; `Source` is a text field for the origin of the
+  task.
+- GitHub labels are used as an agent work router. Every planned issue should
+  carry exactly one primary `agency:*` label, exactly one `agent:*` label, and
+  optionally an `output:*` label:
+  - `agency:ready` — a coding agent can implement or validate from repo context
+    with little owner input.
+  - `agency:investigate` — a coding agent can independently produce useful
+    diagnosis, evidence, or a plan; implementation may or may not follow.
+  - `agency:needs-owner-decision` — Kevin needs to decide product scope, risk,
+    launch posture, or tradeoffs before implementation.
+  - `agency:needs-architecture-decision` — system shape must be decided before
+    code should move.
+  - `agency:external-blocked` — action depends on Apple, Google, GitHub,
+    CloudKit, App Store Connect, or another external setting/access path.
+  - `agent:standard` — suitable for scoped UI, docs, tests, scripts, and small
+    service changes.
+  - `agent:strong` — use a strong coding agent for cross-layer SwiftData,
+    HealthKit, Gemini, sync, migration, or tricky validation work.
+  - `agent:frontier` — reserve for ambiguous architecture/product/security
+    decisions where a frontier model is worth the cost.
+  - `output:plan-only` — expected output is a decision memo, issue comment, or
+    implementation plan before code.
 - After each work session, update relevant GitHub issues and board fields
-  (`Status`, `Priority`, `Size`) so the board reflects the latest state.
+  (`Status`, `Category`, `Priority`, `Size`, `Source`) so the board reflects
+  the latest state.
   At minimum, move actively worked issues to `In Progress`, move verified
   completed issues to `Done`, and add notes/links for blockers or validation.
+- New agent-created issues should include context/source, acceptance criteria,
+  likely starting files, risk or user impact, `Status`, `Category`, `Priority`,
+  `Size`, `Source`, one primary `agency:*` label, one `agent:*` label, and
+  `output:plan-only` when the expected next step is a memo rather than code.
+- Draft Project cards are inbox items. Convert durable work to real GitHub
+  Issues when it needs labels, comments, links, or agent routing; leave rough
+  brainstorms as drafts until they are actionable.
 
 Common commands:
 ```bash
@@ -244,13 +307,13 @@ python .agents/skills/openfoodjournal/scripts/github_project_board.py projects
 python .agents/skills/openfoodjournal/scripts/github_project_board.py columns
 python .agents/skills/openfoodjournal/scripts/github_project_board.py list
 python .agents/skills/openfoodjournal/scripts/github_project_board.py list --status Todo
-python .agents/skills/openfoodjournal/scripts/github_project_board.py add-issue 4 --status Todo --priority P0 --size M
+python .agents/skills/openfoodjournal/scripts/github_project_board.py add-issue 4 --status Todo --category "AI / Gemini" --priority P0 --size M --source "manual triage"
 python .agents/skills/openfoodjournal/scripts/github_project_board.py move 4 "In Progress"
-python .agents/skills/openfoodjournal/scripts/github_project_board.py create-issue --title "Bug title" --body-file /tmp/body.md --label area:healthkit,type:bug,priority:p0 --status Todo --priority P0 --size M
-python .agents/skills/openfoodjournal/scripts/github_project_board.py edit-issue 10 --body-file /tmp/body.md --add-label area:healthkit --status Todo --priority P0
+python .agents/skills/openfoodjournal/scripts/github_project_board.py create-issue --title "Bug title" --body-file /tmp/body.md --label area:healthkit,type:bug,priority:p0,agency:ready,agent:strong --status Todo --category "Health / Integrations" --priority P0 --size M --source "conversation import"
+python .agents/skills/openfoodjournal/scripts/github_project_board.py edit-issue 10 --body-file /tmp/body.md --add-label area:healthkit --status Todo --category "Health / Integrations" --priority P0
 python .agents/skills/openfoodjournal/scripts/github_project_board.py check-criteria 10 --all
 python .agents/skills/openfoodjournal/scripts/github_project_board.py check-criteria 10 "AI Search overlay"
-python .agents/skills/openfoodjournal/scripts/github_project_board.py set-fields 10 --status "In Progress" --priority P0 --size M
+python .agents/skills/openfoodjournal/scripts/github_project_board.py set-fields 10 --status "In Progress" --category "Health / Integrations" --priority P0 --size M --source "validated"
 ```
 
 ## Backup / Export Flow
@@ -263,7 +326,7 @@ Settings → Data → Export Spreadsheet CSV
 
 Settings → Data → Export Backup
   → NutritionStore.exportBackup(goals, appSettings)
-  → Versioned JSON (`schemaVersion: 1`) with DailyLog, NutritionEntry, SavedFood (including composite ingredient snapshots and calculator ingredient snapshots), TrackedContainer, Preferences, UserGoals, and non-sensitive app settings
+  → Versioned JSON (`schemaVersion: 1`) with DailyLog, NutritionEntry, SavedFood (including emoji, composite ingredient snapshots, and calculator ingredient snapshots), TrackedContainer, Preferences, UserGoals, meal schedule, and non-sensitive app settings
   → Does not include Gemini API key, HealthKit authorization state, or HealthKit samples
 
 Settings → Data → Import Backup
@@ -307,7 +370,8 @@ Settings → Data → Export Gemini Logs
 16. **Day UI depends on `DailyLog.entries`; CSV export fetches `NutritionEntry` directly** — if entries export but older days look empty, suspect orphaned or duplicate `DailyLog` relationships, not deleted food data. `repairDailyLogEntryRelationships()` runs on launch and is intentionally idempotent so it can reattach entries after CloudKit sync catches up.
 17. **`KnownMicronutrient.Category` cases are `.vitamin`/`.mineral`** — not `.vitamins`/`.minerals`. The enum raw values are plural ("Vitamins"/"Minerals") but the Swift case names are singular.
 18. **`@Observable` should only track UI state** — mark framework infrastructure with `@ObservationIgnored` (`ModelContext`, `URLSession`, `HKHealthStore`, `AVCaptureSession`, `AVCaptureDevice/Input`, continuations). Leaving dispatch/AVFoundation/HealthKit internals observable can surface runtime-only Objective-C selector crashes such as `_setContext:` on dispatch-backed objects. For `NSObject` delegate controllers like `CameraController`, prefer `ObservableObject` + `@StateObject` with `@Published` UI state instead of `@Observable`.
-19. **Gemini Interactions streams typed events** — `ScanService` should parse `event:` + `data:` lines and route `step.delta` by `delta.type`: `thought_summary` updates the visible thinking trace, `text` accumulates final JSON, and `interaction.completed` / `step.stop` usage updates cost and grounding metadata. Do not wait for blank SSE separators before consuming Interactions `data:` JSON; observed responses can arrive as newline-delimited data lines and blank-line batching delays every visible update until `[DONE]`. The API still does not guarantee multiple progressive thought-summary chunks; for many scans it may emit one late summary. Do not add artificial post-summary delays as a substitute for real streaming. Keep DEBUG timing logs and attempt timing fields useful enough to prove whether summaries arrived before or alongside final text. Keep API keys in the `x-goog-api-key` header rather than query strings so exported diagnostics never contain secrets.
+19. **Gemini Interactions streams typed events** — `ScanService` should parse `event:` + `data:` lines and route `step.delta` by `delta.type`: `thought_summary` updates the visible thinking trace, `text` accumulates final JSON, and `interaction.completed` / `step.stop` usage updates cost and grounding metadata. Do not wait for blank SSE separators before consuming Interactions `data:` JSON; observed responses can arrive as newline-delimited data lines and blank-line batching delays every visible update until `[DONE]`. The API still does not guarantee multiple progressive thought-summary chunks; for many scans it may emit one late summary. Do not add artificial post-summary delays as a substitute for real streaming. Keep DEBUG timing logs and attempt timing fields useful enough to prove whether summaries arrived before or alongside final text. Interactions currently accepts `thinking_level` values such as `low` and `high`; do not send the old `minimal` value because latest Flash/Pro return HTTP 400 for it. Keep API keys in the `x-goog-api-key` header rather than query strings so exported diagnostics never contain secrets.
+20. **Debugger log triage needs ownership evidence** — use `docs/debug-log-triage.md` and `.agents/skills/openfoodjournal/scripts/triage_debug_log.py` before turning Xcode console noise into app work. Keyboard constraints with `TUIKeyplane`/`TUIPredictionViewCell`, RunningBoard entitlement lines, Network framework UDP/TCP cleanup, and CoreData CloudKit `BGSystemTaskSchedulerErrorDomain Code=3` export scheduling lines are usually framework/debugger noise unless a breakpoint stack enters `OpenFoodJournal`. `unsafeForcedSync` is not actionable from the log line alone; capture a Swift concurrency runtime backtrace. `glassEffect() tried to update multiple times per frame` is the scan-session warning family most likely to be app-owned, so check broad implicit animations around glass-heavy overlays first.
 
 ## What's New Sheet Pattern
 
@@ -365,14 +429,15 @@ Already configured in `OpenFoodJournal.entitlements`:
 - Builds successfully with `xcodebuild -destination generic/platform=iOS` (no simulators installed; compile-only verification)
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Gemini scans/searches call the Gemini REST API directly from the device using the user's BYOK key; no Render proxy is used by the current app path
-- Food Bank: save foods from scan/manual entry, build composite foods from snapshot ingredient portions, browse/search/sort active foods, auto-hide foods unused for over 14 days, manually archive/unarchive foods, log archived foods from search or Archive
+- Food Bank: save foods from scan/manual entry, build composite foods from snapshot ingredient portions, auto-generate missing emojis from Settings with sequential Gemini Flash latest calls, browse/search/sort/filter active foods, filter by runtime-derived brand buckets including Unbranded, bulk-consolidate one brand string into another across all saved foods, auto-hide foods unused for over 14 days, manually archive/unarchive foods, log archived foods from search or Archive
 - Nutrition Calculator: calculators are `SavedFood(kind: .calculator)` rows with flat ingredient/portion snapshots. OCR import is name-first per ingredient: type an ingredient name, choose an image from the library or camera, Gemini fills nutrients, and portion rows default to visible `normal` field text when no source label exists.
 - Keyboard UX: tapping outside a text input dismisses the keyboard app-wide via `CursorEndModifier`, while taps still pass through to buttons/lists.
-- Settings Data: spreadsheet CSV export plus versioned JSON backup export/import. JSON import is idempotent by UUID.
-- Apple Health repair: Settings can force-rewrite OpenFoodJournal-owned HealthKit nutrition samples for every entry, using deterministic sync identifiers so historical macro-only writes can be replaced without duplicating samples.
+- Settings Data: spreadsheet CSV export plus versioned JSON backup export/import. JSON import is idempotent by UUID and includes saved-food emojis.
+- Apple Health repair: Settings can force-rewrite OpenFoodJournal-owned HealthKit nutrition samples for every entry, using deterministic sync identifiers so historical macro-only or partial micronutrient writes can be replaced without duplicating samples. Incremental "Sync Missing" also picks up new HealthKit dietary export mappings because the write hash includes the export schema version.
 - **Gemini scan UX**: loading overlay shows Interactions API streamed thought-summary trace, result sheet and scan page can redo the last submitted photo set, and camera view has 0.5x/1x/2x zoom controls
 - **Open Food Facts integration**: Enter-only search, zero-calorie/no-usable-nutrition rows filtered out, add to journal/food bank, per-serving nutrition
 - **Food Bank "+" toolbar menu**: AI Search, Composite Food, Nutrition Calculator, Search Open Food Facts, Manual Entry, Archive (replaces empty-state-only guidance)
+- **Meal Schedule**: Settings lets users configure Breakfast/Lunch/Dinner start times. Manual entry, scan result, saved-food logging, container completion, and nutrition-calculator builds default to the schedule from the device's local clock at log time while still allowing manual meal override.
 - **Settings: OFF contribute toggle/status** (`off.contributeEnabled`, default off; `off.contributionSuccessCount` and `off.lastContributionAt` show confirmed on-device upload history)
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
