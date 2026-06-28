@@ -1,4 +1,4 @@
-// OpenFoodJournal — What's New Sheet (v1.2)
+// OpenFoodJournal — What's New Sheet (v1.3)
 // Shown once after updating to a new version. Highlights new features
 // so users discover what's changed. Dismissed with a single button.
 // AGPL-3.0 License
@@ -21,24 +21,38 @@ struct WhatsNewSheet: View {
                     // Feature list — one FeatureRow per new capability
                     VStack(spacing: 24) {
                         FeatureRow(
-                            icon: "scalemass",
+                            icon: "refrigerator",
                             color: .green,
-                            title: "Smarter Container Tracking",
-                            description: "When tracking a container again, the start weight field now suggests the last ending weight for that food."
+                            title: "More Food Bank Tools",
+                            description: "Create composite foods, build restaurant-style calculators, organize brands, and keep older foods in the archive."
                         )
 
                         FeatureRow(
-                            icon: "clock.arrow.circlepath",
-                            color: .orange,
-                            title: "More Recent Foods",
-                            description: "The container picker now shows up to eight recently tracked foods and sorts all foods by recent container use."
+                            icon: "sparkles",
+                            color: .purple,
+                            title: "AI Search and Better Scans",
+                            description: "Search nutrition with Gemini, scan multiple angles, and watch clearer scan progress while results are prepared."
                         )
 
                         FeatureRow(
-                            icon: "bolt",
+                            icon: "heart.text.square",
+                            color: .red,
+                            title: "Apple Health Repair",
+                            description: "Nutrition sync now avoids duplicate samples, writes more nutrients, and can repair older OpenFoodJournal entries."
+                        )
+
+                        FeatureRow(
+                            icon: "externaldrive.badge.checkmark",
                             color: .blue,
-                            title: "Latest Gemini Models",
-                            description: "Food and label scans now use Google's latest Gemini endpoints instead of pinned preview model versions."
+                            title: "Backups and Diagnostics",
+                            description: "Export full backups, restore them safely, and review recent Gemini usage, costs, and diagnostic logs."
+                        )
+
+                        FeatureRow(
+                            icon: "clock",
+                            color: .orange,
+                            title: "Custom Meal Times",
+                            description: "Set your Breakfast, Lunch, and Dinner windows so late logs match your local schedule."
                         )
                     }
                     .padding(.horizontal, 24)
@@ -63,7 +77,7 @@ struct WhatsNewSheet: View {
     private var headerSection: some View {
         VStack(spacing: 12) {
             // Version pill — shows the current release number
-            Text("Version 1.2")
+            Text("Version 1.3")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)

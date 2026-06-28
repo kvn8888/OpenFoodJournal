@@ -1,6 +1,6 @@
 # Privacy Policy — OpenFoodJournal
 
-**Last Updated:** July 17, 2025
+**Last Updated:** June 27, 2026
 
 OpenFoodJournal ("the App") is an open-source food journaling application. This privacy policy explains what data we collect, how it's used, and your rights.
 
@@ -10,7 +10,8 @@ OpenFoodJournal ("the App") is an open-source food journaling application. This 
 - Food names, brands, and nutritional information you enter or scan
 - Daily food logs and meal entries
 - Macro and micronutrient tracking data
-- Saved food templates and container tracking data
+- Saved food templates, composite foods, nutrition calculators, serving mappings, and container tracking data
+- Meal-time preferences, goals, archive state, and app settings
 
 This data is stored locally on your device using SwiftData and synced across your devices via **Apple iCloud (CloudKit Private Database)**. Your data is stored in your personal iCloud account — we do not have access to it.
 
@@ -22,9 +23,17 @@ When you use the scan feature, the App captures photos of food items or nutritio
 
 You provide your own Google Gemini API key to enable scanning. Your API key is stored securely in the iOS Keychain on your device — it is never transmitted to us or any third party other than Google.
 
+### Gemini Diagnostics and Usage Totals
+When you use Gemini-powered features such as label scans, food-photo scans, AI Search, nutrition-calculator OCR, or optional food emoji generation, the App stores local diagnostic logs for troubleshooting. These logs may include:
+- Operation type, status, selected model, duration, and error details
+- Prompt text and non-image response text returned by Gemini
+- Request metadata such as image dimensions, JPEG sizes, response timing, token usage, and estimated cost
+
+These logs **never include your Gemini API key or raw image bytes**. They are stored locally with your app data, can be exported from Settings, and are pruned to a 30-day window.
+
 ### Health Data (Apple HealthKit)
 If you opt in, the App:
-- **Writes** nutritional data (calories, protein, carbs, fat) to Apple Health
+- **Writes** nutritional data such as calories, protein, carbs, fat, and supported dietary micronutrients to Apple Health
 - **Reads** active energy burned (`HKQuantityTypeIdentifierActiveEnergyBurned`) to calculate your net calorie balance for the day
 
 We:
@@ -36,16 +45,16 @@ We:
 You can disable HealthKit integration at any time in Settings.
 
 ### Macro Goals & Preferences
-Your daily calorie and macro goals, and UI preferences (e.g., ring display configuration), are stored locally on your device using UserDefaults.
+Your daily calorie and macro goals, meal-time settings, and UI preferences (e.g., ring display configuration) are stored locally on your device using UserDefaults or SwiftData.
 
 ## Data Processing
 
 ### Google Gemini AI (Direct API)
-When you scan a food item, the image is sent directly from your device via HTTPS to **Google's Gemini AI** (`generativelanguage.googleapis.com`) for nutritional analysis. There is no intermediary server — your device communicates with Google's API directly using your personal API key.
+When you use Gemini-powered features, images and/or text prompts are sent directly from your device via HTTPS to **Google's Gemini AI** (`generativelanguage.googleapis.com`) for nutritional analysis, nutrition search, OCR, or emoji generation. There is no intermediary OpenFoodJournal server — your device communicates with Google's API directly using your personal API key.
 
 - Images are sent as part of a single API request and are **not stored** by the App after processing
 - Google may process and temporarily retain the image per their API terms
-- No personally identifiable information is included in the request — only the food image and an analysis prompt
+- No personally identifiable information is intentionally included in the request — only the food image or prompt content needed for the feature
 - You can revoke access at any time by deleting your API key in Settings or revoking it at [Google AI Studio](https://aistudio.google.com/apikey)
 
 Google's use of data sent to Gemini is governed by [Google's Privacy Policy](https://policies.google.com/privacy) and [Google's Generative AI Terms](https://ai.google.dev/gemini-api/terms).
@@ -57,6 +66,16 @@ All your food journal data is stored in **Apple's iCloud Private Database** via 
 - We have **no ability to read, access, or delete** your cloud data
 - Data syncs automatically across your devices signed into the same Apple ID
 - Apple's iCloud terms and privacy policy apply to this storage
+
+### Optional Turso Mirror
+The App can optionally mirror a copy of your OpenFoodJournal data to a Turso database that you configure yourself. This feature is off by default.
+
+If you enable it:
+- You provide the Turso database URL and auth token
+- Credentials are stored in the iOS Keychain
+- Food logs, saved foods, containers, preferences, and optionally diagnostic logs may be pushed to your Turso database
+- OpenFoodJournal does not operate or access that database
+- You can disable the mirror or delete the credentials in Settings
 
 ## No User Accounts
 
@@ -72,14 +91,16 @@ The App does not:
 
 ## No Third-Party Data Sharing
 
-We do not sell, rent, or share your data with any third parties, except as described above (Google Gemini for image processing during scans).
+We do not sell, rent, or share your data with third parties for advertising or marketing. Data is sent only as described above: to Apple iCloud for sync, to Google Gemini when you use Gemini-powered features, and to your own Turso database only if you explicitly configure the optional mirror.
 
 ## Data Deletion
 
 To delete your data:
 - **Local data**: Uninstall the App from your device
 - **iCloud data**: Go to iOS Settings → [Your Name] → iCloud → Manage Storage → OpenFoodJournal → Delete Data
-- **Both**: Uninstalling the App and removing iCloud data permanently deletes all your information
+- **Gemini API key or Turso credentials**: Delete them from Settings
+- **Apple Health samples**: Manage or delete OpenFoodJournal Health data in the Apple Health app
+- **Both local and iCloud data**: Uninstalling the App and removing iCloud data permanently deletes all your information
 
 ## Children's Privacy
 
