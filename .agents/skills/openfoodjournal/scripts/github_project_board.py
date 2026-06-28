@@ -118,6 +118,13 @@ def single_select_field(fields: list[dict[str, Any]], name: str) -> dict[str, An
     raise BoardError(f"Project has no single-select {name} field.")
 
 
+def field_by_name(fields: list[dict[str, Any]], name: str) -> dict[str, Any]:
+    for field in fields:
+        if field.get("name", "").lower() == name.lower():
+            return field
+    raise BoardError(f"Project has no {name} field.")
+
+
 def option_id(field: dict[str, Any], value: str) -> str:
     lowered = value.lower()
     for option in field.get("options", []):
@@ -180,16 +187,18 @@ def print_items(items: list[dict[str, Any]]) -> None:
     for status, status_items in grouped.items():
         print(f"## {status}")
         print()
-        print("| Item | Title | Type | URL |")
-        print("| --- | --- | --- | --- |")
+        print("| Item | Title | Type | Priority | Size | Category | Source | URL |")
+        print("| --- | --- | --- | --- | --- | --- | --- | --- |")
         for item in status_items:
             content = item.get("content") or {}
             number = content.get("number")
             item_number = f"#{number}" if number else "draft"
             title = item.get("title") or content.get("title") or "(untitled)"
             print(
-                f"| {item_number} | {markdown_escape(title)} | "
-                f"{markdown_escape(content.get('type'))} | {content.get('url', '')} |"
+                f"| {item_number} | {markdown_escape(title)} | {markdown_escape(content.get('type'))} | "
+                f"{markdown_escape(item.get('priority'))} | {markdown_escape(item.get('size'))} | "
+                f"{markdown_escape(item.get('category'))} | {markdown_escape(item.get('source'))} | "
+                f"{content.get('url', '')} |"
             )
         print()
 
@@ -200,18 +209,57 @@ def move_item(owner: str, project: Project, item_id: str, status: str) -> None:
 
 def set_single_select(owner: str, project: Project, item_id: str, field_name: str, value: str) -> None:
     view = project_view(owner, project)
-    field = single_select_field(field_list(owner, project), field_name)
+    fields = field_list(owner, project)
+    set_single_select_value(view["id"], fields, item_id, field_name, value)
+
+
+def set_single_select_value(
+    project_id: str,
+    fields: list[dict[str, Any]],
+    item_id: str,
+    field_name: str,
+    value: str,
+) -> None:
+    field = single_select_field(fields, field_name)
     run_gh(
         "project",
         "item-edit",
         "--id",
         item_id,
         "--project-id",
-        view["id"],
+        project_id,
         "--field-id",
         field["id"],
         "--single-select-option-id",
         option_id(field, value),
+    )
+
+
+def set_text_field(owner: str, project: Project, item_id: str, field_name: str, value: str) -> None:
+    view = project_view(owner, project)
+    fields = field_list(owner, project)
+    set_text_field_value(view["id"], fields, item_id, field_name, value)
+
+
+def set_text_field_value(
+    project_id: str,
+    fields: list[dict[str, Any]],
+    item_id: str,
+    field_name: str,
+    value: str,
+) -> None:
+    field = field_by_name(fields, field_name)
+    run_gh(
+        "project",
+        "item-edit",
+        "--id",
+        item_id,
+        "--project-id",
+        project_id,
+        "--field-id",
+        field["id"],
+        "--text",
+        value,
     )
 
 
@@ -414,14 +462,23 @@ def ensure_issue_on_project(args: argparse.Namespace, project: Project, number: 
 
 
 def apply_project_fields(args: argparse.Namespace, project: Project, item_id: str) -> None:
-    field_values = {
+    single_select_values = {
         "Status": getattr(args, "status", None),
+        "Category": getattr(args, "category", None),
         "Priority": getattr(args, "priority", None),
         "Size": getattr(args, "size", None),
     }
-    for field_name, value in field_values.items():
+    source = getattr(args, "source", None)
+    if not any(single_select_values.values()) and not source:
+        return
+
+    view = project_view(args.owner, project)
+    fields = field_list(args.owner, project)
+    for field_name, value in single_select_values.items():
         if value:
-            set_single_select(args.owner, project, item_id, field_name, value)
+            set_single_select_value(view["id"], fields, item_id, field_name, value)
+    if source:
+        set_text_field_value(view["id"], fields, item_id, "Source", source)
 
 
 def cmd_projects(args: argparse.Namespace) -> None:
@@ -519,7 +576,7 @@ def cmd_edit_issue(args: argparse.Namespace) -> None:
     run_gh(*command)
     print(f"Edited issue #{args.number}: {issue_url(args, args.number)}")
 
-    if args.status or args.priority or args.size:
+    if args.status or args.category or args.priority or args.size or args.source:
         project = resolve_project(args.owner, args.project_title, args.project_number)
         item_id = ensure_issue_on_project(args, project, args.number)
         apply_project_fields(args, project, item_id)
@@ -608,8 +665,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_args(add_issue)
     add_issue.add_argument("number", type=int)
     add_issue.add_argument("--status")
+    add_issue.add_argument("--category")
     add_issue.add_argument("--priority")
     add_issue.add_argument("--size")
+    add_issue.add_argument("--source")
     add_issue.set_defaults(func=cmd_add_issue)
 
     move = sub.add_parser("move", help="Move an item to a Status column.")
@@ -625,8 +684,10 @@ def build_parser() -> argparse.ArgumentParser:
     create_issue.add_argument("--body-file")
     create_issue.add_argument("--label", action="append", help="Comma-separated label list. May be repeated.")
     create_issue.add_argument("--status")
+    create_issue.add_argument("--category")
     create_issue.add_argument("--priority")
     create_issue.add_argument("--size")
+    create_issue.add_argument("--source")
     create_issue.add_argument("--no-project", action="store_true")
     create_issue.set_defaults(func=cmd_create_issue)
 
@@ -638,8 +699,10 @@ def build_parser() -> argparse.ArgumentParser:
     edit_issue.add_argument("--body-file")
     edit_issue.add_argument("--add-label", action="append", help="Comma-separated label list. May be repeated.")
     edit_issue.add_argument("--status")
+    edit_issue.add_argument("--category")
     edit_issue.add_argument("--priority")
     edit_issue.add_argument("--size")
+    edit_issue.add_argument("--source")
     edit_issue.set_defaults(func=cmd_edit_issue)
 
     check_criteria = sub.add_parser(
@@ -669,8 +732,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_common_args(set_fields)
     set_fields.add_argument("item", help="Issue number, item ID, URL, or title.")
     set_fields.add_argument("--status")
+    set_fields.add_argument("--category")
     set_fields.add_argument("--priority")
     set_fields.add_argument("--size")
+    set_fields.add_argument("--source")
     set_fields.set_defaults(func=cmd_set_fields)
     return parser
 
