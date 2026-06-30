@@ -226,6 +226,10 @@ final class SavedFood {
     var name: String = ""
     var brand: String?             // Product brand, separate from name
     var emoji: String?             // Optional user-visible Food Bank icon
+    var generatedIconImageData: Data?
+    var generatedIconImageMimeType: String?
+    var generatedIconImageUpdatedAt: Date?
+    var generatedIconImagePrompt: String?
     var createdAt: Date = Date()
 
     // Core macros — always required (same four as NutritionEntry)
@@ -271,6 +275,10 @@ final class SavedFood {
         name: String,
         brand: String? = nil,
         emoji: String? = nil,
+        generatedIconImageData: Data? = nil,
+        generatedIconImageMimeType: String? = nil,
+        generatedIconImageUpdatedAt: Date? = nil,
+        generatedIconImagePrompt: String? = nil,
         createdAt: Date = .now,
         calories: Double,
         protein: Double,
@@ -293,6 +301,10 @@ final class SavedFood {
         self.name = name
         self.brand = brand
         self.emoji = emoji
+        self.generatedIconImageData = generatedIconImageData
+        self.generatedIconImageMimeType = generatedIconImageMimeType
+        self.generatedIconImageUpdatedAt = generatedIconImageUpdatedAt
+        self.generatedIconImagePrompt = generatedIconImagePrompt
         self.createdAt = createdAt
         self.calories = calories
         self.protein = protein
@@ -355,6 +367,15 @@ extension SavedFood {
 
     var needsFoodBankEmoji: Bool {
         normalizedEmoji == nil
+    }
+
+    var hasGeneratedFoodIconImage: Bool {
+        guard let generatedIconImageData else { return false }
+        return !generatedIconImageData.isEmpty
+    }
+
+    var needsFoodBankGeneratedIconImage: Bool {
+        !hasGeneratedFoodIconImage
     }
 
     static func compositeTotals(for ingredients: [CompositeIngredientSnapshot]) -> CompositeNutritionTotals {

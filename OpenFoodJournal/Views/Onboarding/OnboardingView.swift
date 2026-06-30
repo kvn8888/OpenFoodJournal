@@ -18,6 +18,7 @@ struct OnboardingView: View {
 
     // Persists across launches — once set to true, onboarding is skipped
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage(AIProviderSettings.providerKey) private var aiProviderRawValue: String = AIProviderSettings.defaultProvider.rawValue
 
     // Tracks which page the user is on (0-indexed)
     @State private var currentPage = 0
@@ -37,7 +38,9 @@ struct OnboardingView: View {
 
     // API key input during onboarding
     @State private var onboardingAPIKey: String = ""
+    @State private var onboardingOpenRouterAPIKey: String = ""
     @State private var apiKeySaved = false
+    @State private var openRouterAPIKeySaved = false
 
     // Total number of onboarding pages
     private let pageCount = 6
@@ -48,7 +51,7 @@ struct OnboardingView: View {
             welcomePage
                 .tag(0)
 
-            // Page 1: Gemini API Key
+            // Page 1: AI Provider API Key
             apiKeyPage
                 .tag(1)
 
@@ -122,9 +125,22 @@ struct OnboardingView: View {
         .padding()
     }
 
-    // MARK: - Page 1: Gemini API Key
+    // MARK: - Page 1: AI Provider API Key
 
-    /// Prompts the user to enter their Gemini API key.
+    private var selectedAIProvider: AIProvider {
+        AIProvider(rawValue: aiProviderRawValue) ?? .gemini
+    }
+
+    private var selectedAPIKeyBinding: Binding<String> {
+        switch selectedAIProvider {
+        case .gemini:
+            return $onboardingAPIKey
+        case .openRouter:
+            return $onboardingOpenRouterAPIKey
+        }
+    }
+
+    /// Prompts the user to enter an AI provider key.
     /// This is required for food scanning — without it, the app can't analyze images.
     private var apiKeyPage: some View {
         VStack(spacing: 24) {
@@ -134,14 +150,22 @@ struct OnboardingView: View {
                 .font(.system(size: 60))
                 .foregroundStyle(Color.accentColor)
 
-            Text("Gemini API Key")
+            Text("AI Provider Key")
                 .font(.largeTitle.bold())
 
-            Text("OpenFoodJournal uses Google's Gemini AI to analyze food photos and nutrition labels. You'll need a free API key.")
+            Text("OpenFoodJournal can use Gemini directly or OpenRouter for model routing, including Google Vertex routes configured in OpenRouter.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
+
+            Picker("AI Provider", selection: $aiProviderRawValue) {
+                ForEach(AIProvider.allCases) { provider in
+                    Text(provider.displayName).tag(provider.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 32)
 
             // App Store 5.1.2(i) disclosure: clearly state what data goes to Google
             // Using footnote + primary color so it's prominent enough for App Store review
@@ -149,7 +173,7 @@ struct OnboardingView: View {
                 Image(systemName: "info.circle")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                Text("When you scan food, your photo is sent to Google's Gemini API for analysis. No other personal data is shared.")
+                Text("When you scan food, your photo is sent directly to the selected AI provider for analysis. No other personal data is shared.")
                     .font(.footnote)
                     .foregroundStyle(.primary)
                     .multilineTextAlignment(.leading)
@@ -158,15 +182,18 @@ struct OnboardingView: View {
             .padding(.vertical, 8)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
 
-            if apiKeySaved {
-                Label("API key saved", systemImage: "checkmark.circle.fill")
+            if selectedAIProvider == .gemini, apiKeySaved {
+                Label("Gemini API key saved", systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.headline)
+            } else if selectedAIProvider == .openRouter, openRouterAPIKeySaved {
+                Label("OpenRouter API key saved", systemImage: "checkmark.circle.fill")
                     .foregroundStyle(.green)
                     .font(.headline)
             } else {
                 VStack(spacing: 12) {
-                    // Link to get an API key
-                    Link(destination: URL(string: "https://aistudio.google.com/apikey")!) {
-                        Label("Get a free API key", systemImage: "safari")
+                    Link(destination: URL(string: selectedAIProvider == .gemini ? "https://aistudio.google.com/apikey" : "https://openrouter.ai/keys")!) {
+                        Label(selectedAIProvider == .gemini ? "Get Gemini API Key" : "Manage OpenRouter Keys", systemImage: "safari")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding()
@@ -178,7 +205,7 @@ struct OnboardingView: View {
 
                     // API key text field
                     HStack {
-                        SecureField("Paste your API key here", text: $onboardingAPIKey)
+                        SecureField("Paste your API key here", text: selectedAPIKeyBinding)
                             .textContentType(.password)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
@@ -186,12 +213,19 @@ struct OnboardingView: View {
                             .background(Color(.systemGray6))
                             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-                        if !onboardingAPIKey.isEmpty {
+                        if !selectedAPIKeyBinding.wrappedValue.isEmpty {
                             Button("Save") {
-                                let trimmed = onboardingAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+                                let trimmed = selectedAPIKeyBinding.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
                                 guard !trimmed.isEmpty else { return }
-                                KeychainService.save(trimmed, for: KeychainService.geminiAPIKeyAccount)
-                                apiKeySaved = true
+                                KeychainService.save(trimmed, for: selectedAIProvider.keychainAccount)
+                                switch selectedAIProvider {
+                                case .gemini:
+                                    apiKeySaved = true
+                                    onboardingAPIKey = ""
+                                case .openRouter:
+                                    openRouterAPIKeySaved = true
+                                    onboardingOpenRouterAPIKey = ""
+                                }
                             }
                             .buttonStyle(.borderedProminent)
                         }
@@ -208,6 +242,7 @@ struct OnboardingView: View {
         .onAppear {
             // Check if key was already saved (e.g. from a previous partial onboarding)
             apiKeySaved = KeychainService.hasGeminiAPIKey
+            openRouterAPIKeySaved = KeychainService.hasOpenRouterAPIKey
         }
     }
 

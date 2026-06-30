@@ -7,6 +7,8 @@ import SwiftData
 
 @Model
 final class GeminiCostAccumulator {
+    static let currentPricingSource = "Google Gemini API pricing, Standard paid tier, checked 2026-06-30"
+
     var id: UUID = UUID()
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
@@ -28,7 +30,7 @@ final class GeminiCostAccumulator {
     var lastPricingModel: String?
     var lastRecordedAt: Date?
 
-    var pricingSource: String = "Google Gemini API pricing, Standard paid tier, checked 2026-06-22"
+    var pricingSource: String = GeminiCostAccumulator.currentPricingSource
 
     init() {}
 
@@ -39,6 +41,7 @@ final class GeminiCostAccumulator {
         )
         descriptor.fetchLimit = 1
         if let existing = try? context.fetch(descriptor).first {
+            existing.pricingSource = currentPricingSource
             return existing
         }
 

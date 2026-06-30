@@ -5,4 +5,5 @@ import Foundation
 
 enum FoodBankEmojiSettings {
     static let autoGenerateKey = "foodBank.autoGenerateEmojis"
+    static let useGeneratedIconImagesKey = "foodBank.useGeneratedIconImages"
 }

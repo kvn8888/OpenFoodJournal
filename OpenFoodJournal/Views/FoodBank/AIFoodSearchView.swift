@@ -1,5 +1,5 @@
 // OpenFoodJournal — AIFoodSearchView
-// Text search for foods/products using Gemini with Google Search grounding.
+// Text search for foods/products using the selected AI provider with web grounding.
 // AGPL-3.0 License
 
 import SwiftUI

@@ -1,5 +1,5 @@
 // OpenFoodJournal — Keychain Service
-// Provides secure storage for the user's Gemini API key using the iOS Keychain.
+// Provides secure storage for user-owned API keys using the iOS Keychain.
 // The Keychain persists across app updates and is encrypted at rest by the OS.
 // AGPL-3.0 License
 
@@ -9,7 +9,7 @@ import Security
 // MARK: - KeychainService
 
 /// A simple wrapper around the iOS Keychain for storing and retrieving string secrets.
-/// Used primarily to store the user's Gemini API key securely — never in UserDefaults
+/// Used primarily to store user AI provider keys securely — never in UserDefaults
 /// or plain text, since API keys grant access to billable services.
 enum KeychainService {
 
@@ -22,6 +22,10 @@ enum KeychainService {
     /// The specific Keychain account name for the Gemini API key.
     /// Think of (service, account) as a composite key in a database.
     static let geminiAPIKeyAccount = "gemini-api-key"
+
+    /// OpenRouter API key for model-router access. This is separate from the
+    /// Gemini key so users can switch providers without overwriting secrets.
+    static let openRouterAPIKeyAccount = "openrouter-api-key"
 
     /// Optional Turso mirror credentials. These are user-owned debugging
     /// database secrets and must never be copied into UserDefaults or logs.
@@ -111,6 +115,21 @@ enum KeychainService {
     /// Retrieves the stored Gemini API key, if any.
     static var geminiAPIKey: String? {
         load(for: geminiAPIKeyAccount)
+    }
+
+    /// Quick check: does the user have an OpenRouter API key stored?
+    static var hasOpenRouterAPIKey: Bool {
+        load(for: openRouterAPIKeyAccount) != nil
+    }
+
+    /// Retrieves the stored OpenRouter API key, if any.
+    static var openRouterAPIKey: String? {
+        load(for: openRouterAPIKeyAccount)
+    }
+
+    /// Retrieves the API key for whichever provider is currently selected.
+    static func apiKey(for provider: AIProvider) -> String? {
+        load(for: provider.keychainAccount)
     }
 
     /// Quick check: does the user have both Turso mirror credential fields saved?

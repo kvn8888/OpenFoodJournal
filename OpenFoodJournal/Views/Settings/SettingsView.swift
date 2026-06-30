@@ -17,18 +17,26 @@ struct SettingsView: View {
     @Query private var savedFoods: [SavedFood]
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
+    @AppStorage(AIProviderSettings.providerKey) private var aiProviderRawValue: String = AIProviderSettings.defaultProvider.rawValue
     @AppStorage("scan.useProModel") private var useProModel: Bool = false
+    @AppStorage(AIProviderSettings.openRouterLiteModelKey) private var openRouterLiteModel: String = AIProviderSettings.defaultOpenRouterLiteModel
+    @AppStorage(AIProviderSettings.openRouterProModelKey) private var openRouterProModel: String = AIProviderSettings.defaultOpenRouterProModel
+    @AppStorage(AIProviderSettings.openRouterEmojiModelKey) private var openRouterEmojiModel: String = AIProviderSettings.defaultOpenRouterEmojiModel
+    @AppStorage(AIProviderSettings.openRouterRoutingModeKey) private var openRouterRoutingModeRawValue: String = OpenRouterRoutingMode.automatic.rawValue
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
+    @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
     @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
     @AppStorage("off.contributionSuccessCount") private var offContributionSuccessCount: Int = 0
     @AppStorage("off.lastContributionAt") private var offLastContributionAt: Double = 0
 
     /// The text field value for the API key — loaded from Keychain on appear.
     @State private var apiKeyInput: String = ""
+    @State private var openRouterAPIKeyInput: String = ""
     /// Whether the saved key is currently masked (showing dots instead of the key).
     @State private var isKeyMasked: Bool = true
     /// Whether a valid API key is currently stored in Keychain.
     @State private var hasAPIKey: Bool = false
+    @State private var hasOpenRouterAPIKey: Bool = false
 
     @State private var showOnboarding = false
     /// Shown when the user tries to export but has logged no food yet.
@@ -92,75 +100,96 @@ struct SettingsView: View {
                     Text("Food is assigned to Breakfast, Lunch, or Dinner from your device's local time when you tap Add. Dinner wraps overnight until Breakfast starts; Snack remains a manual override.")
                 }
 
-                // MARK: Gemini API Key
+                // MARK: AI Provider
                 Section {
-                    if hasAPIKey && apiKeyInput.isEmpty {
-                        // Key is saved — show masked or reveal toggle
-                        HStack {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                            Text("API key saved")
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Remove") {
-                                KeychainService.delete(for: KeychainService.geminiAPIKeyAccount)
-                                hasAPIKey = false
-                                apiKeyInput = ""
-                            }
-                            .foregroundStyle(.red)
-                            .font(.subheadline)
-                        }
-                    } else {
-                        // No key or user is editing — show text field
-                        HStack {
-                            SecureField("Paste your Gemini API key", text: $apiKeyInput)
-                                .textContentType(.password)
-                                .autocorrectionDisabled()
-                                .textInputAutocapitalization(.never)
-
-                            if !apiKeyInput.isEmpty {
-                                Button("Save") {
-                                    let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    guard !trimmed.isEmpty else { return }
-                                    KeychainService.save(trimmed, for: KeychainService.geminiAPIKeyAccount)
-                                    hasAPIKey = true
-                                    apiKeyInput = ""  // Clear the field to show "saved" state
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .font(.subheadline)
-                            }
+                    Picker("Provider", selection: $aiProviderRawValue) {
+                        ForEach(AIProvider.allCases) { provider in
+                            Text(provider.displayName).tag(provider.rawValue)
                         }
                     }
+
+                    if selectedAIProvider == .gemini {
+                        apiKeyRow(
+                            providerName: "Gemini",
+                            placeholder: "Paste your Gemini API key",
+                            input: $apiKeyInput,
+                            hasKey: $hasAPIKey,
+                            account: KeychainService.geminiAPIKeyAccount
+                        )
+
+                        Link(destination: URL(string: "https://aistudio.google.com/apikey")!) {
+                            Label("Get Gemini API Key", systemImage: "safari")
+                        }
+                    } else {
+                        apiKeyRow(
+                            providerName: "OpenRouter",
+                            placeholder: "Paste your OpenRouter API key",
+                            input: $openRouterAPIKeyInput,
+                            hasKey: $hasOpenRouterAPIKey,
+                            account: KeychainService.openRouterAPIKeyAccount
+                        )
+
+                        Link(destination: URL(string: "https://openrouter.ai/keys")!) {
+                            Label("Manage OpenRouter Keys", systemImage: "safari")
+                        }
+
+                        TextField("Lite / label model", text: $openRouterLiteModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Pro / estimate model", text: $openRouterProModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Food emoji model", text: $openRouterEmojiModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        Picker("OpenRouter Route", selection: $openRouterRoutingModeRawValue) {
+                            ForEach(OpenRouterRoutingMode.allCases) { mode in
+                                Text(mode.displayName).tag(mode.rawValue)
+                            }
+                        }
+
+                        Text(selectedOpenRouterRoutingMode.description)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 } header: {
-                    Text("Gemini API Key")
+                    Text("AI Provider")
                 } footer: {
-                    Text("Required for food scanning. Get a free key at [aistudio.google.com](https://aistudio.google.com/apikey)")
+                    Text("Gemini uses Google's direct API. OpenRouter uses its chat-completions API and can prefer or require the Google Vertex route if your OpenRouter account is configured for it. API keys stay in Keychain and are not exported.")
                 }
 
                 // MARK: Scanning
                 Section {
                     Toggle(isOn: $useProModel) {
-                        Label("Use Gemini Pro for AI", systemImage: "sparkles")
+                        Label("Use Pro Model for AI", systemImage: "sparkles")
                     }
                 } header: {
                     Text("Scanning")
                 } footer: {
-                    Text("When enabled, food photo scans and AI Search use Gemini Pro for more accurate estimates. Lite mode is faster and uses less API quota.")
+                    Text("When enabled, food photo scans, AI Search, and calculator OCR use the provider's Pro model. Lite mode is faster and uses less quota.")
                 }
 
                 // MARK: Food Bank
                 Section {
                     Toggle(isOn: $autoGenerateFoodEmojis) {
-                        Label("Auto-Generate Food Emojis", systemImage: "face.smiling")
+                        Label("Enable Food Icon Generation", systemImage: "sparkles")
                     }
-                    .onChange(of: autoGenerateFoodEmojis) { _, enabled in
+                    .onChange(of: autoGenerateFoodEmojis) {
                         tursoMirror.scheduleMirror(reason: "food_emoji_setting_changed")
-                        if enabled {
-                            assignMissingFoodEmojis()
-                        }
                     }
 
-                    LabeledContent("Missing Emojis", value: missingFoodEmojiCount.formatted())
+                    Toggle(isOn: $useGeneratedFoodIconImages) {
+                        Label("Use Generated Food Images", systemImage: "photo.circle")
+                    }
+                    .onChange(of: useGeneratedFoodIconImages) {
+                        tursoMirror.scheduleMirror(reason: "food_icon_mode_changed")
+                    }
+
+                    LabeledContent(missingFoodIconLabel, value: missingFoodIconCount.formatted())
+                    LabeledContent("Image Storage", value: generatedFoodIconStorageText)
 
                     if scanService.isAssigningFoodEmojis {
                         VStack(alignment: .leading, spacing: 8) {
@@ -179,24 +208,28 @@ struct SettingsView: View {
                     }
 
                     Button {
-                        assignMissingFoodEmojis()
+                        assignMissingFoodIcons()
                     } label: {
-                        Label("Generate Missing Emojis Now", systemImage: "sparkles")
+                        Label(generateMissingFoodIconLabel, systemImage: useGeneratedFoodIconImages ? "photo.badge.plus" : "sparkles")
                     }
-                    .disabled(!hasAPIKey || scanService.isAssigningFoodEmojis || missingFoodEmojiCount == 0)
+                    .disabled(!autoGenerateFoodEmojis || !selectedFoodIconModeHasKey || scanService.isAssigningFoodEmojis || missingFoodIconCount == 0)
 
-                    if !hasAPIKey {
-                        Label("Gemini API key required.", systemImage: "key")
+                    if !autoGenerateFoodEmojis {
+                        Label("Enable food icon generation to generate icons.", systemImage: "switch.2")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else if !selectedFoodIconModeHasKey {
+                        Label("\(selectedFoodIconModeKeyName) API key required.", systemImage: "key")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 } header: {
                     Text("Food Bank")
                 } footer: {
-                    Text("When enabled, saved foods without an emoji are assigned one with Gemini Flash latest. The app processes foods sequentially and never overwrites existing emojis.")
+                    Text("Toggles only change icon preferences. Generate missing icons manually with the button above or a Food Bank row context menu. Emoji mode uses the selected AI provider. Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails.")
                 }
 
-                // MARK: Gemini Usage
+                // MARK: AI Usage
                 Section {
                     LabeledContent {
                         Text(costText(geminiTotalEstimatedCostUSD))
@@ -223,13 +256,13 @@ struct SettingsView: View {
                     Button(role: .destructive) {
                         showResetGeminiCostConfirmation = true
                     } label: {
-                        Label("Reset Gemini Usage Total", systemImage: "arrow.counterclockwise")
+                        Label("Reset AI Usage Total", systemImage: "arrow.counterclockwise")
                     }
                     .disabled(geminiTotalRequests == 0)
                 } header: {
-                    Text("Gemini Usage")
+                    Text("AI Usage")
                 } footer: {
-                    Text("Estimated from Gemini token usage and Google Standard paid-tier prices checked June 22, 2026. Google Search grounding fees are not included because the API response does not expose the number of billable search queries.")
+                    Text("Gemini and Gemini-routed OpenRouter calls are estimated from usage metadata and Google Standard paid-tier prices checked June 30, 2026. Food icon image generation uses reported image output tokens when Gemini returns them, with a documented 1K-image fallback. Non-Gemini OpenRouter models log token counts but may show zero local cost if pricing is not known.")
                 }
 
                 // MARK: Integrations
@@ -314,12 +347,12 @@ struct SettingsView: View {
                     Button {
                         presentGeminiLogExport()
                     } label: {
-                        Label("Export Gemini Logs", systemImage: "doc.text.magnifyingglass")
+                        Label("Export AI Logs", systemImage: "doc.text.magnifyingglass")
                     }
-                    .alert("No Gemini logs", isPresented: $showNoGeminiLogsAlert) {
+                    .alert("No AI logs", isPresented: $showNoGeminiLogsAlert) {
                         Button("OK", role: .cancel) {}
                     } message: {
-                        Text("Gemini scan and AI Search logs from the last 30 days will appear here after you use those features.")
+                        Text("AI scan and AI Search logs from the last 30 days will appear here after you use those features.")
                     }
 
                     Button {
@@ -371,6 +404,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .onAppear {
                 hasAPIKey = KeychainService.hasGeminiAPIKey
+                hasOpenRouterAPIKey = KeychainService.hasOpenRouterAPIKey
                 _ = GeminiCostAccumulator.current(in: modelContext)
                 try? modelContext.save()
             }
@@ -426,7 +460,7 @@ struct SettingsView: View {
             Text("This rewrites Apple Health nutrition data for all OpenFoodJournal entries. It replaces data previously written by this app instead of duplicating it, and does not modify nutrition data from other apps.")
         }
         .confirmationDialog(
-            "Reset Gemini Usage Total?",
+            "Reset AI Usage Total?",
             isPresented: $showResetGeminiCostConfirmation,
             titleVisibility: .visible
         ) {
@@ -435,7 +469,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This clears the local estimated cost and token counters. It does not affect Google billing history.")
+            Text("This clears the local estimated cost and token counters. It does not affect provider billing history.")
         }
     }
 
@@ -463,12 +497,107 @@ struct SettingsView: View {
         }
     }
 
+    private var selectedAIProvider: AIProvider {
+        AIProvider(rawValue: aiProviderRawValue) ?? .gemini
+    }
+
+    private var selectedOpenRouterRoutingMode: OpenRouterRoutingMode {
+        OpenRouterRoutingMode(rawValue: openRouterRoutingModeRawValue) ?? .automatic
+    }
+
+    private var selectedAIProviderHasKey: Bool {
+        switch selectedAIProvider {
+        case .gemini:
+            return hasAPIKey
+        case .openRouter:
+            return hasOpenRouterAPIKey
+        }
+    }
+
+    @ViewBuilder
+    private func apiKeyRow(
+        providerName: String,
+        placeholder: String,
+        input: Binding<String>,
+        hasKey: Binding<Bool>,
+        account: String
+    ) -> some View {
+        if hasKey.wrappedValue && input.wrappedValue.isEmpty {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                Text("\(providerName) API key saved")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Remove") {
+                    KeychainService.delete(for: account)
+                    hasKey.wrappedValue = false
+                    input.wrappedValue = ""
+                }
+                .foregroundStyle(.red)
+                .font(.subheadline)
+            }
+        } else {
+            HStack {
+                SecureField(placeholder, text: input)
+                    .textContentType(.password)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+
+                if !input.wrappedValue.isEmpty {
+                    Button("Save") {
+                        let trimmed = input.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmed.isEmpty else { return }
+                        KeychainService.save(trimmed, for: account)
+                        hasKey.wrappedValue = true
+                        input.wrappedValue = ""
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .font(.subheadline)
+                }
+            }
+        }
+    }
+
     private var geminiTotalEstimatedCostUSD: Double {
         geminiCostAccumulators.reduce(0) { $0 + $1.totalEstimatedTokenCostUSD }
     }
 
-    private var missingFoodEmojiCount: Int {
-        savedFoods.filter(\.needsFoodBankEmoji).count
+    private var missingFoodIconCount: Int {
+        if useGeneratedFoodIconImages {
+            return savedFoods.filter(\.needsFoodBankGeneratedIconImage).count
+        }
+        return savedFoods.filter(\.needsFoodBankEmoji).count
+    }
+
+    private var missingFoodIconLabel: String {
+        useGeneratedFoodIconImages ? "Missing Images" : "Missing Emojis"
+    }
+
+    private var generateMissingFoodIconLabel: String {
+        useGeneratedFoodIconImages ? "Generate Missing Images Now" : "Generate Missing Emojis Now"
+    }
+
+    private var generatedFoodIconStorageText: String {
+        let foodsWithImages = savedFoods.filter(\.hasGeneratedFoodIconImage)
+        let totalBytes = foodsWithImages.reduce(0) { total, food in
+            total + (food.generatedIconImageData?.count ?? 0)
+        }
+        guard !foodsWithImages.isEmpty else { return "0 images" }
+
+        let formattedBytes = ByteCountFormatter.string(
+            fromByteCount: Int64(totalBytes),
+            countStyle: .file
+        )
+        return "\(foodsWithImages.count.formatted()) image\(foodsWithImages.count == 1 ? "" : "s") · \(formattedBytes)"
+    }
+
+    private var selectedFoodIconModeHasKey: Bool {
+        useGeneratedFoodIconImages ? hasAPIKey : selectedAIProviderHasKey
+    }
+
+    private var selectedFoodIconModeKeyName: String {
+        useGeneratedFoodIconImages ? "Gemini" : selectedAIProvider.displayName
     }
 
     private var foodEmojiProgressText: String {
@@ -562,9 +691,13 @@ struct SettingsView: View {
         tursoMirror.scheduleMirror(reason: "gemini_cost_reset")
     }
 
-    private func assignMissingFoodEmojis() {
+    private func assignMissingFoodIcons() {
         Task {
-            await scanService.backfillMissingFoodEmojis()
+            if useGeneratedFoodIconImages {
+                await scanService.backfillMissingFoodIconImages()
+            } else {
+                await scanService.backfillMissingFoodEmojis()
+            }
         }
     }
 
@@ -651,7 +784,13 @@ struct SettingsView: View {
             let data = try nutritionStore.exportBackup(
                 goals: goals,
                 appSettings: AppSettingsRecord(
+                    aiProvider: aiProviderRawValue,
                     useProModel: useProModel,
+                    openRouterLiteModel: openRouterLiteModel,
+                    openRouterProModel: openRouterProModel,
+                    openRouterEmojiModel: openRouterEmojiModel,
+                    openRouterRoutingMode: openRouterRoutingModeRawValue,
+                    useGeneratedFoodIconImages: useGeneratedFoodIconImages,
                     offContributeEnabled: offContributeEnabled,
                     breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
                     lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
@@ -693,7 +832,13 @@ struct SettingsView: View {
 
         do {
             backupImportSummary = try nutritionStore.importBackup(backup, goals: goals)
+            aiProviderRawValue = backup.appSettings.aiProvider
             useProModel = backup.appSettings.useProModel
+            openRouterLiteModel = backup.appSettings.openRouterLiteModel
+            openRouterProModel = backup.appSettings.openRouterProModel
+            openRouterEmojiModel = backup.appSettings.openRouterEmojiModel
+            openRouterRoutingModeRawValue = backup.appSettings.openRouterRoutingMode
+            useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
             offContributeEnabled = backup.appSettings.offContributeEnabled
             mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
             mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes

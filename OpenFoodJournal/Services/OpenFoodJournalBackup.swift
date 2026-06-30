@@ -197,6 +197,10 @@ struct SavedFoodRecord: Codable {
     var name: String
     var brand: String?
     var emoji: String?
+    var generatedIconImageData: Data?
+    var generatedIconImageMimeType: String?
+    var generatedIconImageUpdatedAt: Date?
+    var generatedIconImagePrompt: String?
     var createdAt: Date
     var calories: Double
     var protein: Double
@@ -221,6 +225,10 @@ struct SavedFoodRecord: Codable {
         name = food.name
         brand = food.brand
         emoji = food.emoji
+        generatedIconImageData = food.generatedIconImageData
+        generatedIconImageMimeType = food.generatedIconImageMimeType
+        generatedIconImageUpdatedAt = food.generatedIconImageUpdatedAt
+        generatedIconImagePrompt = food.generatedIconImagePrompt
         createdAt = food.createdAt
         calories = food.calories
         protein = food.protein
@@ -246,6 +254,10 @@ struct SavedFoodRecord: Codable {
         case name
         case brand
         case emoji
+        case generatedIconImageData
+        case generatedIconImageMimeType
+        case generatedIconImageUpdatedAt
+        case generatedIconImagePrompt
         case createdAt
         case calories
         case protein
@@ -272,6 +284,10 @@ struct SavedFoodRecord: Codable {
         name = try container.decode(String.self, forKey: .name)
         brand = try container.decodeIfPresent(String.self, forKey: .brand)
         emoji = try container.decodeIfPresent(String.self, forKey: .emoji)
+        generatedIconImageData = try container.decodeIfPresent(Data.self, forKey: .generatedIconImageData)
+        generatedIconImageMimeType = try container.decodeIfPresent(String.self, forKey: .generatedIconImageMimeType)
+        generatedIconImageUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .generatedIconImageUpdatedAt)
+        generatedIconImagePrompt = try container.decodeIfPresent(String.self, forKey: .generatedIconImagePrompt)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         calories = try container.decode(Double.self, forKey: .calories)
         protein = try container.decode(Double.self, forKey: .protein)
@@ -304,6 +320,10 @@ struct SavedFoodRecord: Codable {
         try container.encode(name, forKey: .name)
         try container.encodeIfPresent(brand, forKey: .brand)
         try container.encodeIfPresent(emoji, forKey: .emoji)
+        try container.encodeIfPresent(generatedIconImageData, forKey: .generatedIconImageData)
+        try container.encodeIfPresent(generatedIconImageMimeType, forKey: .generatedIconImageMimeType)
+        try container.encodeIfPresent(generatedIconImageUpdatedAt, forKey: .generatedIconImageUpdatedAt)
+        try container.encodeIfPresent(generatedIconImagePrompt, forKey: .generatedIconImagePrompt)
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(calories, forKey: .calories)
         try container.encode(protein, forKey: .protein)
@@ -330,6 +350,10 @@ struct SavedFoodRecord: Codable {
             name: name,
             brand: brand,
             emoji: emoji,
+            generatedIconImageData: generatedIconImageData,
+            generatedIconImageMimeType: generatedIconImageMimeType,
+            generatedIconImageUpdatedAt: generatedIconImageUpdatedAt,
+            generatedIconImagePrompt: generatedIconImagePrompt,
             createdAt: createdAt,
             calories: calories,
             protein: protein,
@@ -358,6 +382,10 @@ struct SavedFoodRecord: Codable {
         food.name = name
         food.brand = brand
         food.emoji = emoji
+        food.generatedIconImageData = generatedIconImageData
+        food.generatedIconImageMimeType = generatedIconImageMimeType
+        food.generatedIconImageUpdatedAt = generatedIconImageUpdatedAt
+        food.generatedIconImagePrompt = generatedIconImagePrompt
         food.createdAt = createdAt
         food.calories = calories
         food.protein = protein
@@ -503,20 +531,38 @@ struct UserGoalsRecord: Codable {
 }
 
 struct AppSettingsRecord: Codable {
+    var aiProvider: String
     var useProModel: Bool
+    var openRouterLiteModel: String
+    var openRouterProModel: String
+    var openRouterEmojiModel: String
+    var openRouterRoutingMode: String
+    var useGeneratedFoodIconImages: Bool
     var offContributeEnabled: Bool
     var breakfastStartMinutes: Int
     var lunchStartMinutes: Int
     var dinnerStartMinutes: Int
 
     init(
+        aiProvider: String = AIProviderSettings.defaultProvider.rawValue,
         useProModel: Bool,
+        openRouterLiteModel: String = AIProviderSettings.defaultOpenRouterLiteModel,
+        openRouterProModel: String = AIProviderSettings.defaultOpenRouterProModel,
+        openRouterEmojiModel: String = AIProviderSettings.defaultOpenRouterEmojiModel,
+        openRouterRoutingMode: String = OpenRouterRoutingMode.automatic.rawValue,
+        useGeneratedFoodIconImages: Bool = false,
         offContributeEnabled: Bool,
         breakfastStartMinutes: Int = MealScheduleDefaults.breakfastStartMinutes,
         lunchStartMinutes: Int = MealScheduleDefaults.lunchStartMinutes,
         dinnerStartMinutes: Int = MealScheduleDefaults.dinnerStartMinutes
     ) {
+        self.aiProvider = aiProvider
         self.useProModel = useProModel
+        self.openRouterLiteModel = openRouterLiteModel
+        self.openRouterProModel = openRouterProModel
+        self.openRouterEmojiModel = openRouterEmojiModel
+        self.openRouterRoutingMode = openRouterRoutingMode
+        self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
         self.offContributeEnabled = offContributeEnabled
         self.breakfastStartMinutes = breakfastStartMinutes
         self.lunchStartMinutes = lunchStartMinutes
@@ -524,7 +570,13 @@ struct AppSettingsRecord: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case aiProvider
         case useProModel
+        case openRouterLiteModel
+        case openRouterProModel
+        case openRouterEmojiModel
+        case openRouterRoutingMode
+        case useGeneratedFoodIconImages
         case offContributeEnabled
         case breakfastStartMinutes
         case lunchStartMinutes
@@ -533,7 +585,13 @@ struct AppSettingsRecord: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        aiProvider = try container.decodeIfPresent(String.self, forKey: .aiProvider) ?? AIProviderSettings.defaultProvider.rawValue
         useProModel = try container.decodeIfPresent(Bool.self, forKey: .useProModel) ?? false
+        openRouterLiteModel = try container.decodeIfPresent(String.self, forKey: .openRouterLiteModel) ?? AIProviderSettings.defaultOpenRouterLiteModel
+        openRouterProModel = try container.decodeIfPresent(String.self, forKey: .openRouterProModel) ?? AIProviderSettings.defaultOpenRouterProModel
+        openRouterEmojiModel = try container.decodeIfPresent(String.self, forKey: .openRouterEmojiModel) ?? AIProviderSettings.defaultOpenRouterEmojiModel
+        openRouterRoutingMode = try container.decodeIfPresent(String.self, forKey: .openRouterRoutingMode) ?? OpenRouterRoutingMode.automatic.rawValue
+        useGeneratedFoodIconImages = try container.decodeIfPresent(Bool.self, forKey: .useGeneratedFoodIconImages) ?? false
         offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false
         breakfastStartMinutes = try container.decodeIfPresent(Int.self, forKey: .breakfastStartMinutes) ?? MealScheduleDefaults.breakfastStartMinutes
         lunchStartMinutes = try container.decodeIfPresent(Int.self, forKey: .lunchStartMinutes) ?? MealScheduleDefaults.lunchStartMinutes

@@ -9,6 +9,7 @@ enum GeminiScanLogOperation: String, Codable, CaseIterable, Sendable {
     case scan
     case aiSearch
     case foodEmoji
+    case foodIconImage
 }
 
 enum GeminiScanLogStatus: String, Codable, CaseIterable, Sendable {

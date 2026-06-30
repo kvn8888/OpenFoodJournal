@@ -51,7 +51,6 @@ struct MacrosApp: App {
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("hasRetrolinkedMappings") private var hasRetrolinkedMappings = false
-    @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis = false
 
     var body: some Scene {
         WindowGroup {
@@ -79,9 +78,6 @@ struct MacrosApp: App {
                             nutritionStore.deduplicateAllMappings()
                             nutritionStore.retrolinkOrphanedEntries()
                             hasRetrolinkedMappings = true
-                        }
-                        if autoGenerateFoodEmojis {
-                            await scanService.backfillMissingFoodEmojis()
                         }
                         tursoMirrorService.scheduleMirror(reason: "app_launch")
                     }

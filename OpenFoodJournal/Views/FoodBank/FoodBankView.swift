@@ -28,7 +28,8 @@ struct FoodBankView: View {
     @State private var selectedFood: SavedFood?       // For the "log it" sheet
     @State private var foodToEdit: SavedFood?          // For the edit sheet
     @State private var addSheet: FoodBankAddSheet?
-    @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis = false
+    @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var foodIconGenerationEnabled = false
+    @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages = false
 
     // ── Computed: filter + sort the foods based on search text ────
     // Filters by name and brand (case-insensitive) so users can quickly find a food.
@@ -139,10 +140,6 @@ struct FoodBankView: View {
                     }
                 }
             }
-            .task(id: autoGenerateFoodEmojis) {
-                guard autoGenerateFoodEmojis else { return }
-                await scanService.backfillMissingFoodEmojis()
-            }
         }
     }
 
@@ -180,6 +177,41 @@ struct FoodBankView: View {
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button {
+                selectedFood = food
+            } label: {
+                Label("Log Food", systemImage: "plus.circle")
+            }
+
+            Button {
+                foodToEdit = food
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+
+            if foodIconGenerationEnabled {
+                Button {
+                    regenerateFoodIcon(for: food)
+                } label: {
+                    Label(foodIconActionTitle(for: food), systemImage: useGeneratedFoodIconImages ? "photo.badge.plus" : "sparkles")
+                }
+            }
+
+            if food.isArchivedInFoodBank {
+                Button {
+                    restore(food)
+                } label: {
+                    Label("Unarchive", systemImage: "tray.and.arrow.up")
+                }
+            } else {
+                Button {
+                    archive(food)
+                } label: {
+                    Label("Archive", systemImage: "archivebox")
+                }
+            }
+        }
         // Trailing swipe (left) — archive/unarchive plus edit; delete lives inside EditFoodSheet.
         .swipeActions(edge: .trailing) {
             if food.isArchivedInFoodBank {
@@ -256,7 +288,7 @@ struct FoodBankView: View {
     /// scan a label, enter manually, or search the Open Food Facts database.
     private var addMenu: some View {
         Menu {
-            // AI Search — Gemini with Google Search grounding
+            // AI Search — selected AI provider with web grounding
             Button {
                 addSheet = .aiSearch
             } label: {
@@ -305,6 +337,23 @@ struct FoodBankView: View {
             }
         } label: {
             Image(systemName: "plus")
+        }
+    }
+
+    private func foodIconActionTitle(for food: SavedFood) -> String {
+        if useGeneratedFoodIconImages {
+            return food.hasGeneratedFoodIconImage ? "Regenerate Image" : "Generate Image"
+        }
+        return "Regenerate Emoji"
+    }
+
+    private func regenerateFoodIcon(for food: SavedFood) {
+        Task {
+            if useGeneratedFoodIconImages {
+                await scanService.generateFoodIconImage(for: food, force: true)
+            } else {
+                await scanService.refreshFoodEmoji(for: food)
+            }
         }
     }
 

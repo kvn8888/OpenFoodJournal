@@ -6,6 +6,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct LogFoodSheet: View {
     // ── Environment ───────────────────────────────────────────────
@@ -16,6 +17,7 @@ struct LogFoodSheet: View {
     @Environment(UserGoals.self) private var goals
     @Environment(MealTimeSettings.self) private var mealTimeSettings
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
+    @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
 
     // ── Input: the saved food to potentially log ──────────────────
     let food: SavedFood
@@ -184,17 +186,11 @@ struct LogFoodSheet: View {
 
     /// Shows the food name, serving size, and how it was originally captured
     private var headerSection: some View {
-        VStack(spacing: 8) {
-            // Source badge (label scan, food photo, or manual)
-            HStack {
-                Image(systemName: sourceIcon)
-                Text(sourceLabel)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.quaternary, in: .capsule)
+        VStack(spacing: 10) {
+            LogFoodHeaderIcon(
+                food: food,
+                useGeneratedIconImages: useGeneratedIconImages
+            )
 
             // Brand (if available)
             if let brand = food.brand, !brand.isEmpty {
@@ -215,7 +211,19 @@ struct LogFoodSheet: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
+
+            // Source badge (label scan, food photo, or manual)
+            HStack {
+                Image(systemName: sourceIcon)
+                Text(sourceLabel)
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.quaternary, in: .capsule)
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Macro Grid
@@ -546,6 +554,46 @@ struct LogFoodSheet: View {
         case .barcode: "Barcode Scan"
         case .manual: "Manual Entry"
         }
+    }
+}
+
+private struct LogFoodHeaderIcon: View {
+    let food: SavedFood
+    let useGeneratedIconImages: Bool
+
+    @ScaledMetric(relativeTo: .title2) private var imageSize: CGFloat = 76
+    @ScaledMetric(relativeTo: .title2) private var emojiSize: CGFloat = 54
+
+    var body: some View {
+        if prefersGeneratedImage, let image = generatedImage {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: imageSize, height: imageSize)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        } else if let emoji = food.normalizedEmoji {
+            Text(emoji)
+                .font(.system(size: emojiSize))
+                .frame(width: imageSize, height: imageSize)
+                .accessibilityHidden(true)
+        } else if let image = generatedImage {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: imageSize, height: imageSize)
+                .clipShape(Circle())
+                .accessibilityHidden(true)
+        }
+    }
+
+    private var prefersGeneratedImage: Bool {
+        useGeneratedIconImages || food.normalizedEmoji == nil
+    }
+
+    private var generatedImage: UIImage? {
+        guard let data = food.generatedIconImageData else { return nil }
+        return UIImage(data: data)
     }
 }
 
