@@ -2,6 +2,9 @@
 server/node_modules/
 
 # Environment files (contain secrets)
+.env
+.env.*
+!.env.example
 server/.env
 
 # macOS
