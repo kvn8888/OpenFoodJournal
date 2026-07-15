@@ -24,6 +24,7 @@ struct EditFoodSheet: View {
     @State private var carbs: String = ""
     @State private var fat: String = ""
     @State private var servingSize: String = ""
+    @State private var isOnShelf = false
     @State private var showDeleteConfirm = false
 
     var body: some View {
@@ -33,6 +34,9 @@ struct EditFoodSheet: View {
                 Section("Identity") {
                     TextField("Food name", text: $name)
                     TextField("Brand (optional)", text: $brand)
+                    Toggle(isOn: $isOnShelf) {
+                        Label("On Shelf", systemImage: isOnShelf ? "cabinet.fill" : "cabinet")
+                    }
                 }
 
                 // Core macros
@@ -103,6 +107,7 @@ struct EditFoodSheet: View {
                 carbs = String(format: "%.1f", food.carbs)
                 fat = String(format: "%.1f", food.fat)
                 servingSize = food.servingSize ?? ""
+                isOnShelf = food.isOnShelf
             }
         }
     }
@@ -120,6 +125,7 @@ struct EditFoodSheet: View {
         food.fat = Double(fat) ?? food.fat
         food.servingSize = servingSize.trimmingCharacters(in: .whitespaces).isEmpty
             ? nil : servingSize.trimmingCharacters(in: .whitespaces)
+        food.isOnShelf = isOnShelf
 
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: "saved_food_updated")

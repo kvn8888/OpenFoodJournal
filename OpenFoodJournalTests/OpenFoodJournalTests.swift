@@ -136,6 +136,8 @@ struct OpenFoodJournalTests {
 
         #expect(record.emoji == nil)
         #expect(record.makeModel().emoji == nil)
+        #expect(!record.isOnShelf)
+        #expect(!record.makeModel().isOnShelf)
     }
 
     @Test func micronutrientValueDecodesBareNumbersWithKnownUnits() throws {

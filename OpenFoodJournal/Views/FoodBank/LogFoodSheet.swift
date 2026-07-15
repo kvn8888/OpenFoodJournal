@@ -29,6 +29,7 @@ struct LogFoodSheet: View {
     @State private var selectedMealType: MealType = .snack
     @State private var mealTypeWasEdited = false
     @State private var didApplyDefaultMealType = false
+    @State private var didApplyLastUsedServing = false
     // Quantity of this food the user wants to log (in the selected unit)
     @State private var quantity: Double
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
@@ -54,24 +55,33 @@ struct LogFoodSheet: View {
     // Keep baseUnit accessible for onChange unit-switch logic
     private let baseUnit: String
 
-    init(food: SavedFood, logDate: Date = .now) {
+    init(
+        food: SavedFood,
+        logDate: Date = .now,
+        initialQuantity: Double? = nil,
+        initialUnit: String? = nil
+    ) {
         self.food = food
         self.logDate = logDate
-        let qty = food.servingQuantity ?? 1.0
-        let unit = food.servingUnit ?? "serving"
+        let templateQuantity = food.servingQuantity ?? 1.0
+        let templateUnit = food.servingUnit ?? "serving"
+        let suggestedQuantity = initialQuantity.flatMap { $0 > 0 ? $0 : nil }
+        let qty = suggestedQuantity ?? templateQuantity
+        let unit = initialUnit?.isEmpty == false ? initialUnit! : templateUnit
         _quantity = State(initialValue: qty)
         _quantityText = State(initialValue: qty.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
         _selectedUnit = State(initialValue: unit)
+        _didApplyLastUsedServing = State(initialValue: suggestedQuantity != nil && initialUnit?.isEmpty == false)
         _editedMicros = State(initialValue: food.micronutrients)
-        self.baseUnit = unit
+        self.baseUnit = templateUnit
         self.converter = ServingConverter(
             calories: food.calories,
             protein: food.protein,
             carbs: food.carbs,
             fat: food.fat,
-            quantity: qty,
-            unit: unit,
+            quantity: templateQuantity,
+            unit: templateUnit,
             serving: food.serving,
             mappings: food.servingMappings
         )
@@ -178,6 +188,7 @@ struct LogFoodSheet: View {
             }
             .onAppear {
                 applyDefaultMealTypeIfNeeded()
+                applyLastUsedServingIfNeeded()
             }
         }
     }
@@ -364,32 +375,10 @@ struct LogFoodSheet: View {
     /// Mirrors the serving editor in EditEntryView.
     private var servingSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("Quantity")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if let last = nutritionStore.lastUsedServing(forFoodNamed: food.name, brand: food.brand) {
-                    Button {
-                        suppressUnitConversion = true
-                        quantity = last.quantity
-                        quantityText = last.quantity.truncatingRemainder(dividingBy: 1) == 0
-                            ? String(format: "%.0f", last.quantity)
-                            : String(format: "%.2f", last.quantity)
-                        if availableUnits.contains(last.unit) {
-                            selectedUnit = last.unit
-                        }
-                    } label: {
-                        let qtyLabel = last.quantity.truncatingRemainder(dividingBy: 1) == 0
-                            ? String(format: "%.0f", last.quantity) : String(format: "%.1f", last.quantity)
-                        Label("Last: \(qtyLabel) \(last.unit)", systemImage: "clock.arrow.circlepath")
-                            .font(.caption)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                }
-            }
+            Text("Quantity")
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
 
             HStack(spacing: 12) {
                 // Quantity input — decimal keyboard, live-updates macros
@@ -451,6 +440,31 @@ struct LogFoodSheet: View {
                     .foregroundStyle(.tertiary)
             }
         }
+    }
+
+    /// Repeated logs should open exactly where the user left off. If mappings
+    /// changed and the old unit is no longer valid, preserve the template
+    /// quantity and unit rather than applying a partially compatible default.
+    private func applyLastUsedServingIfNeeded() {
+        guard !didApplyLastUsedServing else { return }
+        didApplyLastUsedServing = true
+        guard let last = nutritionStore.lastUsedServing(for: food),
+              availableUnits.contains(last.unit) else {
+            return
+        }
+
+        quantity = last.quantity
+        quantityText = formattedQuantity(last.quantity)
+        if selectedUnit != last.unit {
+            suppressUnitConversion = true
+            selectedUnit = last.unit
+        }
+    }
+
+    private func formattedQuantity(_ value: Double) -> String {
+        value.truncatingRemainder(dividingBy: 1) == 0
+            ? String(format: "%.0f", value)
+            : String(format: "%.2f", value)
     }
 
     private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {

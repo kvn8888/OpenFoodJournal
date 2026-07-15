@@ -10,6 +10,7 @@ struct ScanResultCard: View {
     @Bindable var entry: NutritionEntry
     let onConfirm: () -> Void            // Log only
     let onConfirmAndSave: () -> Void     // Log + save to Food Bank
+    let onSaveAndTrack: () -> Void       // Save to Food Bank + start a container
     let onRetake: () -> Void
     let onRedo: (() -> Void)?
     let onMealTypeEdited: () -> Void
@@ -20,6 +21,7 @@ struct ScanResultCard: View {
         entry: NutritionEntry,
         onConfirm: @escaping () -> Void,
         onConfirmAndSave: @escaping () -> Void,
+        onSaveAndTrack: @escaping () -> Void,
         onRetake: @escaping () -> Void,
         onRedo: (() -> Void)? = nil,
         onMealTypeEdited: @escaping () -> Void = {}
@@ -27,6 +29,7 @@ struct ScanResultCard: View {
         self.entry = entry
         self.onConfirm = onConfirm
         self.onConfirmAndSave = onConfirmAndSave
+        self.onSaveAndTrack = onSaveAndTrack
         self.onRetake = onRetake
         self.onRedo = onRedo
         self.onMealTypeEdited = onMealTypeEdited
@@ -132,6 +135,13 @@ struct ScanResultCard: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                     }
                     .buttonStyle(.glassProminent)
+
+                    Button(action: onSaveAndTrack) {
+                        Label("Save to Food Bank & Track Container", systemImage: "scalemass")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.glass)
 
                     HStack(spacing: 12) {
                         Button(action: onRetake) {
@@ -321,6 +331,7 @@ private struct MicronutrientField: View {
             entry: NutritionEntry.preview,
             onConfirm: {},
             onConfirmAndSave: {},
+            onSaveAndTrack: {},
             onRetake: {},
             onRedo: nil
         )

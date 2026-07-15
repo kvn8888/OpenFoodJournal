@@ -216,6 +216,7 @@ struct SavedFoodRecord: Codable {
     var originalScanMode: ScanMode
     var lastUsedAt: Date
     var archivedAt: Date?
+    var isOnShelf: Bool
     var kind: SavedFoodKind
     var compositeIngredients: [CompositeIngredientSnapshot]
     var calculatorIngredients: [CalculatorIngredient]
@@ -244,6 +245,7 @@ struct SavedFoodRecord: Codable {
         originalScanMode = food.originalScanMode
         lastUsedAt = food.lastUsedAt
         archivedAt = food.archivedAt
+        isOnShelf = food.isOnShelf
         kind = food.kind
         compositeIngredients = food.compositeIngredients
         calculatorIngredients = food.calculatorIngredients
@@ -273,6 +275,7 @@ struct SavedFoodRecord: Codable {
         case originalScanMode
         case lastUsedAt
         case archivedAt
+        case isOnShelf
         case kind
         case compositeIngredients
         case calculatorIngredients
@@ -303,6 +306,7 @@ struct SavedFoodRecord: Codable {
         originalScanMode = try container.decode(ScanMode.self, forKey: .originalScanMode)
         lastUsedAt = try container.decode(Date.self, forKey: .lastUsedAt)
         archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+        isOnShelf = try container.decodeIfPresent(Bool.self, forKey: .isOnShelf) ?? false
         kind = try container.decodeIfPresent(SavedFoodKind.self, forKey: .kind) ?? .single
         compositeIngredients = try container.decodeIfPresent(
             [CompositeIngredientSnapshot].self,
@@ -339,6 +343,7 @@ struct SavedFoodRecord: Codable {
         try container.encode(originalScanMode, forKey: .originalScanMode)
         try container.encode(lastUsedAt, forKey: .lastUsedAt)
         try container.encodeIfPresent(archivedAt, forKey: .archivedAt)
+        try container.encode(isOnShelf, forKey: .isOnShelf)
         try container.encode(kind, forKey: .kind)
         try container.encode(compositeIngredients, forKey: .compositeIngredients)
         try container.encode(calculatorIngredients, forKey: .calculatorIngredients)
@@ -368,6 +373,7 @@ struct SavedFoodRecord: Codable {
             servingMappings: servingMappings,
             originalScanMode: originalScanMode,
             archivedAt: archivedAt,
+            isOnShelf: isOnShelf,
             kind: kind,
             compositeIngredients: compositeIngredients,
             calculatorIngredients: calculatorIngredients
@@ -401,6 +407,7 @@ struct SavedFoodRecord: Codable {
         food.originalScanMode = originalScanMode
         food.lastUsedAt = lastUsedAt
         food.archivedAt = archivedAt
+        food.isOnShelf = isOnShelf
         food.kind = kind
         food.compositeIngredients = compositeIngredients
         food.calculatorIngredients = calculatorIngredients
@@ -485,6 +492,35 @@ struct PreferencesRecord: Codable {
     var ringSlot3: String
     var ringSlot4: String
     var ringSlot5: String
+    var shelfRecommendationsEnabled: Bool?
+    var shelfSuggestionCount: Int?
+    var shelfRecommendationStyleRawValue: String?
+    var shelfTriggerFraction: Double?
+    var shelfCalorieFlexibilityRawValue: String?
+    var shelfIncompleteNutritionPolicyRawValue: String?
+    var shelfEnergyIntentRawValue: String?
+    var shelfNutritionEmphasisRawValue: String?
+    var shelfUseRollingWeekContext: Bool?
+    var shelfHardCapCalories: Bool?
+    var shelfHardCapSodium: Bool?
+    var shelfCustomCaloriesPolicyRawValue: String?
+    var shelfCustomProteinPolicyRawValue: String?
+    var shelfCustomFiberPolicyRawValue: String?
+    var shelfCustomCarbsPolicyRawValue: String?
+    var shelfCustomFatPolicyRawValue: String?
+    var shelfCustomSodiumPolicyRawValue: String?
+    var shelfCustomCaloriesStrengthRawValue: String?
+    var shelfCustomProteinStrengthRawValue: String?
+    var shelfCustomFiberStrengthRawValue: String?
+    var shelfCustomCarbsStrengthRawValue: String?
+    var shelfCustomFatStrengthRawValue: String?
+    var shelfCustomSodiumStrengthRawValue: String?
+    var shelfCustomCaloriesRoleRawValue: String?
+    var shelfCustomProteinRoleRawValue: String?
+    var shelfCustomFiberRoleRawValue: String?
+    var shelfCustomCarbsRoleRawValue: String?
+    var shelfCustomFatRoleRawValue: String?
+    var shelfCustomSodiumRoleRawValue: String?
     var createdAt: Date
     var updatedAt: Date
 
@@ -494,6 +530,35 @@ struct PreferencesRecord: Codable {
         ringSlot3 = preferences.ringSlot3
         ringSlot4 = preferences.ringSlot4
         ringSlot5 = preferences.ringSlot5
+        shelfRecommendationsEnabled = preferences.shelfRecommendationsEnabled
+        shelfSuggestionCount = preferences.clampedShelfSuggestionCount
+        shelfRecommendationStyleRawValue = preferences.shelfRecommendationStyleRawValue
+        shelfTriggerFraction = preferences.shelfTriggerFraction
+        shelfCalorieFlexibilityRawValue = preferences.shelfCalorieFlexibilityRawValue
+        shelfIncompleteNutritionPolicyRawValue = preferences.shelfIncompleteNutritionPolicyRawValue
+        shelfEnergyIntentRawValue = preferences.shelfEnergyIntentRawValue
+        shelfNutritionEmphasisRawValue = preferences.shelfNutritionEmphasisRawValue
+        shelfUseRollingWeekContext = preferences.shelfUseRollingWeekContext
+        shelfHardCapCalories = preferences.shelfHardCapCalories
+        shelfHardCapSodium = preferences.shelfHardCapSodium
+        shelfCustomCaloriesPolicyRawValue = preferences.shelfCustomCaloriesPolicyRawValue
+        shelfCustomProteinPolicyRawValue = preferences.shelfCustomProteinPolicyRawValue
+        shelfCustomFiberPolicyRawValue = preferences.shelfCustomFiberPolicyRawValue
+        shelfCustomCarbsPolicyRawValue = preferences.shelfCustomCarbsPolicyRawValue
+        shelfCustomFatPolicyRawValue = preferences.shelfCustomFatPolicyRawValue
+        shelfCustomSodiumPolicyRawValue = preferences.shelfCustomSodiumPolicyRawValue
+        shelfCustomCaloriesStrengthRawValue = preferences.shelfCustomCaloriesStrengthRawValue
+        shelfCustomProteinStrengthRawValue = preferences.shelfCustomProteinStrengthRawValue
+        shelfCustomFiberStrengthRawValue = preferences.shelfCustomFiberStrengthRawValue
+        shelfCustomCarbsStrengthRawValue = preferences.shelfCustomCarbsStrengthRawValue
+        shelfCustomFatStrengthRawValue = preferences.shelfCustomFatStrengthRawValue
+        shelfCustomSodiumStrengthRawValue = preferences.shelfCustomSodiumStrengthRawValue
+        shelfCustomCaloriesRoleRawValue = preferences.shelfCustomCaloriesRoleRawValue
+        shelfCustomProteinRoleRawValue = preferences.shelfCustomProteinRoleRawValue
+        shelfCustomFiberRoleRawValue = preferences.shelfCustomFiberRoleRawValue
+        shelfCustomCarbsRoleRawValue = preferences.shelfCustomCarbsRoleRawValue
+        shelfCustomFatRoleRawValue = preferences.shelfCustomFatRoleRawValue
+        shelfCustomSodiumRoleRawValue = preferences.shelfCustomSodiumRoleRawValue
         createdAt = preferences.createdAt
         updatedAt = preferences.updatedAt
     }
@@ -504,6 +569,35 @@ struct PreferencesRecord: Codable {
         preferences.ringSlot3 = ringSlot3
         preferences.ringSlot4 = ringSlot4
         preferences.ringSlot5 = ringSlot5
+        if let shelfRecommendationsEnabled { preferences.shelfRecommendationsEnabled = shelfRecommendationsEnabled }
+        if let shelfSuggestionCount { preferences.shelfSuggestionCount = min(max(shelfSuggestionCount, 1), 5) }
+        if let shelfRecommendationStyleRawValue { preferences.shelfRecommendationStyleRawValue = shelfRecommendationStyleRawValue }
+        if let shelfTriggerFraction { preferences.shelfTriggerFraction = min(max(shelfTriggerFraction, 0), 1) }
+        if let shelfCalorieFlexibilityRawValue { preferences.shelfCalorieFlexibilityRawValue = shelfCalorieFlexibilityRawValue }
+        if let shelfIncompleteNutritionPolicyRawValue { preferences.shelfIncompleteNutritionPolicyRawValue = shelfIncompleteNutritionPolicyRawValue }
+        if let shelfEnergyIntentRawValue { preferences.shelfEnergyIntentRawValue = shelfEnergyIntentRawValue }
+        if let shelfNutritionEmphasisRawValue { preferences.shelfNutritionEmphasisRawValue = shelfNutritionEmphasisRawValue }
+        if let shelfUseRollingWeekContext { preferences.shelfUseRollingWeekContext = shelfUseRollingWeekContext }
+        if let shelfHardCapCalories { preferences.shelfHardCapCalories = shelfHardCapCalories }
+        if let shelfHardCapSodium { preferences.shelfHardCapSodium = shelfHardCapSodium }
+        if let shelfCustomCaloriesPolicyRawValue { preferences.shelfCustomCaloriesPolicyRawValue = shelfCustomCaloriesPolicyRawValue }
+        if let shelfCustomProteinPolicyRawValue { preferences.shelfCustomProteinPolicyRawValue = shelfCustomProteinPolicyRawValue }
+        if let shelfCustomFiberPolicyRawValue { preferences.shelfCustomFiberPolicyRawValue = shelfCustomFiberPolicyRawValue }
+        if let shelfCustomCarbsPolicyRawValue { preferences.shelfCustomCarbsPolicyRawValue = shelfCustomCarbsPolicyRawValue }
+        if let shelfCustomFatPolicyRawValue { preferences.shelfCustomFatPolicyRawValue = shelfCustomFatPolicyRawValue }
+        if let shelfCustomSodiumPolicyRawValue { preferences.shelfCustomSodiumPolicyRawValue = shelfCustomSodiumPolicyRawValue }
+        if let shelfCustomCaloriesStrengthRawValue { preferences.shelfCustomCaloriesStrengthRawValue = shelfCustomCaloriesStrengthRawValue }
+        if let shelfCustomProteinStrengthRawValue { preferences.shelfCustomProteinStrengthRawValue = shelfCustomProteinStrengthRawValue }
+        if let shelfCustomFiberStrengthRawValue { preferences.shelfCustomFiberStrengthRawValue = shelfCustomFiberStrengthRawValue }
+        if let shelfCustomCarbsStrengthRawValue { preferences.shelfCustomCarbsStrengthRawValue = shelfCustomCarbsStrengthRawValue }
+        if let shelfCustomFatStrengthRawValue { preferences.shelfCustomFatStrengthRawValue = shelfCustomFatStrengthRawValue }
+        if let shelfCustomSodiumStrengthRawValue { preferences.shelfCustomSodiumStrengthRawValue = shelfCustomSodiumStrengthRawValue }
+        if let shelfCustomCaloriesRoleRawValue { preferences.shelfCustomCaloriesRoleRawValue = shelfCustomCaloriesRoleRawValue }
+        if let shelfCustomProteinRoleRawValue { preferences.shelfCustomProteinRoleRawValue = shelfCustomProteinRoleRawValue }
+        if let shelfCustomFiberRoleRawValue { preferences.shelfCustomFiberRoleRawValue = shelfCustomFiberRoleRawValue }
+        if let shelfCustomCarbsRoleRawValue { preferences.shelfCustomCarbsRoleRawValue = shelfCustomCarbsRoleRawValue }
+        if let shelfCustomFatRoleRawValue { preferences.shelfCustomFatRoleRawValue = shelfCustomFatRoleRawValue }
+        if let shelfCustomSodiumRoleRawValue { preferences.shelfCustomSodiumRoleRawValue = shelfCustomSodiumRoleRawValue }
         preferences.createdAt = createdAt
         preferences.updatedAt = updatedAt
     }

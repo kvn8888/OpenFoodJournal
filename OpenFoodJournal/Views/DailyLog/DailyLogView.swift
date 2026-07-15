@@ -227,6 +227,7 @@ private struct ScanResultSheet: View {
     let logDate: Date
     @State private var mealTypeWasEdited = false
     @State private var didApplyDefaultMealType = false
+    @State private var savedFoodToTrack: SavedFood?
 
     var body: some View {
         ScanResultCard(
@@ -240,19 +241,21 @@ private struct ScanResultSheet: View {
                 dismiss()
             },
             onConfirmAndSave: {
-                // Log entry to journal
+                // Explicitly log and save, linking the journal entry back to
+                // the new Food Bank row for future last-used defaults.
                 applyMealTypeForLog()
+                let saved = saveReviewedFood()
+                entry.savedFoodID = saved.id
                 nutritionStore.log(entry, to: logDate)
                 syncToHealthKitIfNeeded(entry)
 
-                // Also save to Food Bank
-                let saved = SavedFood(from: entry)
-                nutritionStore.modelContext.insert(saved)
-                try? nutritionStore.modelContext.save()
-                tursoMirror.scheduleMirror(reason: "scan_save_to_food_bank")
-
                 scanService.pendingResult = nil
                 dismiss()
+            },
+            onSaveAndTrack: {
+                // This action intentionally does not log to the journal. The
+                // button says exactly which two persistent actions it performs.
+                savedFoodToTrack = saveReviewedFood()
             },
             onRetake: {
                 scanService.pendingResult = nil
@@ -270,6 +273,9 @@ private struct ScanResultSheet: View {
         .onAppear {
             applyDefaultMealTypeIfNeeded()
         }
+        .sheet(item: $savedFoodToTrack, onDismiss: finishScanResult) { food in
+            NewContainerSheet(preselectedFood: food)
+        }
     }
 
     private func applyDefaultMealTypeIfNeeded() {
@@ -281,6 +287,19 @@ private struct ScanResultSheet: View {
     private func applyMealTypeForLog() {
         guard !mealTypeWasEdited else { return }
         entry.mealType = mealTimeSettings.mealType()
+    }
+
+    private func saveReviewedFood() -> SavedFood {
+        let saved = SavedFood(from: entry)
+        nutritionStore.modelContext.insert(saved)
+        try? nutritionStore.modelContext.save()
+        tursoMirror.scheduleMirror(reason: "scan_save_to_food_bank")
+        return saved
+    }
+
+    private func finishScanResult() {
+        scanService.pendingResult = nil
+        dismiss()
     }
 
     private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {

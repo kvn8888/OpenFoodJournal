@@ -309,20 +309,47 @@ final class NutritionStore {
         save()
     }
 
-    /// Find the most recent journal entry for a food by name (and optionally brand).
-    /// Returns the (quantity, unit) the user last used when logging this food.
-    func lastUsedServing(forFoodNamed name: String, brand: String?) -> (quantity: Double, unit: String)? {
+    /// Finds the most recent quantity and unit used for this Food Bank item.
+    /// Prefer the durable SavedFood link, then fall back to name + brand for
+    /// journal entries created before savedFoodID was recorded.
+    func lastUsedServing(for food: SavedFood) -> (quantity: Double, unit: String)? {
+        let foodID = food.id
         var descriptor = FetchDescriptor<NutritionEntry>(
-            predicate: #Predicate { $0.name == name },
+            predicate: #Predicate { $0.savedFoodID == foodID },
             sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
         )
         descriptor.fetchLimit = 1
-        guard let entry = try? modelContext.fetch(descriptor).first,
-              let qty = entry.servingQuantity, qty > 0,
-              let unit = entry.servingUnit, !unit.isEmpty else {
+
+        if let entry = try? modelContext.fetch(descriptor).first,
+           let serving = validServing(from: entry) {
+            return serving
+        }
+
+        let name = food.name
+        let legacyDescriptor = FetchDescriptor<NutritionEntry>(
+            predicate: #Predicate { $0.name == name },
+            sortBy: [SortDescriptor(\.timestamp, order: .reverse)]
+        )
+        let normalizedBrand = Self.normalizedBrand(food.brand)
+        guard let legacyEntry = try? modelContext.fetch(legacyDescriptor).first(where: {
+            Self.normalizedBrand($0.brand) == normalizedBrand
+        }) else {
             return nil
         }
-        return (qty, unit)
+        return validServing(from: legacyEntry)
+    }
+
+    private func validServing(from entry: NutritionEntry) -> (quantity: Double, unit: String)? {
+        guard let quantity = entry.servingQuantity, quantity > 0,
+              let unit = entry.servingUnit?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !unit.isEmpty else {
+            return nil
+        }
+        return (quantity, unit)
+    }
+
+    private static func normalizedBrand(_ brand: String?) -> String {
+        brand?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     }
 
     /// Save an entry's edits locally

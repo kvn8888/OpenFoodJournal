@@ -15,6 +15,7 @@ struct SettingsView: View {
     @Environment(TursoMirrorService.self) private var tursoMirror
     @Query private var geminiCostAccumulators: [GeminiCostAccumulator]
     @Query private var savedFoods: [SavedFood]
+    @Query private var preferences: [Preferences]
 
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage(AIProviderSettings.providerKey) private var aiProviderRawValue: String = AIProviderSettings.defaultProvider.rawValue
@@ -174,6 +175,14 @@ struct SettingsView: View {
 
                 // MARK: Food Bank
                 Section {
+                    if let preferences = preferences.first {
+                        NavigationLink {
+                            ShelfRecommendationSettingsView(preferences: preferences)
+                        } label: {
+                            Label("Shelf Recommendations", systemImage: "cabinet")
+                        }
+                    }
+
                     Toggle(isOn: $autoGenerateFoodEmojis) {
                         Label("Enable Food Icon Generation", systemImage: "sparkles")
                     }

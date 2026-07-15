@@ -25,17 +25,18 @@ struct ContainerListView: View {
     )
     private var completedContainers: [TrackedContainer]
 
+    @Query(sort: \SavedFood.name) private var savedFoods: [SavedFood]
+
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.modelContext) private var modelContext
-    @Environment(NutritionStore.self) private var nutritionStore
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     /// Date to log completed container nutrition to
     var logDate: Date = .now
 
     // ── State ─────────────────────────────────────────────────────
-    @State private var containerToComplete: TrackedContainer?  // Sheet for entering final weight
-    @State private var showNewContainer = false                 // Sheet for creating new container
+    @State private var presentedSheet: ContainerListSheet?
+    @State private var showMissingFoodAlert = false
 
     var body: some View {
         NavigationStack {
@@ -50,17 +51,24 @@ struct ContainerListView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showNewContainer = true
+                        presentedSheet = .newContainer(nil)
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
-            .sheet(item: $containerToComplete) { container in
-                CompleteContainerSheet(container: container, logDate: logDate)
+            .sheet(item: $presentedSheet) { sheet in
+                switch sheet {
+                case .complete(let container):
+                    CompleteContainerSheet(container: container, logDate: logDate)
+                case .newContainer(let food):
+                    NewContainerSheet(preselectedFood: food)
+                }
             }
-            .sheet(isPresented: $showNewContainer) {
-                NewContainerSheet()
+            .alert("Food No Longer Available", isPresented: $showMissingFoodAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text("This container's Food Bank item was removed. Save the food again before starting another container.")
             }
         }
     }
@@ -74,12 +82,11 @@ struct ContainerListView: View {
                 Section("Active") {
                     ForEach(activeContainers) { container in
                         ActiveContainerRow(container: container) {
-                            containerToComplete = container
+                            presentedSheet = .complete(container)
                         }
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
-                            let id = activeContainers[index].id
                             modelContext.delete(activeContainers[index])
                         }
                         try? modelContext.save()
@@ -92,11 +99,16 @@ struct ContainerListView: View {
             if !completedContainers.isEmpty {
                 Section("Completed") {
                     ForEach(completedContainers) { container in
-                        CompletedContainerRow(container: container)
+                        Button {
+                            startAnotherContainer(from: container)
+                        } label: {
+                            CompletedContainerRow(container: container)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Starts tracking another container of this food")
                     }
                     .onDelete { indexSet in
                         for index in indexSet {
-                            let id = completedContainers[index].id
                             modelContext.delete(completedContainers[index])
                         }
                         try? modelContext.save()
@@ -117,9 +129,32 @@ struct ContainerListView: View {
             Text("Track a food container to measure consumption by weight over time.")
         } actions: {
             Button("Start Tracking") {
-                showNewContainer = true
+                presentedSheet = .newContainer(nil)
             }
             .buttonStyle(.borderedProminent)
+        }
+    }
+
+    private func startAnotherContainer(from container: TrackedContainer) {
+        guard let foodID = container.savedFoodID,
+              let food = savedFoods.first(where: { $0.id == foodID }) else {
+            showMissingFoodAlert = true
+            return
+        }
+        presentedSheet = .newContainer(food)
+    }
+}
+
+private enum ContainerListSheet: Identifiable {
+    case complete(TrackedContainer)
+    case newContainer(SavedFood?)
+
+    var id: String {
+        switch self {
+        case .complete(let container):
+            "complete-\(container.id)"
+        case .newContainer(let food):
+            "new-\(food?.id.uuidString ?? "picker")"
         }
     }
 }

@@ -13,6 +13,7 @@ struct FoodBankView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(TursoMirrorService.self) private var tursoMirror
+    @Environment(UserGoals.self) private var goals
 
     /// Date to log foods to (passed from DailyLogView when opened via radial menu)
     var logDate: Date = .now
@@ -20,12 +21,13 @@ struct FoodBankView: View {
     // ── SwiftData Query: fetches all SavedFood sorted by most recently created ──
     @Query(sort: \SavedFood.createdAt, order: .reverse)
     private var allFoods: [SavedFood]
+    @Query private var preferences: [Preferences]
 
     // ── Local State ───────────────────────────────────────────────
     @State private var searchText = ""
     @State private var sortOrder: SortOrder = .lastUsed
     @State private var selectedBrandFilter: FoodBankBrandFilter = .all
-    @State private var selectedFood: SavedFood?       // For the "log it" sheet
+    @State private var selectedLog: FoodBankLogSelection?
     @State private var foodToEdit: SavedFood?          // For the edit sheet
     @State private var addSheet: FoodBankAddSheet?
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var foodIconGenerationEnabled = false
@@ -69,6 +71,55 @@ struct FoodBankView: View {
         !searchText.isEmpty || selectedBrandFilter != .all
     }
 
+    private var shelfRecommendations: [ShelfRecommendation] {
+        _ = nutritionStore.changeCount
+        guard searchText.isEmpty,
+              selectedBrandFilter == .all,
+              let preferences = preferences.first else { return [] }
+
+        let log = nutritionStore.fetchLog(for: logDate)
+        let entries = log?.safeEntries ?? []
+        let current = ShelfNutrition(
+            calories: log?.totalCalories ?? 0,
+            protein: log?.totalProtein ?? 0,
+            fiber: summedMicronutrient("fiber", entries: entries),
+            carbs: log?.totalCarbs ?? 0,
+            fat: log?.totalFat ?? 0,
+            sodium: summedMicronutrient("sodium", entries: entries)
+        )
+        let configuration = shelfConfiguration(preferences)
+        let candidates = allFoods.map { food in
+            ShelfFoodCandidate(
+                id: food.id,
+                name: food.name,
+                baseQuantity: food.servingQuantity ?? 1,
+                baseUnit: food.servingUnit ?? "serving",
+                nutrition: ShelfNutrition(
+                    calories: food.calories,
+                    protein: food.protein,
+                    fiber: normalizedMicronutrient("fiber", in: food.micronutrients),
+                    carbs: food.carbs,
+                    fat: food.fat,
+                    sodium: normalizedMicronutrient("sodium", in: food.micronutrients)
+                ),
+                isOnShelf: food.isOnShelf,
+                isManuallyArchived: food.archivedAt != nil
+            )
+        }
+        return ShelfRecommendationEngine.recommend(
+            foods: candidates,
+            current: current,
+            goals: ShelfNutritionGoals(
+                calories: goals.dailyCalories,
+                protein: goals.dailyProtein,
+                carbs: goals.dailyCarbs,
+                fat: goals.dailyFat
+            ),
+            configuration: configuration,
+            rollingWeekContext: shelfRollingWeekContext()
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -100,11 +151,17 @@ struct FoodBankView: View {
                 }
             }
             // Sheet to log a selected food to the selected day's journal
-            .sheet(item: $selectedFood) { food in
-                if food.kind == .calculator {
+            .sheet(item: $selectedLog) { selection in
+                let food = selection.food
+                if food.kind == .calculator, selection.recommendation == nil {
                     NutritionCalculatorBuildView(calculator: food, logDate: logDate)
                 } else {
-                    LogFoodSheet(food: food, logDate: logDate)
+                    LogFoodSheet(
+                        food: food,
+                        logDate: logDate,
+                        initialQuantity: selection.recommendation?.quantity,
+                        initialUnit: selection.recommendation?.unit
+                    )
                 }
             }
             // Sheet to edit a food's name, brand, macros
@@ -153,6 +210,35 @@ struct FoodBankView: View {
                 resultSummaryRow
             }
 
+            if !shelfRecommendations.isEmpty {
+                Section {
+                    ForEach(shelfRecommendations) { recommendation in
+                        if let food = allFoods.first(where: { $0.id == recommendation.foodID }) {
+                            Button {
+                                selectedLog = .suggestion(food, recommendation)
+                            } label: {
+                                ShelfSuggestionRow(food: food, recommendation: recommendation)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(recommendation.foodName)
+                            .accessibilityValue(
+                                "Recommended \(recommendation.quantityText) \(recommendation.unit). \(recommendation.reason)." +
+                                (recommendation.hasIncompleteNutrition ? " Nutrition incomplete." : "")
+                            )
+                            .accessibilityHint("Opens an editable food log with the recommended quantity.")
+                        }
+                    }
+                } header: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Shelf Suggestions")
+                        Text("Good fits from foods you have at home")
+                            .font(.caption)
+                            .textCase(nil)
+                    }
+                }
+            }
+
             ForEach(filteredFoods) { food in
                 foodRow(food)
             }
@@ -166,7 +252,7 @@ struct FoodBankView: View {
         // Wrap in a Button + .buttonStyle(.plain) — the same pattern that
         // makes DailyLogView swipes silky smooth.
         Button {
-            selectedFood = food
+            selectedLog = .standard(food)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
                 SavedFoodRowView(food: food)
@@ -174,12 +260,20 @@ struct FoodBankView: View {
                 if !searchText.isEmpty && food.isArchivedInFoodBank {
                     archiveStatusLine(for: food)
                 }
+
+                if food.isOnShelf {
+                    Label("On Shelf", systemImage: "cabinet.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.leading, 56)
+                        .accessibilityLabel("On Shelf: you have this food at home")
+                }
             }
         }
         .buttonStyle(.plain)
         .contextMenu {
             Button {
-                selectedFood = food
+                selectedLog = .standard(food)
             } label: {
                 Label("Log Food", systemImage: "plus.circle")
             }
@@ -188,6 +282,16 @@ struct FoodBankView: View {
                 foodToEdit = food
             } label: {
                 Label("Edit", systemImage: "pencil")
+            }
+
+
+            Button {
+                toggleShelf(food)
+            } label: {
+                Label(
+                    food.isOnShelf ? "Remove from Shelf" : "Add to Shelf",
+                    systemImage: food.isOnShelf ? "cabinet.fill" : "cabinet"
+                )
             }
 
             if foodIconGenerationEnabled {
@@ -240,7 +344,7 @@ struct FoodBankView: View {
         // Leading swipe (right) — quick-add shortcut opens the same LogFoodSheet as tapping.
         .swipeActions(edge: .leading) {
             Button {
-                selectedFood = food
+                selectedLog = .standard(food)
             } label: {
                 Label("Add", systemImage: "plus")
             }
@@ -459,6 +563,127 @@ struct FoodBankView: View {
         food.restoreFromFoodBankArchive()
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: "food_bank_restore")
+    }
+
+    private func toggleShelf(_ food: SavedFood) {
+        food.isOnShelf.toggle()
+        try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "food_bank_shelf_changed")
+    }
+
+    private func shelfConfiguration(_ preferences: Preferences) -> ShelfRecommendationConfiguration {
+        var hardCaps: Set<ShelfNutrient> = []
+        if preferences.shelfHardCapCalories { hardCaps.insert(.calories) }
+        if preferences.shelfHardCapSodium { hardCaps.insert(.sodium) }
+
+        return ShelfRecommendationConfiguration(
+            enabled: preferences.shelfRecommendationsEnabled,
+            suggestionCount: preferences.clampedShelfSuggestionCount,
+            energyIntent: preferences.shelfEnergyIntent,
+            nutritionEmphasis: preferences.shelfNutritionEmphasis,
+            triggerFraction: preferences.shelfTriggerFraction,
+            incompleteNutritionPolicy: preferences.shelfIncompleteNutritionPolicy,
+            useRollingWeekContext: preferences.shelfUseRollingWeekContext,
+            hardCaps: hardCaps,
+            customPolicies: Dictionary(uniqueKeysWithValues: ShelfNutrient.allCases.map {
+                ($0, preferences.shelfPolicy(for: $0))
+            }),
+            customStrengths: Dictionary(uniqueKeysWithValues: ShelfNutrient.allCases.map {
+                ($0, preferences.shelfStrength(for: $0))
+            })
+        )
+    }
+
+    private func shelfRollingWeekContext() -> ShelfRollingWeekContext {
+        let calendar = Calendar.current
+        let selectedDay = calendar.startOfDay(for: logDate)
+        let priorDayCalories = (1...6).reversed().map { daysAgo -> Double? in
+            guard let date = calendar.date(byAdding: .day, value: -daysAgo, to: selectedDay),
+                  let log = nutritionStore.fetchLog(for: date),
+                  !log.safeEntries.isEmpty,
+                  log.totalCalories > 0 else {
+                return nil
+            }
+            return log.totalCalories
+        }
+        return ShelfRollingWeekContext(priorDayCalories: priorDayCalories)
+    }
+
+    private func summedMicronutrient(_ id: String, entries: [NutritionEntry]) -> Double {
+        entries.reduce(0) { total, entry in
+            total + (normalizedMicronutrient(id, in: entry.micronutrients) ?? 0)
+        }
+    }
+
+    private func normalizedMicronutrient(
+        _ id: String,
+        in micronutrients: [String: MicronutrientValue]
+    ) -> Double? {
+        guard let value = KnownMicronutrients.value(in: micronutrients, forID: id) else { return nil }
+        let unit = value.unit.lowercased()
+        if id == "sodium", unit == "g" { return value.value * 1_000 }
+        if id == "fiber", unit == "mg" { return value.value / 1_000 }
+        return value.value
+    }
+}
+
+private enum FoodBankLogSelection: Identifiable {
+    case standard(SavedFood)
+    case suggestion(SavedFood, ShelfRecommendation)
+
+    var food: SavedFood {
+        switch self {
+        case .standard(let food), .suggestion(let food, _): food
+        }
+    }
+
+    var recommendation: ShelfRecommendation? {
+        guard case .suggestion(_, let recommendation) = self else { return nil }
+        return recommendation
+    }
+
+    var id: String {
+        switch self {
+        case .standard(let food): "standard-\(food.id)"
+        case .suggestion(let food, _): "suggestion-\(food.id)"
+        }
+    }
+}
+
+private struct ShelfSuggestionRow: View {
+    let food: SavedFood
+    let recommendation: ShelfRecommendation
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.orange)
+                .frame(width: 28, height: 44)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(food.name)
+                        .font(.body.weight(.medium))
+                    Spacer()
+                    Text("\(recommendation.quantityText) \(recommendation.unit)")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                }
+
+                Text(recommendation.reason)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                if recommendation.hasIncompleteNutrition {
+                    Label("Nutrition incomplete", systemImage: "exclamationmark.triangle")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+        .padding(.vertical, 5)
+        .contentShape(.rect)
     }
 }
 

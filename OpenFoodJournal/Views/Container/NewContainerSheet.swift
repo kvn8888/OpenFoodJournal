@@ -28,6 +28,16 @@ struct NewContainerSheet: View {
     @FocusState private var focusedField: Bool
     private let recentlyUsedLimit = 8
 
+    init(preselectedFood: SavedFood? = nil) {
+        _selectedFood = State(initialValue: preselectedFood)
+        let gramMapping = preselectedFood?.servingMappings.first {
+            $0.to.unit.lowercased() == "g"
+        }
+        _gramsPerServingText = State(initialValue: gramMapping.map {
+            Self.formatInitialWeight($0.to.value)
+        } ?? "")
+    }
+
     // Foods sorted by recent container activity first, then alphabetically.
     private var sortedFoods: [SavedFood] {
         let lastTrackedDates = foodLastTrackedDates
@@ -325,6 +335,10 @@ struct NewContainerSheet: View {
     }
 
     private func formatWeight(_ weight: Double) -> String {
+        Self.formatInitialWeight(weight)
+    }
+
+    private static func formatInitialWeight(_ weight: Double) -> String {
         if weight.rounded() == weight {
             return String(format: "%.0f", weight)
         }

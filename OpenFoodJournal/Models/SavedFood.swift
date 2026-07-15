@@ -265,6 +265,9 @@ final class SavedFood {
     // Cosmetic Food Bank archive state. Archived foods stay in SwiftData and remain searchable.
     var archivedAt: Date?
 
+    // Availability, not preference: the user currently has this food at home.
+    var isOnShelf: Bool = false
+
     // Composite foods snapshot ingredient nutrition instead of referencing source SavedFoods.
     var kind: SavedFoodKind = SavedFoodKind.single
     var compositeIngredients: [CompositeIngredientSnapshot] = []
@@ -293,6 +296,7 @@ final class SavedFood {
         servingMappings: [ServingMapping] = [],
         originalScanMode: ScanMode = .manual,
         archivedAt: Date? = nil,
+        isOnShelf: Bool = false,
         kind: SavedFoodKind = SavedFoodKind.single,
         compositeIngredients: [CompositeIngredientSnapshot] = [],
         calculatorIngredients: [CalculatorIngredient] = []
@@ -320,6 +324,7 @@ final class SavedFood {
         self.originalScanMode = originalScanMode
         self.lastUsedAt = createdAt  // New foods count as "just used" for sort ordering
         self.archivedAt = archivedAt
+        self.isOnShelf = isOnShelf
         self.kind = kind
         self.compositeIngredients = compositeIngredients
         self.calculatorIngredients = calculatorIngredients
@@ -340,7 +345,7 @@ extension SavedFood {
     }
 
     var isArchivedInFoodBank: Bool {
-        archivedAt != nil || lastUsedAt < Self.foodBankArchiveCutoff()
+        archivedAt != nil || (!isOnShelf && lastUsedAt < Self.foodBankArchiveCutoff())
     }
 
     func archiveForFoodBank(now: Date = .now) {
