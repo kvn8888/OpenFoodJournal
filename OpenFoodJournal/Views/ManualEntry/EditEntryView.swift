@@ -6,7 +6,7 @@ import SwiftData
 
 /// Edit a logged entry — adjust serving quantity, unit, and meal type.
 /// Core macros are read-only here; edit the food itself in Food Bank.
-/// Macros scale proportionally when the user changes quantity or unit.
+/// Macros and micronutrients scale proportionally when the user changes quantity or unit.
 struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(HealthKitService.self) private var healthKit
@@ -36,6 +36,7 @@ struct EditEntryView: View {
 
     // Centralised unit conversion + macro scaling logic (shared with LogFoodSheet)
     private let converter: ServingConverter
+    private let baseMicronutrients: [String: MicronutrientValue]
 
     // Keep baseUnit accessible for onChange unit-switch logic
     private let baseUnit: String
@@ -54,6 +55,7 @@ struct EditEntryView: View {
             ? String(format: "%.0f", qty) : String(format: "%.2f", qty))
         _selectedUnit = State(initialValue: unit)
         self.baseUnit = unit
+        self.baseMicronutrients = entry.micronutrients
         self.converter = ServingConverter(
             calories: entry.calories,
             protein: entry.protein,
@@ -74,6 +76,13 @@ struct EditEntryView: View {
     private var displayProtein: Double { converter.scaledProtein(quantity: quantity, unit: selectedUnit) }
     private var displayCarbs: Double { converter.scaledCarbs(quantity: quantity, unit: selectedUnit) }
     private var displayFat: Double { converter.scaledFat(quantity: quantity, unit: selectedUnit) }
+    private var displayMicronutrients: [String: MicronutrientValue] {
+        converter.scaledMicronutrients(
+            baseMicronutrients,
+            quantity: quantity,
+            unit: selectedUnit
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -121,6 +130,7 @@ struct EditEntryView: View {
                         entry.protein = displayProtein
                         entry.carbs = displayCarbs
                         entry.fat = displayFat
+                        entry.micronutrients = displayMicronutrients
                         entry.servingQuantity = quantity
                         entry.servingUnit = selectedUnit
 
@@ -255,13 +265,22 @@ struct EditEntryView: View {
         }
     }
 
-    /// Read-only macros scaled by the current serving selection
+    /// Read-only nutrition scaled by the current serving selection.
     private var nutritionSection: some View {
         Section("Nutrition") {
             MacroDisplayRow(label: "Calories", value: displayCalories, unit: "kcal")
             MacroDisplayRow(label: "Protein", value: displayProtein, unit: "g")
             MacroDisplayRow(label: "Carbs", value: displayCarbs, unit: "g")
             MacroDisplayRow(label: "Fat", value: displayFat, unit: "g")
+            ForEach(displayMicronutrients.keys.sorted(), id: \.self) { key in
+                if let nutrient = displayMicronutrients[key] {
+                    MacroDisplayRow(
+                        label: KnownMicronutrients.nutrient(forID: key)?.name ?? key,
+                        value: nutrient.value,
+                        unit: nutrient.unit
+                    )
+                }
+            }
         }
     }
 

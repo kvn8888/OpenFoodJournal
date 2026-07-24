@@ -1,5 +1,5 @@
 // OpenFoodJournal — Gemini Scan Log
-// Local diagnostic records for Gemini scan/search calls.
+// Local diagnostic records for scan, search, and Assistant model calls.
 // AGPL-3.0 License
 
 import Foundation
@@ -10,6 +10,7 @@ enum GeminiScanLogOperation: String, Codable, CaseIterable, Sendable {
     case aiSearch
     case foodEmoji
     case foodIconImage
+    case assistantChat
 }
 
 enum GeminiScanLogStatus: String, Codable, CaseIterable, Sendable {
@@ -19,12 +20,17 @@ enum GeminiScanLogStatus: String, Codable, CaseIterable, Sendable {
 
 @Model
 final class GeminiScanLog {
-    static let exportWindowDays = 30
+    /// Diagnostic payloads can contain prompts and provider response details,
+    /// so keep them briefly instead of allowing CloudKit/Turso rows to grow
+    /// forever. Conversation history has its own retention semantics.
+    static let retentionDays = 14
+    static let exportWindowDays = retentionDays
 
     var id: UUID = UUID()
     var createdAt: Date = Date()
     var operation: GeminiScanLogOperation = GeminiScanLogOperation.scan
     var status: GeminiScanLogStatus = GeminiScanLogStatus.success
+    var provider: String? = nil
     var scanMode: String?
     var primaryModel: String?
     var fallbackModel: String?
@@ -46,6 +52,7 @@ final class GeminiScanLog {
     var rawResponseJSON: String?
     var modelAttemptsJSON: String?
     var inputTokenCount: Int = 0
+    var cachedInputTokenCount: Int = 0
     var outputTokenCount: Int = 0
     var thinkingTokenCount: Int = 0
     var totalTokenCount: Int = 0
@@ -78,6 +85,7 @@ final class GeminiScanLog {
         createdAt: Date = .now,
         operation: GeminiScanLogOperation,
         status: GeminiScanLogStatus,
+        provider: String? = nil,
         scanMode: String? = nil,
         primaryModel: String? = nil,
         fallbackModel: String? = nil,
@@ -99,6 +107,7 @@ final class GeminiScanLog {
         rawResponseJSON: String? = nil,
         modelAttemptsJSON: String? = nil,
         inputTokenCount: Int = 0,
+        cachedInputTokenCount: Int = 0,
         outputTokenCount: Int = 0,
         thinkingTokenCount: Int = 0,
         totalTokenCount: Int = 0,
@@ -130,6 +139,7 @@ final class GeminiScanLog {
         self.createdAt = createdAt
         self.operation = operation
         self.status = status
+        self.provider = provider
         self.scanMode = scanMode
         self.primaryModel = primaryModel
         self.fallbackModel = fallbackModel
@@ -151,6 +161,7 @@ final class GeminiScanLog {
         self.rawResponseJSON = rawResponseJSON
         self.modelAttemptsJSON = modelAttemptsJSON
         self.inputTokenCount = inputTokenCount
+        self.cachedInputTokenCount = cachedInputTokenCount
         self.outputTokenCount = outputTokenCount
         self.thinkingTokenCount = thinkingTokenCount
         self.totalTokenCount = totalTokenCount
@@ -200,7 +211,7 @@ extension GeminiScanLog {
         in modelContext: ModelContext,
         days: Int = exportWindowDays,
         now: Date = .now
-    ) {
+    ) -> Int {
         let cutoff = cutoffDate(days: days, now: now)
         let descriptor = FetchDescriptor<GeminiScanLog>(
             predicate: #Predicate { $0.createdAt < cutoff }
@@ -209,6 +220,7 @@ extension GeminiScanLog {
         for log in expired {
             modelContext.delete(log)
         }
+        return expired.count
     }
 
     @MainActor
@@ -221,13 +233,13 @@ extension GeminiScanLog {
         guard !logs.isEmpty else { return "" }
 
         let header = [
-            "Log ID", "Timestamp", "Operation", "Status", "Scan Mode",
+            "Log ID", "Timestamp", "Operation", "Status", "Provider", "Scan Mode",
             "Primary Model", "Fallback Model", "Resolved Model", "Used Fallback",
             "Resolved Model Version", "Photo Count", "Duration Ms", "User Prompt Or Query",
             "Request Prompt", "Request Prompt Characters", "Request Metadata JSON",
             "Image Metadata JSON", "Request Payload Bytes", "Response HTTP Status",
             "Parse Stage", "Response Text Characters", "Raw Response Text",
-            "Raw Response JSON", "Model Attempts JSON", "Input Tokens",
+            "Raw Response JSON", "Model Attempts JSON", "Input Tokens", "Cached Input Tokens",
             "Output Tokens", "Thinking Tokens", "Total Tokens",
             "Estimated Token Cost USD", "Pricing Model", "Search Grounding Requested",
             "Search Grounding Used", "Web Search Queries", "Grounding Source URLs",
@@ -246,6 +258,7 @@ extension GeminiScanLog {
             fields.append(Self.isoTimestampFormatter.string(from: log.createdAt))
             fields.append(log.operation.rawValue)
             fields.append(log.status.rawValue)
+            fields.append(log.provider ?? "")
             fields.append(log.scanMode ?? "")
             fields.append(log.primaryModel ?? "")
             fields.append(log.fallbackModel ?? "")
@@ -267,6 +280,7 @@ extension GeminiScanLog {
             fields.append(log.rawResponseJSON ?? "")
             fields.append(log.modelAttemptsJSON ?? "")
             fields.append(String(log.inputTokenCount))
+            fields.append(String(log.cachedInputTokenCount))
             fields.append(String(log.outputTokenCount))
             fields.append(String(log.thinkingTokenCount))
             fields.append(String(log.totalTokenCount))

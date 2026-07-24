@@ -155,6 +155,18 @@ struct ServingConverter {
         (baseFat / baseQuantity) / factorFor(unit) * quantity
     }
 
+    /// Scales a micronutrient snapshot with the same serving factor as macros.
+    func scaledMicronutrients(
+        _ micronutrients: [String: MicronutrientValue],
+        quantity: Double,
+        unit: String
+    ) -> [String: MicronutrientValue] {
+        let factor = (quantity / factorFor(unit)) / baseQuantity
+        return micronutrients.mapValues {
+            MicronutrientValue(value: $0.value * factor, unit: $0.unit)
+        }
+    }
+
     // MARK: - Private helpers
 
     /// Whether the given unit string refers to the food's base serving unit.

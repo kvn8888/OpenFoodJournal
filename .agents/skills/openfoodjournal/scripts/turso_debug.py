@@ -28,6 +28,7 @@ TABLES = [
     "ofj_preferences",
     "ofj_user_goals",
     "ofj_app_settings",
+    "ofj_ai_diagnostic_events",
     "ofj_gemini_scan_logs",
     "ofj_gemini_cost_accumulators",
 ]
@@ -259,6 +260,53 @@ def command_gemini_failures(client: TursoClient, days: int) -> None:
     )
 
 
+def command_ai_events(
+    client: TursoClient,
+    days: int,
+    status: str | None,
+    provider: str | None,
+    operation: str | None,
+    run_id: str | None,
+    request_id: str | None,
+    limit: int,
+    include_payload: bool,
+) -> None:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=min(max(days, 1), 14))
+    filters = ["created_at >= ?"]
+    args: list[Any] = [cutoff.isoformat(timespec="seconds").replace("+00:00", "Z")]
+    for column, value in (
+        ("status", status),
+        ("provider", provider),
+        ("operation", operation),
+        ("run_id", run_id),
+        ("provider_request_id", request_id),
+    ):
+        if value:
+            filters.append(f"{column} = ?")
+            args.append(value)
+    columns = """
+        created_at, event_type, operation, status, provider, base_model,
+        deployment, run_id, turn_id, call_id, provider_request_id,
+        duration_ms, input_tokens, cached_input_tokens, output_tokens,
+        reasoning_tokens, estimated_cost_usd, response_http_status,
+        error_code, error_message
+    """
+    if include_payload:
+        columns += ", payload_json"
+    print_rows(
+        client.execute(
+            f"""
+            SELECT {columns}
+            FROM ofj_ai_diagnostic_events
+            WHERE {' AND '.join(filters)}
+            ORDER BY created_at DESC
+            LIMIT {min(max(limit, 1), 500)}
+            """,
+            args,
+        )
+    )
+
+
 def command_raw_sql(client: TursoClient, sql: str, allow_write: bool) -> None:
     if not allow_write and not sql.lstrip().lower().startswith(("select", "with")):
         raise SystemExit("raw-sql is SELECT-only by default. Pass --allow-write to bypass.")
@@ -303,6 +351,16 @@ def build_parser() -> argparse.ArgumentParser:
     failures = subparsers.add_parser("gemini-failures")
     failures.add_argument("--days", type=int, default=30)
 
+    events = subparsers.add_parser("ai-events", help="Inspect redacted append-only AI diagnostics")
+    events.add_argument("--days", type=int, default=14)
+    events.add_argument("--status")
+    events.add_argument("--provider")
+    events.add_argument("--operation")
+    events.add_argument("--run-id")
+    events.add_argument("--request-id")
+    events.add_argument("--limit", type=int, default=100)
+    events.add_argument("--include-payload", action="store_true")
+
     raw = subparsers.add_parser("raw-sql")
     raw.add_argument("sql")
     raw.add_argument("--allow-write", action="store_true")
@@ -335,6 +393,18 @@ def main() -> int:
         command_healthkit_pending(client)
     elif args.command == "gemini-failures":
         command_gemini_failures(client, args.days)
+    elif args.command == "ai-events":
+        command_ai_events(
+            client,
+            args.days,
+            args.status,
+            args.provider,
+            args.operation,
+            args.run_id,
+            args.request_id,
+            args.limit,
+            args.include_payload,
+        )
     elif args.command == "raw-sql":
         command_raw_sql(client, args.sql, args.allow_write)
     elif args.command == "typed-args-smoke-test":

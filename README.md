@@ -45,10 +45,10 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 ### Health & Sync
 - **Apple HealthKit** — Opt-in idempotent sync for calories, protein, carbs, fat, and 10+ micronutrients. Writes use deterministic sample identifiers so edits replace OpenFoodJournal-owned samples instead of duplicating them. Reads active energy burned for net calorie display.
 - **iCloud sync** — Local-first SwiftData with automatic CloudKit sync across all your Apple devices.
-- **Optional Turso mirror** — Push a debuggable copy of local/iCloud data to your own Turso database for SQL inspection. SwiftData remains the source of truth.
+- **Optional Turso integration** — Push a debuggable copy of local/iCloud app data and append redacted AI diagnostics to your own Turso database for SQL inspection. SwiftData remains the source of truth for app state.
 - **Spreadsheet CSV export** — Export journal entries with stable IDs, ISO dates, macros, serving basics, and micronutrient columns for analysis.
 - **Backup export/import** — Versioned JSON backup restores journal entries, Food Bank foods, containers, preferences, and goals by UUID without duplicating repeated imports.
-- **Gemini log export** — Export the last 30 days of Gemini scan and AI Search diagnostics, including request/response metadata, without API keys or raw photos.
+- **AI diagnostic export** — Export the last 14 days of redacted scan, search, Assistant, tool, latency, token, and cost telemetry from your configured Turso database. Prompts, answers, journal/HealthKit values, sources, attachments, and API keys are excluded.
 - **Gemini usage total** — Settings shows a local running estimate of Gemini token cost and token usage, with reset controls.
 
 ### Sources & Disclaimers
@@ -67,7 +67,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 │  OpenFoodJournalApp                         │
 │    ├─ NutritionStore (CRUD + queries)       │
 │    ├─ ScanService (camera → Gemini REST)    │
-│    ├─ TursoMirrorService (optional mirror)  │
+│    ├─ TursoMirrorService (mirror + AI logs) │
 │    ├─ HealthKitService (Apple Health)       │
 │    ├─ KeychainService (API key storage)     │
 │    └─ UserGoals (@Observable + @AppStorage) │
@@ -84,7 +84,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
     ▼                     ▼                       ▼
 ┌────────────┐  ┌─────────────────┐       ┌─────────────────┐
 │ Gemini API │  │ iCloud Private  │       │ User Turso DB   │
-│ (Google)   │  │ Database        │       │ push-only mirror│
+│ (Google)   │  │ Database        │       │ mirror + AI logs│
 └────────────┘  └─────────────────┘       └─────────────────┘
 ```
 
@@ -92,7 +92,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 
 **BYOK (Bring Your Own Key)**: Users provide their own Gemini API key (free from aistudio.google.com). The key is stored in the iOS Keychain and API calls go directly from the device — no proxy server involved.
 
-**Optional Turso mirror**: Users can add their own Turso database URL and auth token in Settings → Data → Turso Integration. The app uses Turso SQL-over-HTTP directly, mirrors namespaced `ofj_*` tables, and never treats Turso as the source of truth.
+**Optional Turso integration**: Users can add their own Turso database URL and auth token in Settings → Data → Turso Integration. The app uses Turso SQL-over-HTTP directly. Journal/configuration/usage tables are push-only generation mirrors; detailed AI telemetry uses a separate append-only table with 14-day retention and a bounded local-only delivery outbox. Turso is never the source of truth for conversations or nutrition data.
 
 **Service injection**: All services are created at app launch and passed through SwiftUI's `@Environment`. No singletons.
 
@@ -106,7 +106,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 | `NutritionEntry` | Single food log — macros, micros, brand, serving info, optional calculator selection summary, and Apple Health sync metadata. |
 | `SavedFood` | Reusable food template in the Food Bank. Supports single foods, composite foods, and runtime nutrition calculators, plus last-used and archive display state. |
 | `TrackedContainer` | Weight-based container. Snapshots food nutrition at creation, derives consumption from weight delta. |
-| `GeminiScanLog` | Gemini scan/search diagnostics with request metadata, model attempts, raw non-image response text, and a 30-day CSV export window. |
+| `AIDiagnosticEvent` | Provider-neutral redacted telemetry envelope written directly to Turso. Legacy `GeminiScanLog`/`ChatDiagnosticSpan` models remain only for one-time CloudKit migration compatibility. |
 | `GeminiCostAccumulator` | Local running estimate of Gemini token cost and token usage, shown in Settings. |
 | `UserGoals` | Daily calorie/protein/carbs/fat targets. Persisted via `@AppStorage`. |
 

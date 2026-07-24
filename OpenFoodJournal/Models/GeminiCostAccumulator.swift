@@ -7,7 +7,7 @@ import SwiftData
 
 @Model
 final class GeminiCostAccumulator {
-    static let currentPricingSource = "Google Gemini API pricing, Standard paid tier, checked 2026-06-30"
+    static let currentPricingSource = "Dated local Gemini and GPT-5.6 pricing catalogs; see each request's pricing model"
 
     var id: UUID = UUID()
     var createdAt: Date = Date()
@@ -15,6 +15,7 @@ final class GeminiCostAccumulator {
 
     var totalEstimatedTokenCostUSD: Double = 0
     var totalInputTokens: Int = 0
+    var totalCachedInputTokens: Int = 0
     var totalOutputTokens: Int = 0
     var totalThinkingTokens: Int = 0
     var totalRequests: Int = 0
@@ -24,6 +25,7 @@ final class GeminiCostAccumulator {
 
     var lastEstimatedTokenCostUSD: Double = 0
     var lastInputTokens: Int = 0
+    var lastCachedInputTokens: Int = 0
     var lastOutputTokens: Int = 0
     var lastThinkingTokens: Int = 0
     var lastModel: String?
@@ -53,6 +55,7 @@ final class GeminiCostAccumulator {
     func add(
         estimatedCostUSD: Double,
         inputTokens: Int,
+        cachedInputTokens: Int = 0,
         outputTokens: Int,
         thinkingTokens: Int,
         model: String?,
@@ -63,6 +66,7 @@ final class GeminiCostAccumulator {
     ) {
         totalEstimatedTokenCostUSD += estimatedCostUSD
         totalInputTokens += inputTokens
+        totalCachedInputTokens += cachedInputTokens
         totalOutputTokens += outputTokens
         totalThinkingTokens += thinkingTokens
         totalRequests += 1
@@ -77,6 +81,7 @@ final class GeminiCostAccumulator {
 
         lastEstimatedTokenCostUSD = estimatedCostUSD
         lastInputTokens = inputTokens
+        lastCachedInputTokens = cachedInputTokens
         lastOutputTokens = outputTokens
         lastThinkingTokens = thinkingTokens
         lastModel = model
@@ -88,6 +93,7 @@ final class GeminiCostAccumulator {
     func reset(now: Date = .now) {
         totalEstimatedTokenCostUSD = 0
         totalInputTokens = 0
+        totalCachedInputTokens = 0
         totalOutputTokens = 0
         totalThinkingTokens = 0
         totalRequests = 0
@@ -97,6 +103,7 @@ final class GeminiCostAccumulator {
 
         lastEstimatedTokenCostUSD = 0
         lastInputTokens = 0
+        lastCachedInputTokens = 0
         lastOutputTokens = 0
         lastThinkingTokens = 0
         lastModel = nil

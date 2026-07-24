@@ -267,11 +267,41 @@ enum TursoSchema {
             .init(name: "app_build", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
+        TursoTableDefinition(name: "ofj_ai_diagnostic_events", columns: [
+            .init(name: "id", type: "TEXT PRIMARY KEY"),
+            .init(name: "created_at", type: "TEXT NOT NULL"),
+            .init(name: "expires_at", type: "TEXT NOT NULL"),
+            .init(name: "event_type", type: "TEXT NOT NULL"),
+            .init(name: "operation", type: "TEXT NOT NULL"),
+            .init(name: "status", type: "TEXT NOT NULL"),
+            .init(name: "provider", type: "TEXT"),
+            .init(name: "base_model", type: "TEXT"),
+            .init(name: "deployment", type: "TEXT"),
+            .init(name: "run_id", type: "TEXT"),
+            .init(name: "thread_id", type: "TEXT"),
+            .init(name: "turn_id", type: "TEXT"),
+            .init(name: "call_id", type: "TEXT"),
+            .init(name: "provider_request_id", type: "TEXT"),
+            .init(name: "duration_ms", type: "INTEGER"),
+            .init(name: "input_tokens", type: "INTEGER NOT NULL DEFAULT 0"),
+            .init(name: "cached_input_tokens", type: "INTEGER NOT NULL DEFAULT 0"),
+            .init(name: "output_tokens", type: "INTEGER NOT NULL DEFAULT 0"),
+            .init(name: "reasoning_tokens", type: "INTEGER NOT NULL DEFAULT 0"),
+            .init(name: "estimated_cost_usd", type: "REAL"),
+            .init(name: "response_http_status", type: "INTEGER"),
+            .init(name: "error_code", type: "TEXT"),
+            .init(name: "error_message", type: "TEXT"),
+            .init(name: "payload_json", type: "TEXT"),
+            .init(name: "app_version", type: "TEXT"),
+            .init(name: "app_build", type: "TEXT"),
+            .init(name: "os_version", type: "TEXT")
+        ]),
         TursoTableDefinition(name: "ofj_gemini_scan_logs", columns: [
             .init(name: "id", type: "TEXT PRIMARY KEY"),
             .init(name: "created_at", type: "TEXT"),
             .init(name: "operation", type: "TEXT"),
             .init(name: "status", type: "TEXT"),
+            .init(name: "provider", type: "TEXT"),
             .init(name: "scan_mode", type: "TEXT"),
             .init(name: "primary_model", type: "TEXT"),
             .init(name: "fallback_model", type: "TEXT"),
@@ -293,6 +323,7 @@ enum TursoSchema {
             .init(name: "raw_response_json", type: "TEXT"),
             .init(name: "model_attempts_json", type: "TEXT"),
             .init(name: "input_token_count", type: "INTEGER"),
+            .init(name: "cached_input_token_count", type: "INTEGER"),
             .init(name: "output_token_count", type: "INTEGER"),
             .init(name: "thinking_token_count", type: "INTEGER"),
             .init(name: "total_token_count", type: "INTEGER"),
@@ -327,6 +358,7 @@ enum TursoSchema {
             .init(name: "updated_at", type: "TEXT"),
             .init(name: "total_estimated_token_cost_usd", type: "REAL"),
             .init(name: "total_input_tokens", type: "INTEGER"),
+            .init(name: "total_cached_input_tokens", type: "INTEGER"),
             .init(name: "total_output_tokens", type: "INTEGER"),
             .init(name: "total_thinking_tokens", type: "INTEGER"),
             .init(name: "total_requests", type: "INTEGER"),
@@ -335,6 +367,7 @@ enum TursoSchema {
             .init(name: "grounded_search_prompts", type: "INTEGER"),
             .init(name: "last_estimated_token_cost_usd", type: "REAL"),
             .init(name: "last_input_tokens", type: "INTEGER"),
+            .init(name: "last_cached_input_tokens", type: "INTEGER"),
             .init(name: "last_output_tokens", type: "INTEGER"),
             .init(name: "last_thinking_tokens", type: "INTEGER"),
             .init(name: "last_model", type: "TEXT"),
@@ -350,7 +383,11 @@ enum TursoSchema {
     }
 
     static var mirroredTableNames: [String] {
-        tables.map(\.name).filter { $0 != "ofj_sync_runs" }
+        // Diagnostic events are append-only and have their own acknowledgement
+        // path. A full generation mirror must never prune that table.
+        tables.map(\.name).filter {
+            $0 != "ofj_sync_runs" && $0 != "ofj_ai_diagnostic_events"
+        }
     }
 }
 
@@ -368,6 +405,7 @@ final class TursoMirrorService {
     static let lastSyncAtKey = "turso.lastSyncAt"
     static let lastErrorKey = "turso.lastError"
     static let lastRowCountKey = "turso.lastRowCount"
+    static let lastDiagnosticUploadAtKey = "turso.lastDiagnosticUploadAt"
 
     @ObservationIgnored
     private let modelContext: ModelContext
@@ -376,24 +414,47 @@ final class TursoMirrorService {
     @ObservationIgnored
     private let defaults: UserDefaults
     @ObservationIgnored
+    private let credentialProvider: () -> (databaseURL: String?, authToken: String?)
+    @ObservationIgnored
     private let encoder: JSONEncoder
     @ObservationIgnored
     private let isoFormatter: ISO8601DateFormatter
     @ObservationIgnored
     private var scheduledTask: Task<Void, Never>?
+    @ObservationIgnored
+    private var diagnosticFlushTask: Task<Void, Never>?
+    @ObservationIgnored
+    private let diagnosticOutbox: AIDiagnosticOutboxStore
+    @ObservationIgnored
+    private var didRunMigrationsInProcess = false
 
     private(set) var isMirroring = false
     private(set) var isTestingConnection = false
     private(set) var lastSummary: TursoMirrorSummary?
+    private(set) var pendingDiagnosticCount = 0
 
     init(
         modelContext: ModelContext,
         session: URLSession = .shared,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        diagnosticOutboxURL: URL? = nil,
+        diagnosticOutboxMaximumEvents: Int = AIDiagnosticOutboxStore.defaultMaximumEvents,
+        diagnosticOutboxMaximumBytes: Int = AIDiagnosticOutboxStore.defaultMaximumBytes,
+        diagnosticOutboxMaximumAge: TimeInterval = AIDiagnosticOutboxStore.defaultMaximumAge,
+        credentialProvider: (() -> (databaseURL: String?, authToken: String?))? = nil
     ) {
         self.modelContext = modelContext
         self.session = session
         self.defaults = defaults
+        self.credentialProvider = credentialProvider ?? {
+            (KeychainService.tursoDatabaseURL, KeychainService.tursoAuthToken)
+        }
+        diagnosticOutbox = AIDiagnosticOutboxStore(
+            fileURL: diagnosticOutboxURL,
+            maximumEvents: diagnosticOutboxMaximumEvents,
+            maximumBytes: diagnosticOutboxMaximumBytes,
+            maximumAge: diagnosticOutboxMaximumAge
+        )
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -407,6 +468,7 @@ final class TursoMirrorService {
         if defaults.object(forKey: Self.includeDiagnosticsKey) == nil {
             defaults.set(true, forKey: Self.includeDiagnosticsKey)
         }
+        pendingDiagnosticCount = diagnosticOutbox.count
     }
 
     var isEnabled: Bool {
@@ -470,16 +532,31 @@ final class TursoMirrorService {
         defaults.set(enabled, forKey: Self.enabledKey)
         if enabled {
             scheduleMirror(reason: "enabled")
+            Task { [weak self] in await self?.migrateLegacyDiagnostics() }
         } else {
             scheduledTask?.cancel()
             scheduledTask = nil
+            diagnosticFlushTask?.cancel()
+            diagnosticFlushTask = nil
+            diagnosticOutbox.clear()
+            pendingDiagnosticCount = 0
         }
     }
 
     func setIncludeDiagnostics(_ include: Bool) {
         defaults.set(include, forKey: Self.includeDiagnosticsKey)
+        if !include {
+            diagnosticFlushTask?.cancel()
+            diagnosticOutbox.clear()
+            pendingDiagnosticCount = 0
+        }
         if isEnabled {
             scheduleMirror(reason: "settings_include_diagnostics_changed")
+            if include {
+                Task { [weak self] in await self?.migrateLegacyDiagnostics() }
+            } else {
+                Task { [weak self] in await self?.clearRemoteDiagnostics() }
+            }
         }
     }
 
@@ -506,10 +583,12 @@ final class TursoMirrorService {
         for table in TursoSchema.tables {
             try await ensureColumns(for: table, credentials: credentials)
         }
+        try await ensureDiagnosticIndexes(credentials: credentials)
+        didRunMigrationsInProcess = true
     }
 
     func scheduleMirror(reason: String) {
-        guard isEnabled, KeychainService.hasTursoCredentials else { return }
+        guard isEnabled, hasCredentials else { return }
         scheduledTask?.cancel()
         scheduledTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
@@ -591,13 +670,215 @@ final class TursoMirrorService {
         isMirroring = false
     }
 
+    // MARK: - Append-only AI diagnostics
+
+    /// Enqueues an already-redacted event in a small local-only delivery queue.
+    /// No diagnostic row is inserted into SwiftData or CloudKit.
+    func recordDiagnostic(_ event: AIDiagnosticEvent) {
+        guard isEnabled, includeDiagnostics, hasCredentials else { return }
+        pendingDiagnosticCount = diagnosticOutbox.append(sanitized(event))
+        diagnosticFlushTask?.cancel()
+        diagnosticFlushTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled else { return }
+            _ = await self?.flushDiagnosticOutbox()
+        }
+    }
+
+    /// Flushes the delivery queue with idempotent UUID upserts. Failure leaves
+    /// events queued and never affects the scan or Assistant request that
+    /// produced them.
+    @discardableResult
+    func flushDiagnosticOutbox() async -> Bool {
+        guard isEnabled, includeDiagnostics, hasCredentials else {
+            return false
+        }
+        let events = diagnosticOutbox.events()
+        pendingDiagnosticCount = events.count
+
+        do {
+            let credentials = try loadCredentials()
+            try await uploadDiagnosticEvents(events, credentials: credentials)
+
+            pendingDiagnosticCount = diagnosticOutbox.remove(ids: Set(events.map(\.id)))
+            if !events.isEmpty {
+                defaults.set(Date().timeIntervalSince1970, forKey: Self.lastDiagnosticUploadAtKey)
+            }
+            defaults.set("", forKey: Self.lastErrorKey)
+            return true
+        } catch {
+            defaults.set(redacted(error.localizedDescription), forKey: Self.lastErrorKey)
+            pendingDiagnosticCount = diagnosticOutbox.count
+            return false
+        }
+    }
+
+    /// Converts the prior CloudKit-backed diagnostic rows once, uploads them,
+    /// and only then deletes them locally. New diagnostics never take this path.
+    func migrateLegacyDiagnostics() async {
+        guard isEnabled, includeDiagnostics, hasCredentials else { return }
+        let logs = fetch(FetchDescriptor<GeminiScanLog>(sortBy: [SortDescriptor(\.createdAt)]))
+        let spans = fetch(FetchDescriptor<ChatDiagnosticSpan>(sortBy: [SortDescriptor(\.startedAt)]))
+        let events = logs.map(AIDiagnosticEvent.init(scanLog:))
+            + spans.map(AIDiagnosticEvent.init(span:))
+        guard !events.isEmpty else {
+            _ = await flushDiagnosticOutbox()
+            return
+        }
+
+        do {
+            let credentials = try loadCredentials()
+            var index = 0
+            while index < events.count {
+                let end = min(index + 200, events.count)
+                try await uploadDiagnosticEvents(
+                    events[index..<end].map(sanitized),
+                    credentials: credentials
+                )
+                index = end
+            }
+
+            for log in logs { modelContext.delete(log) }
+            for span in spans { modelContext.delete(span) }
+            try modelContext.save()
+            defaults.set(Date().timeIntervalSince1970, forKey: Self.lastDiagnosticUploadAtKey)
+            defaults.set("", forKey: Self.lastErrorKey)
+            _ = await flushDiagnosticOutbox()
+        } catch {
+            defaults.set(redacted(error.localizedDescription), forKey: Self.lastErrorKey)
+        }
+    }
+
+    func clearAIDiagnostics() async {
+        diagnosticFlushTask?.cancel()
+        diagnosticOutbox.clear()
+        pendingDiagnosticCount = 0
+        for log in fetch(FetchDescriptor<GeminiScanLog>()) { modelContext.delete(log) }
+        for span in fetch(FetchDescriptor<ChatDiagnosticSpan>()) { modelContext.delete(span) }
+        try? modelContext.save()
+        await clearRemoteDiagnostics()
+    }
+
+    func exportDiagnosticCSV() async throws -> String {
+        guard isEnabled, includeDiagnostics else { return "" }
+        _ = await flushDiagnosticOutbox()
+        let credentials = try loadCredentials()
+        if !didRunMigrationsInProcess { try await runMigrations() }
+        let columns = [
+            "id", "created_at", "event_type", "operation", "status", "provider",
+            "base_model", "deployment", "run_id", "thread_id", "turn_id", "call_id",
+            "provider_request_id", "duration_ms", "input_tokens", "cached_input_tokens",
+            "output_tokens", "reasoning_tokens", "estimated_cost_usd",
+            "response_http_status", "error_code", "error_message", "payload_json",
+            "app_version", "app_build", "os_version",
+        ]
+        let cutoff = Calendar.current.date(
+            byAdding: .day,
+            value: -AIDiagnosticEvent.retentionDays,
+            to: .now
+        ) ?? .now
+        let rows = try await queryRows(
+            sql: "SELECT \(columns.joined(separator: ", ")) FROM ofj_ai_diagnostic_events WHERE created_at >= ? ORDER BY created_at DESC",
+            args: [.text(iso(cutoff))],
+            credentials: credentials
+        )
+        guard !rows.isEmpty else { return "" }
+        func csv(_ value: String) -> String {
+            "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+        }
+        var output = [columns.map(csv).joined(separator: ",")]
+        output.append(contentsOf: rows.map { row in
+            columns.map { csv((row[$0] ?? nil) ?? "") }.joined(separator: ",")
+        })
+        return output.joined(separator: "\n")
+    }
+
+    private func uploadDiagnosticEvents(
+        _ events: [AIDiagnosticEvent],
+        credentials: (url: URL, token: String)
+    ) async throws {
+        if !didRunMigrationsInProcess { try await runMigrations() }
+        if !events.isEmpty {
+            try await execute(
+                events.map { Self.upsertStatement(for: diagnosticRow(for: $0)) },
+                credentials: credentials
+            )
+        }
+        try await execute([
+            TursoSQLStatement(
+                sql: "DELETE FROM ofj_ai_diagnostic_events WHERE expires_at <= ?",
+                args: [.text(iso(.now))]
+            )
+        ], credentials: credentials)
+    }
+
+    private func clearRemoteDiagnostics() async {
+        guard hasCredentials else { return }
+        do {
+            let credentials = try loadCredentials()
+            if !didRunMigrationsInProcess { try await runMigrations() }
+            try await execute([
+                TursoSQLStatement(sql: "DELETE FROM ofj_ai_diagnostic_events"),
+                TursoSQLStatement(sql: "DELETE FROM ofj_gemini_scan_logs"),
+            ], credentials: credentials)
+        } catch {
+            defaults.set(redacted(error.localizedDescription), forKey: Self.lastErrorKey)
+        }
+    }
+
+    private func diagnosticRow(for event: AIDiagnosticEvent) -> TursoMirrorRow {
+        TursoMirrorRow(table: "ofj_ai_diagnostic_events", columns: [
+            "id": .text(event.id.uuidString),
+            "created_at": .text(iso(event.createdAt)),
+            "expires_at": .text(iso(event.expiresAt)),
+            "event_type": .text(event.eventType),
+            "operation": .text(event.operation),
+            "status": .text(event.status),
+            "provider": optionalString(event.providerID),
+            "base_model": optionalString(event.baseModelID),
+            "deployment": optionalString(event.deploymentID),
+            "run_id": optionalUUID(event.runID),
+            "thread_id": optionalUUID(event.threadID),
+            "turn_id": optionalString(event.turnID),
+            "call_id": optionalString(event.callID),
+            "provider_request_id": optionalString(event.providerRequestID),
+            "duration_ms": optionalInt(event.durationMs),
+            "input_tokens": .integer(event.inputTokens),
+            "cached_input_tokens": .integer(event.cachedInputTokens),
+            "output_tokens": .integer(event.outputTokens),
+            "reasoning_tokens": .integer(event.reasoningTokens),
+            "estimated_cost_usd": optionalDouble(event.estimatedCostUSD),
+            "response_http_status": optionalInt(event.responseHTTPStatus),
+            "error_code": optionalString(event.errorCode),
+            "error_message": optionalString(event.errorMessage),
+            "payload_json": optionalString(event.payloadJSON),
+            "app_version": optionalString(event.appVersion),
+            "app_build": optionalString(event.appBuild),
+            "os_version": optionalString(event.osVersion),
+        ])
+    }
+
+    private func sanitized(_ event: AIDiagnosticEvent) -> AIDiagnosticEvent {
+        var event = event
+        event.errorMessage = event.errorMessage.map(redacted)
+        event.payloadJSON = event.payloadJSON.map(redacted)
+        return event
+    }
+
     // MARK: - Credentials
 
+    private var hasCredentials: Bool {
+        let credentials = credentialProvider()
+        return Self.normalizedHTTPURLString(credentials.databaseURL ?? "") != nil
+            && credentials.authToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+
     private func loadCredentials() throws -> (url: URL, token: String) {
-        guard let urlString = KeychainService.tursoDatabaseURL,
+        let credentials = credentialProvider()
+        guard let urlString = credentials.databaseURL,
               let normalized = Self.normalizedHTTPURLString(urlString),
               let url = URL(string: normalized),
-              let token = KeychainService.tursoAuthToken,
+              let token = credentials.authToken,
               !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw TursoMirrorError.missingCredentials
         }
@@ -687,6 +968,19 @@ final class TursoMirrorService {
             TursoSQLStatement(sql: "ALTER TABLE \(table.name) ADD COLUMN \($0.name) \($0.type)")
         }
         try await execute(statements, credentials: credentials)
+    }
+
+    private func ensureDiagnosticIndexes(
+        credentials: (url: URL, token: String)
+    ) async throws {
+        try await execute([
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_created_at ON ofj_ai_diagnostic_events(created_at)"),
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_run_id ON ofj_ai_diagnostic_events(run_id)"),
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_request_id ON ofj_ai_diagnostic_events(provider_request_id)"),
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_provider_model ON ofj_ai_diagnostic_events(provider, base_model, deployment)"),
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_operation_status ON ofj_ai_diagnostic_events(operation, status)"),
+            TursoSQLStatement(sql: "CREATE INDEX IF NOT EXISTS idx_ofj_ai_events_expires_at ON ofj_ai_diagnostic_events(expires_at)"),
+        ], credentials: credentials)
     }
 
     // MARK: - Mirror
@@ -937,6 +1231,7 @@ final class TursoMirrorService {
                     "created_at": .text(iso(log.createdAt)),
                     "operation": .text(log.operation.rawValue),
                     "status": .text(log.status.rawValue),
+                    "provider": optionalString(log.provider),
                     "scan_mode": optionalString(log.scanMode),
                     "primary_model": optionalString(log.primaryModel),
                     "fallback_model": optionalString(log.fallbackModel),
@@ -958,6 +1253,7 @@ final class TursoMirrorService {
                     "raw_response_json": optionalString(log.rawResponseJSON),
                     "model_attempts_json": optionalString(log.modelAttemptsJSON),
                     "input_token_count": .integer(log.inputTokenCount),
+                    "cached_input_token_count": .integer(log.cachedInputTokenCount),
                     "output_token_count": .integer(log.outputTokenCount),
                     "thinking_token_count": .integer(log.thinkingTokenCount),
                     "total_token_count": .integer(log.totalTokenCount),
@@ -996,6 +1292,7 @@ final class TursoMirrorService {
                     "updated_at": .text(iso(accumulator.updatedAt)),
                     "total_estimated_token_cost_usd": .real(accumulator.totalEstimatedTokenCostUSD),
                     "total_input_tokens": .integer(accumulator.totalInputTokens),
+                    "total_cached_input_tokens": .integer(accumulator.totalCachedInputTokens),
                     "total_output_tokens": .integer(accumulator.totalOutputTokens),
                     "total_thinking_tokens": .integer(accumulator.totalThinkingTokens),
                     "total_requests": .integer(accumulator.totalRequests),
@@ -1004,6 +1301,7 @@ final class TursoMirrorService {
                     "grounded_search_prompts": .integer(accumulator.groundedSearchPrompts),
                     "last_estimated_token_cost_usd": .real(accumulator.lastEstimatedTokenCostUSD),
                     "last_input_tokens": .integer(accumulator.lastInputTokens),
+                    "last_cached_input_tokens": .integer(accumulator.lastCachedInputTokens),
                     "last_output_tokens": .integer(accumulator.lastOutputTokens),
                     "last_thinking_tokens": .integer(accumulator.lastThinkingTokens),
                     "last_model": optionalString(accumulator.lastModel),
@@ -1071,15 +1369,28 @@ final class TursoMirrorService {
 
     private func redacted(_ value: String) -> String {
         var output = value
-        if let token = KeychainService.tursoAuthToken, !token.isEmpty {
-            output = output.replacingOccurrences(of: token, with: "[redacted]")
+        let diagnosticCredentials = credentialProvider()
+        let secrets = [
+            KeychainService.geminiAPIKey,
+            KeychainService.openRouterAPIKey,
+            KeychainService.azureOpenAIAPIKey,
+            KeychainService.tavilyAPIKey,
+            KeychainService.parallelAPIKey,
+            KeychainService.tursoAuthToken,
+            diagnosticCredentials.authToken,
+        ]
+        for secret in secrets.compactMap({ $0 }).filter({ !$0.isEmpty }) {
+            output = output.replacingOccurrences(of: secret, with: "[redacted]")
         }
-        if let url = KeychainService.tursoDatabaseURL, !url.isEmpty {
+        let databaseURLs = [KeychainService.tursoDatabaseURL, diagnosticCredentials.databaseURL]
+        for url in databaseURLs.compactMap({ $0 }).filter({ !$0.isEmpty }) {
             output = output.replacingOccurrences(of: url, with: "[database-url]")
         }
         return output
     }
 }
+
+extension TursoMirrorService: AIDiagnosticWriting {}
 
 private struct TursoPipelineRequest: Encodable {
     var requests: [TursoPipelineOperation]

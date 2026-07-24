@@ -115,6 +115,9 @@ struct NutritionCalculatorEditorView: View {
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     private let calculator: SavedFood?
+    /// Invoked after a successful save with the created/updated calculator.
+    /// Used by the Assistant's review flow to report the outcome back to the AI.
+    private let onSaved: ((SavedFood) -> Void)?
 
     @State private var name: String
     @State private var brand: String
@@ -122,11 +125,21 @@ struct NutritionCalculatorEditorView: View {
     @State private var editingIngredient: CalculatorIngredient?
     @State private var showDeleteConfirm = false
 
-    init(calculator: SavedFood? = nil) {
+    /// Prefill parameters let the Assistant open this editor with an
+    /// AI-drafted calculator (or AI-proposed changes to an existing one)
+    /// for user review before anything is persisted.
+    init(
+        calculator: SavedFood? = nil,
+        prefillName: String? = nil,
+        prefillBrand: String? = nil,
+        prefillIngredients: [CalculatorIngredient]? = nil,
+        onSaved: ((SavedFood) -> Void)? = nil
+    ) {
         self.calculator = calculator
-        _name = State(initialValue: calculator?.name ?? "")
-        _brand = State(initialValue: calculator?.brand ?? "")
-        _ingredients = State(initialValue: calculator?.calculatorIngredients ?? [])
+        self.onSaved = onSaved
+        _name = State(initialValue: prefillName ?? calculator?.name ?? "")
+        _brand = State(initialValue: prefillBrand ?? calculator?.brand ?? "")
+        _ingredients = State(initialValue: prefillIngredients ?? calculator?.calculatorIngredients ?? [])
     }
 
     private var isEditing: Bool { calculator != nil }
@@ -239,12 +252,14 @@ struct NutritionCalculatorEditorView: View {
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBrand = brand.trimmingCharacters(in: .whitespacesAndNewlines)
 
+        let saved: SavedFood
         if let calculator {
             calculator.name = trimmedName
             calculator.brand = trimmedBrand.nilIfEmpty
             calculator.kind = .calculator
             calculator.calculatorIngredients = ingredients
             calculator.refreshCalculatorNutrition()
+            saved = calculator
         } else {
             let calculator = SavedFood(
                 name: trimmedName,
@@ -261,10 +276,12 @@ struct NutritionCalculatorEditorView: View {
             )
             calculator.refreshCalculatorNutrition()
             modelContext.insert(calculator)
+            saved = calculator
         }
 
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: isEditing ? "nutrition_calculator_updated" : "nutrition_calculator_created")
+        onSaved?(saved)
         dismiss()
     }
 }

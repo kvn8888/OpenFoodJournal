@@ -303,7 +303,20 @@ struct SavedFoodRecord: Codable {
         servingQuantity = try container.decodeIfPresent(Double.self, forKey: .servingQuantity)
         servingUnit = try container.decodeIfPresent(String.self, forKey: .servingUnit)
         servingMappings = try container.decode([ServingMapping].self, forKey: .servingMappings)
-        originalScanMode = try container.decode(ScanMode.self, forKey: .originalScanMode)
+        if let decodedMode = try? container.decode(ScanMode.self, forKey: .originalScanMode) {
+            originalScanMode = decodedMode
+        } else if let legacyMode = try? container.decode(String.self, forKey: .originalScanMode) {
+            let normalized = legacyMode.lowercased().filter(\.isLetter)
+            originalScanMode = switch normalized {
+            case "label", "labelscan": .label
+            case "foodphoto": .foodPhoto
+            case "barcode": .barcode
+            case "manual": .manual
+            default: .manual
+            }
+        } else {
+            originalScanMode = .manual
+        }
         lastUsedAt = try container.decode(Date.self, forKey: .lastUsedAt)
         archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
         isOnShelf = try container.decodeIfPresent(Bool.self, forKey: .isOnShelf) ?? false
@@ -626,11 +639,20 @@ struct UserGoalsRecord: Codable {
 
 struct AppSettingsRecord: Codable {
     var aiProvider: String
+    var assistantProvider: String
+    var assistantResearchProvider: String
+    var tavilySearchDepth: String
+    var parallelSearchMode: String
     var useProModel: Bool
     var openRouterLiteModel: String
     var openRouterProModel: String
     var openRouterEmojiModel: String
     var openRouterRoutingMode: String
+    var azureEndpoint: String
+    var azureSolDeployment: String
+    var azureTerraDeployment: String
+    var azureDefaultModel: String
+    var chatContextBudget: String
     var useGeneratedFoodIconImages: Bool
     var offContributeEnabled: Bool
     var breakfastStartMinutes: Int
@@ -639,11 +661,20 @@ struct AppSettingsRecord: Codable {
 
     init(
         aiProvider: String = AIProviderSettings.defaultProvider.rawValue,
+        assistantProvider: String? = nil,
+        assistantResearchProvider: String = AssistantResearchProvider.modelProvider.rawValue,
+        tavilySearchDepth: String = TavilySearchDepth.fast.rawValue,
+        parallelSearchMode: String = ParallelSearchMode.basic.rawValue,
         useProModel: Bool,
         openRouterLiteModel: String = AIProviderSettings.defaultOpenRouterLiteModel,
         openRouterProModel: String = AIProviderSettings.defaultOpenRouterProModel,
         openRouterEmojiModel: String = AIProviderSettings.defaultOpenRouterEmojiModel,
         openRouterRoutingMode: String = OpenRouterRoutingMode.automatic.rawValue,
+        azureEndpoint: String = "",
+        azureSolDeployment: String = "",
+        azureTerraDeployment: String = "",
+        azureDefaultModel: String = AIProviderSettings.defaultAzureModel.rawValue,
+        chatContextBudget: String = ChatContextBudget.balanced.rawValue,
         useGeneratedFoodIconImages: Bool = false,
         offContributeEnabled: Bool,
         breakfastStartMinutes: Int = MealScheduleDefaults.breakfastStartMinutes,
@@ -651,11 +682,20 @@ struct AppSettingsRecord: Codable {
         dinnerStartMinutes: Int = MealScheduleDefaults.dinnerStartMinutes
     ) {
         self.aiProvider = aiProvider
+        self.assistantProvider = assistantProvider ?? aiProvider
+        self.assistantResearchProvider = assistantResearchProvider
+        self.tavilySearchDepth = tavilySearchDepth
+        self.parallelSearchMode = parallelSearchMode
         self.useProModel = useProModel
         self.openRouterLiteModel = openRouterLiteModel
         self.openRouterProModel = openRouterProModel
         self.openRouterEmojiModel = openRouterEmojiModel
         self.openRouterRoutingMode = openRouterRoutingMode
+        self.azureEndpoint = azureEndpoint
+        self.azureSolDeployment = azureSolDeployment
+        self.azureTerraDeployment = azureTerraDeployment
+        self.azureDefaultModel = azureDefaultModel
+        self.chatContextBudget = chatContextBudget
         self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
         self.offContributeEnabled = offContributeEnabled
         self.breakfastStartMinutes = breakfastStartMinutes
@@ -665,11 +705,20 @@ struct AppSettingsRecord: Codable {
 
     private enum CodingKeys: String, CodingKey {
         case aiProvider
+        case assistantProvider
+        case assistantResearchProvider
+        case tavilySearchDepth
+        case parallelSearchMode
         case useProModel
         case openRouterLiteModel
         case openRouterProModel
         case openRouterEmojiModel
         case openRouterRoutingMode
+        case azureEndpoint
+        case azureSolDeployment
+        case azureTerraDeployment
+        case azureDefaultModel
+        case chatContextBudget
         case useGeneratedFoodIconImages
         case offContributeEnabled
         case breakfastStartMinutes
@@ -680,11 +729,20 @@ struct AppSettingsRecord: Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         aiProvider = try container.decodeIfPresent(String.self, forKey: .aiProvider) ?? AIProviderSettings.defaultProvider.rawValue
+        assistantProvider = try container.decodeIfPresent(String.self, forKey: .assistantProvider) ?? aiProvider
+        assistantResearchProvider = try container.decodeIfPresent(String.self, forKey: .assistantResearchProvider) ?? AssistantResearchProvider.modelProvider.rawValue
+        tavilySearchDepth = try container.decodeIfPresent(String.self, forKey: .tavilySearchDepth) ?? TavilySearchDepth.fast.rawValue
+        parallelSearchMode = try container.decodeIfPresent(String.self, forKey: .parallelSearchMode) ?? ParallelSearchMode.basic.rawValue
         useProModel = try container.decodeIfPresent(Bool.self, forKey: .useProModel) ?? false
         openRouterLiteModel = try container.decodeIfPresent(String.self, forKey: .openRouterLiteModel) ?? AIProviderSettings.defaultOpenRouterLiteModel
         openRouterProModel = try container.decodeIfPresent(String.self, forKey: .openRouterProModel) ?? AIProviderSettings.defaultOpenRouterProModel
         openRouterEmojiModel = try container.decodeIfPresent(String.self, forKey: .openRouterEmojiModel) ?? AIProviderSettings.defaultOpenRouterEmojiModel
         openRouterRoutingMode = try container.decodeIfPresent(String.self, forKey: .openRouterRoutingMode) ?? OpenRouterRoutingMode.automatic.rawValue
+        azureEndpoint = try container.decodeIfPresent(String.self, forKey: .azureEndpoint) ?? ""
+        azureSolDeployment = try container.decodeIfPresent(String.self, forKey: .azureSolDeployment) ?? ""
+        azureTerraDeployment = try container.decodeIfPresent(String.self, forKey: .azureTerraDeployment) ?? ""
+        azureDefaultModel = try container.decodeIfPresent(String.self, forKey: .azureDefaultModel) ?? AIProviderSettings.defaultAzureModel.rawValue
+        chatContextBudget = try container.decodeIfPresent(String.self, forKey: .chatContextBudget) ?? ChatContextBudget.balanced.rawValue
         useGeneratedFoodIconImages = try container.decodeIfPresent(Bool.self, forKey: .useGeneratedFoodIconImages) ?? false
         offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false
         breakfastStartMinutes = try container.decodeIfPresent(Int.self, forKey: .breakfastStartMinutes) ?? MealScheduleDefaults.breakfastStartMinutes

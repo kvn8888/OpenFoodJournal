@@ -27,6 +27,18 @@ enum KeychainService {
     /// Gemini key so users can switch providers without overwriting secrets.
     static let openRouterAPIKeyAccount = "openrouter-api-key"
 
+    /// Azure OpenAI uses its own resource-scoped key. Keeping it in a distinct
+    /// account prevents provider switching or backups from exposing it.
+    static let azureOpenAIAPIKeyAccount = "azure-openai-api-key"
+
+    /// Tavily is an independent Assistant research provider. Its credential
+    /// is never shared with the selected conversation model or exported.
+    static let tavilyAPIKeyAccount = "tavily-api-key"
+
+    /// Parallel Search is independent from the conversation model and Tavily,
+    /// so it receives its own non-exportable Keychain account.
+    static let parallelAPIKeyAccount = "parallel-api-key"
+
     /// Optional Turso mirror credentials. These are user-owned debugging
     /// database secrets and must never be copied into UserDefaults or logs.
     static let tursoDatabaseURLAccount = "turso-database-url"
@@ -127,8 +139,39 @@ enum KeychainService {
         load(for: openRouterAPIKeyAccount)
     }
 
+    /// Quick check: does the user have an Azure OpenAI API key stored?
+    static var hasAzureOpenAIAPIKey: Bool {
+        load(for: azureOpenAIAPIKeyAccount) != nil
+    }
+
+    /// Retrieves the stored Azure OpenAI API key, if any.
+    static var azureOpenAIAPIKey: String? {
+        load(for: azureOpenAIAPIKeyAccount)
+    }
+
+    static var hasTavilyAPIKey: Bool {
+        load(for: tavilyAPIKeyAccount) != nil
+    }
+
+    static var tavilyAPIKey: String? {
+        load(for: tavilyAPIKeyAccount)
+    }
+
+    static var hasParallelAPIKey: Bool {
+        load(for: parallelAPIKeyAccount) != nil
+    }
+
+    static var parallelAPIKey: String? {
+        load(for: parallelAPIKeyAccount)
+    }
+
     /// Retrieves the API key for whichever provider is currently selected.
     static func apiKey(for provider: AIProvider) -> String? {
+        load(for: provider.keychainAccount)
+    }
+
+    /// Retrieves the API key for the independently selected Assistant provider.
+    static func apiKey(for provider: AssistantProvider) -> String? {
         load(for: provider.keychainAccount)
     }
 

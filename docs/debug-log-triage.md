@@ -25,7 +25,7 @@ The June 2026 scan-session log had one successful two-photo Gemini label scan, t
 
 The later June 2026 log was dominated by sequential Gemini Flash calls with tiny payloads and tiny JSON responses, matching Food Bank emoji backfill. The Gemini calls completed with HTTP 200, but every emoji attempt also inserted a `GeminiScanLog`, updated the cost accumulator, and saved SwiftData. Successful assignments then saved SwiftData again. With a large Food Bank, that produced a wall of CoreData/CloudKit export scheduling lines.
 
-Mitigation: Food emoji backfill now batches its Gemini diagnostic logs, cost updates, and emoji assignments. Normal scan/search logging still saves immediately; only the sequential backfill path defers persistence for a small batch so CloudKit is not asked to schedule an export for each individual emoji attempt.
+Current mitigation: detailed AI diagnostics no longer enter SwiftData/CloudKit. Scan/search/icon/Assistant events use a bounded local delivery outbox and append to the user-configured Turso diagnostic table; acknowledged events are removed from the device. Usage/cost aggregates and actual Food Bank assignments still save locally, and emoji backfill can batch those legitimate app-state writes.
 
 ## Classification Rules
 

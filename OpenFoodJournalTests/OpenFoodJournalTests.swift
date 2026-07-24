@@ -7,6 +7,7 @@
 
 import Testing
 import Foundation
+import SwiftData
 @testable import OpenFoodJournal
 
 struct OpenFoodJournalTests {
@@ -51,7 +52,156 @@ struct OpenFoodJournalTests {
             #expect(joined.contains("CREATE TABLE IF NOT EXISTS \(table.name)"))
         }
 
+        #expect(joined.contains("cached_input_token_count INTEGER"))
+        #expect(joined.contains("provider TEXT"))
         #expect(!joined.contains("ADD COLUMN IF NOT EXISTS"))
+    }
+
+    @Test func tursoDiagnosticsUseAnAppendOnlyTableOutsideGenerationMirroring() {
+        #expect(TursoSchema.tables.contains(where: { $0.name == "ofj_ai_diagnostic_events" }))
+        #expect(!TursoSchema.mirroredTableNames.contains("ofj_ai_diagnostic_events"))
+        #expect(TursoSchema.mirroredTableNames.contains("ofj_gemini_cost_accumulators"))
+    }
+
+    @Test func aiDiagnosticOutboxIsBoundedExpiresAndAcknowledgesEvents() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "ofj-ai-diagnostic-outbox-tests-(UUID().uuidString)", directoryHint: .isDirectory)
+        let fileURL = directory.appending(path: "outbox.json", directoryHint: .notDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = AIDiagnosticOutboxStore(
+            fileURL: fileURL,
+            maximumEvents: 2,
+            maximumBytes: 1_000_000,
+            maximumAge: 60
+        )
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let expired = AIDiagnosticEvent(
+            createdAt: now.addingTimeInterval(-61),
+            eventType: "assistant_span",
+            operation: "expired",
+            status: "completed"
+        )
+        let first = AIDiagnosticEvent(
+            createdAt: now.addingTimeInterval(-2),
+            eventType: "assistant_span",
+            operation: "first",
+            status: "completed"
+        )
+        let second = AIDiagnosticEvent(
+            createdAt: now.addingTimeInterval(-1),
+            eventType: "assistant_span",
+            operation: "second",
+            status: "completed"
+        )
+        let third = AIDiagnosticEvent(
+            createdAt: now,
+            eventType: "assistant_span",
+            operation: "third",
+            status: "completed"
+        )
+
+        store.append(expired, now: now)
+        store.append(first, now: now)
+        store.append(second, now: now)
+        store.append(third, now: now)
+
+        #expect(store.events(now: now).map(\.id) == [second.id, third.id])
+        #expect(store.remove(ids: Set([second.id])) == 1)
+        #expect(store.events(now: now).map(\.id) == [third.id])
+    }
+
+    @MainActor
+    @Test func remoteScanDiagnosticEnvelopeOmitsPromptsResponsesSourcesAndThinking() {
+        let log = GeminiScanLog(
+            operation: .scan,
+            status: .success,
+            provider: "gemini",
+            userPrompt: "private meal prompt",
+            requestPrompt: "private system request",
+            responseText: "private provider answer",
+            rawResponseJSON: #"{"secret":"raw"}"#,
+            modelAttemptsJSON: #"[{"secret":"attempt"}]"#,
+            groundingSourceURLs: ["https://private.example/source"],
+            groundingSourceTitles: ["Private title"],
+            groundingMetadataJSON: #"{"source":"private"}"#,
+            errorMessage: "private provider error body",
+            responseJSON: #"{"journal":"private"}"#,
+            thinkingTrace: ["private reasoning"]
+        )
+
+        let event = AIDiagnosticEvent(scanLog: log)
+        let payload = event.payloadJSON ?? ""
+
+        #expect(!payload.contains("private meal prompt"))
+        #expect(!payload.contains("private system request"))
+        #expect(!payload.contains("private provider answer"))
+        #expect(!payload.contains("private.example"))
+        #expect(!payload.contains("private reasoning"))
+        #expect(!payload.contains("secret"))
+        #expect(!payload.contains("journal"))
+        #expect(event.errorMessage == nil)
+    }
+
+    @MainActor
+    @Test func tursoDiagnosticFlushUsesAppendOnlyUpsertAndAcknowledgesOutbox() async throws {
+        let harness = try ChatTestHarness()
+        let suiteName = "ofj-turso-diagnostic-tests-(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: TursoMirrorService.enabledKey)
+        defaults.set(true, forKey: TursoMirrorService.includeDiagnosticsKey)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var requestBodies: [String] = []
+        StubChatURLProtocol.handler = { request in
+            requestBodies.append(String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-turso-token")
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            let data = #"{"results":[{"response":{"result":{"cols":[],"rows":[]}}},{"response":{}}]}"#
+                .data(using: .utf8)!
+            return (response, data)
+        }
+        defer { StubChatURLProtocol.handler = nil }
+
+        let service = TursoMirrorService(
+            modelContext: harness.context,
+            session: StubChatURLProtocol.session(),
+            defaults: defaults,
+            diagnosticOutboxURL: directory.appending(path: "outbox.json"),
+            credentialProvider: {
+                ("https://test-diagnostics.turso.io", "test-turso-token")
+            }
+        )
+        let event = AIDiagnosticEvent(
+            eventType: "assistant_span",
+            operation: "first_provider_event",
+            status: "completed",
+            providerID: "azureOpenAI",
+            baseModelID: "gpt-5.6-terra",
+            deploymentID: "terra-deployment",
+            runID: UUID(),
+            providerRequestID: "request-123",
+            durationMs: 321
+        )
+
+        service.recordDiagnostic(event)
+        #expect(service.pendingDiagnosticCount == 1)
+        #expect(await service.flushDiagnosticOutbox())
+        #expect(service.pendingDiagnosticCount == 0)
+        #expect(requestBodies.contains(where: {
+            $0.contains("INSERT INTO ofj_ai_diagnostic_events")
+                && $0.contains(event.id.uuidString)
+        }))
+        #expect(requestBodies.contains(where: {
+            $0.contains("DELETE FROM ofj_ai_diagnostic_events WHERE expires_at <= ?")
+        }))
     }
 
     @Test func tursoUpsertStatementUsesPlaceholders() {
@@ -95,6 +245,62 @@ struct OpenFoodJournalTests {
         #expect(record.breakfastStartMinutes == MealScheduleDefaults.breakfastStartMinutes)
         #expect(record.lunchStartMinutes == MealScheduleDefaults.lunchStartMinutes)
         #expect(record.dinnerStartMinutes == MealScheduleDefaults.dinnerStartMinutes)
+        #expect(record.assistantProvider == AIProviderSettings.defaultProvider.rawValue)
+        #expect(record.azureEndpoint.isEmpty)
+        #expect(record.azureSolDeployment.isEmpty)
+        #expect(record.azureTerraDeployment.isEmpty)
+        #expect(record.azureDefaultModel == AIProviderSettings.defaultAzureModel.rawValue)
+        #expect(record.chatContextBudget == ChatContextBudget.balanced.rawValue)
+        #expect(record.assistantResearchProvider == AssistantResearchProvider.modelProvider.rawValue)
+        #expect(record.tavilySearchDepth == TavilySearchDepth.fast.rawValue)
+        #expect(record.parallelSearchMode == ParallelSearchMode.basic.rawValue)
+    }
+
+    @Test func chatToolRecordPreservesGeminiReplayMetadata() throws {
+        let record = ChatToolRecord(
+            callID: "call_123",
+            thoughtSignature: "opaque-signature==",
+            modelTurnID: "model-turn-1",
+            modelTurnIndex: 0,
+            name: "read_journal",
+            argsJSON: #"{"date":"2026-07-20"}"#,
+            resultJSON: #"{"entries":[]}"#,
+            status: .completed,
+            summary: "Read journal"
+        )
+
+        let data = try JSONEncoder().encode(record)
+        let decoded = try JSONDecoder().decode(ChatToolRecord.self, from: data)
+
+        #expect(decoded.callID == "call_123")
+        #expect(decoded.thoughtSignature == "opaque-signature==")
+        #expect(decoded.modelTurnID == "model-turn-1")
+        #expect(decoded.modelTurnIndex == 0)
+    }
+
+    @Test func chatToolRecordDecodesLegacyPayloadWithoutGeminiReplayMetadata() throws {
+        let json = #"""
+        {
+            "callID": "legacy-call",
+            "name": "read_journal",
+            "argsJSON": "{}",
+            "resultJSON": "{}",
+            "status": "completed",
+            "summary": "Read journal"
+        }
+        """#.data(using: .utf8)!
+
+        let record = try JSONDecoder().decode(ChatToolRecord.self, from: json)
+
+        #expect(record.callID == "legacy-call")
+        #expect(record.thoughtSignature == nil)
+        #expect(record.modelTurnID == nil)
+        #expect(record.modelTurnIndex == nil)
+        #expect(record.providerContinuations == nil)
+        #expect(record.providerID == nil)
+        #expect(record.modelID == nil)
+        #expect(record.providerRequestID == nil)
+        #expect(record.sourceArtifactIDs == nil)
     }
 
     @Test func foodEmojiExtractionReturnsFirstEmojiOnly() throws {

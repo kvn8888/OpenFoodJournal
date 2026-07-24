@@ -12,6 +12,7 @@ struct TursoIntegrationSettingsView: View {
     @AppStorage(TursoMirrorService.lastSyncAtKey) private var lastSyncAtTimestamp: Double = 0
     @AppStorage(TursoMirrorService.lastErrorKey) private var lastError: String = ""
     @AppStorage(TursoMirrorService.lastRowCountKey) private var lastRowCount: Int = 0
+    @AppStorage(TursoMirrorService.lastDiagnosticUploadAtKey) private var lastDiagnosticUploadAtTimestamp: Double = 0
 
     @State private var databaseURLInput = ""
     @State private var authTokenInput = ""
@@ -67,7 +68,7 @@ struct TursoIntegrationSettingsView: View {
                     get: { includeDiagnostics },
                     set: setIncludeDiagnostics
                 )) {
-                    Label("Include Diagnostics", systemImage: "stethoscope")
+                    Label("Send AI Diagnostics", systemImage: "stethoscope")
                 }
 
                 Button {
@@ -93,7 +94,7 @@ struct TursoIntegrationSettingsView: View {
             } header: {
                 Text("Mirror")
             } footer: {
-                Text("OpenFoodJournal remains the source of truth. Turso is a push-only external mirror for your own SQL inspection and debugging.")
+                Text("Journal data uses a push-only snapshot mirror. AI diagnostics use append-only writes with 14-day retention and a bounded local delivery queue, making remote debugging possible without storing detailed logs in SwiftData or CloudKit.")
             }
 
             Section {
@@ -101,6 +102,8 @@ struct TursoIntegrationSettingsView: View {
                 LabeledContent("Credentials", value: hasCredentials ? "Saved" : "Missing")
                 LabeledContent("Last Successful Mirror", value: lastSyncText)
                 LabeledContent("Mirrored Rows", value: lastRowCount.formatted())
+                LabeledContent("Last Diagnostic Upload", value: lastDiagnosticUploadText)
+                LabeledContent("Diagnostics Pending", value: tursoMirror.pendingDiagnosticCount.formatted())
 
                 if !lastError.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
@@ -130,6 +133,12 @@ struct TursoIntegrationSettingsView: View {
     private var lastSyncText: String {
         guard lastSyncAtTimestamp > 0 else { return "Never" }
         let date = Date(timeIntervalSince1970: lastSyncAtTimestamp)
+        return date.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    private var lastDiagnosticUploadText: String {
+        guard lastDiagnosticUploadAtTimestamp > 0 else { return "Never" }
+        let date = Date(timeIntervalSince1970: lastDiagnosticUploadAtTimestamp)
         return date.formatted(date: .abbreviated, time: .shortened)
     }
 
@@ -170,6 +179,9 @@ struct TursoIntegrationSettingsView: View {
         databaseURLInput = normalizedURL
         authTokenInput = ""
         statusMessage = hasCredentials ? "Credentials saved." : "Credentials could not be saved."
+        if hasCredentials, tursoEnabled {
+            Task { await tursoMirror.migrateLegacyDiagnostics() }
+        }
     }
 
     private func removeCredentials() {
@@ -195,8 +207,8 @@ struct TursoIntegrationSettingsView: View {
     private func setIncludeDiagnostics(_ include: Bool) {
         tursoMirror.setIncludeDiagnostics(include)
         statusMessage = include
-            ? "Gemini logs and cost counters will be mirrored."
-            : "Gemini diagnostic tables will be cleared on the next mirror."
+            ? "New AI diagnostics will be written directly to Turso."
+            : "Remote diagnostics and pending delivery events are being cleared."
     }
 
     private func run(_ action: BusyAction) {
@@ -216,6 +228,8 @@ struct TursoIntegrationSettingsView: View {
                 case .syncNow:
                     try await tursoMirror.runMigrations()
                     await tursoMirror.mirrorAll(reason: "settings_sync_now")
+                    await tursoMirror.migrateLegacyDiagnostics()
+                    _ = await tursoMirror.flushDiagnosticOutbox()
                     statusMessage = tursoMirror.lastError == nil
                         ? "Mirror completed."
                         : "Mirror finished with an error. Check status below."

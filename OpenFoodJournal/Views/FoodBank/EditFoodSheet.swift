@@ -1,5 +1,5 @@
 // OpenFoodJournal — EditFoodSheet
-// Allows editing a SavedFood's name, brand, and core macros.
+// Allows editing a SavedFood's identity, macros, and micronutrients.
 // Presented from FoodBankView via swipe action or context menu.
 // Changes are saved to SwiftData.
 // AGPL-3.0 License
@@ -24,6 +24,8 @@ struct EditFoodSheet: View {
     @State private var carbs: String = ""
     @State private var fat: String = ""
     @State private var servingSize: String = ""
+    @State private var micronutrientValues: [String: String] = [:]
+    @State private var micronutrientUnits: [String: String] = [:]
     @State private var isOnShelf = false
     @State private var showDeleteConfirm = false
 
@@ -45,6 +47,38 @@ struct EditFoodSheet: View {
                     MacroField(label: "Protein", unit: "g", text: $protein)
                     MacroField(label: "Carbs", unit: "g", text: $carbs)
                     MacroField(label: "Fat", unit: "g", text: $fat)
+                }
+
+                Section("Micronutrients (per serving)") {
+                    ForEach(sortedMicronutrientKeys, id: \.self) { key in
+                        MicronutrientEditRow(
+                            label: KnownMicronutrients.nutrient(forID: key)?.name ?? key,
+                            value: Binding(
+                                get: { micronutrientValues[key] ?? "" },
+                                set: { micronutrientValues[key] = $0 }
+                            ),
+                            unit: Binding(
+                                get: { micronutrientUnits[key] ?? "" },
+                                set: { micronutrientUnits[key] = $0 }
+                            ),
+                            onDelete: {
+                                micronutrientValues.removeValue(forKey: key)
+                                micronutrientUnits.removeValue(forKey: key)
+                            }
+                        )
+                    }
+
+                    Menu {
+                        ForEach(availableMicronutrients) { nutrient in
+                            Button(nutrient.name) {
+                                micronutrientValues[nutrient.id] = "0"
+                                micronutrientUnits[nutrient.id] = nutrient.unit
+                            }
+                        }
+                    } label: {
+                        Label("Add Micronutrient", systemImage: "plus.circle")
+                    }
+                    .disabled(availableMicronutrients.isEmpty)
                 }
 
                 // Serving info
@@ -107,12 +141,28 @@ struct EditFoodSheet: View {
                 carbs = String(format: "%.1f", food.carbs)
                 fat = String(format: "%.1f", food.fat)
                 servingSize = food.servingSize ?? ""
+                micronutrientValues = food.micronutrients.mapValues {
+                    $0.value.formatted(.number.precision(.fractionLength(0...3)))
+                }
+                micronutrientUnits = food.micronutrients.mapValues(\.unit)
                 isOnShelf = food.isOnShelf
             }
         }
     }
 
     // MARK: - Save Changes
+
+    private var sortedMicronutrientKeys: [String] {
+        micronutrientValues.keys.sorted {
+            let first = KnownMicronutrients.nutrient(forID: $0)?.name ?? $0
+            let second = KnownMicronutrients.nutrient(forID: $1)?.name ?? $1
+            return first.localizedCaseInsensitiveCompare(second) == .orderedAscending
+        }
+    }
+
+    private var availableMicronutrients: [KnownMicronutrient] {
+        KnownMicronutrients.all.filter { micronutrientValues[$0.id] == nil }
+    }
 
     /// Apply buffered text field values back to the SwiftData model and sync
     private func saveChanges() {
@@ -123,12 +173,52 @@ struct EditFoodSheet: View {
         food.protein = Double(protein) ?? food.protein
         food.carbs = Double(carbs) ?? food.carbs
         food.fat = Double(fat) ?? food.fat
+        food.micronutrients = Dictionary(uniqueKeysWithValues:
+            sortedMicronutrientKeys.compactMap { key in
+                guard let value = Double(micronutrientValues[key] ?? ""),
+                      value.isFinite,
+                      value >= 0
+                else { return nil }
+                let unit = micronutrientUnits[key]?.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard let unit, !unit.isEmpty else { return nil }
+                return (key, MicronutrientValue(value: value, unit: unit))
+            }
+        )
         food.servingSize = servingSize.trimmingCharacters(in: .whitespaces).isEmpty
             ? nil : servingSize.trimmingCharacters(in: .whitespaces)
         food.isOnShelf = isOnShelf
 
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: "saved_food_updated")
+    }
+}
+
+private struct MicronutrientEditRow: View {
+    let label: String
+    @Binding var value: String
+    @Binding var unit: String
+    let onDelete: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: $value)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 68)
+                .accessibilityLabel("\(label) amount")
+            TextField("unit", text: $unit)
+                .textInputAutocapitalization(.never)
+                .multilineTextAlignment(.leading)
+                .frame(width: 48)
+                .accessibilityLabel("\(label) unit")
+            Button(role: .destructive, action: onDelete) {
+                Image(systemName: "minus.circle")
+                    .accessibilityLabel("Remove \(label)")
+            }
+            .buttonStyle(.plain)
+        }
     }
 }
 

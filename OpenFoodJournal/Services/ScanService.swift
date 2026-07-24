@@ -926,7 +926,7 @@ final class ScanService {
     // Image generation currently uses this concrete Gemini image endpoint; the
     // "latest alias only" rule above still applies to text scan/emoji models.
     private static let foodIconImageModel = "models/gemini-3.1-flash-lite-image"
-    private static let foodIconImageSystemInstruction = "Pure White background. 3d emoji. Simple. Center the food object. Do not include text, logos, or packaging labels."
+    private static let foodIconImageSystemInstruction = "Pure White background. 3d emoji. Simple. Center the food object. No text on the food items"
     // Public Gemini API Standard paid-tier pricing checked 2026-06-30. AI Studio
     // may show a lower studio/free estimate; persisted app estimates use the
     // documented paid API rates so the Settings total stays auditable.
@@ -938,6 +938,7 @@ final class ScanService {
     private static let foodIconStoredMaxPixelDimension: CGFloat = 160
     private static let foodIconStoredJPEGQuality = 0.82
     private static let foodIconStoredMimeType = "image/jpeg"
+    private static let foodIconTransparentMimeType = "image/png"
     // Gemini Interactions currently rejects the older "minimal" value for
     // thinking_level, including for the image model.
     private static let foodIconImageThinkingLevel = "low"
@@ -973,10 +974,19 @@ final class ScanService {
 
     @ObservationIgnored private let modelContext: ModelContext?
     @ObservationIgnored private let tursoMirror: TursoMirrorService?
+    @ObservationIgnored private let diagnosticSink: (any AIDiagnosticWriting)?
+    @ObservationIgnored private let modelCatalog: RuntimeModelCatalog?
 
-    init(modelContext: ModelContext? = nil, tursoMirror: TursoMirrorService? = nil) {
+    init(
+        modelContext: ModelContext? = nil,
+        tursoMirror: TursoMirrorService? = nil,
+        diagnosticSink: (any AIDiagnosticWriting)? = nil,
+        modelCatalog: RuntimeModelCatalog? = nil
+    ) {
         self.modelContext = modelContext
         self.tursoMirror = tursoMirror
+        self.diagnosticSink = diagnosticSink ?? tursoMirror
+        self.modelCatalog = modelCatalog
     }
 
     // MARK: Configuration
@@ -1844,6 +1854,35 @@ final class ScanService {
         }
     }
 
+    func pixelPassFoodIconImage(for food: SavedFood) async {
+        guard let modelContext else { return }
+        guard let data = food.generatedIconImageData, !data.isEmpty else {
+            foodEmojiProgressMessage = "Generate a food image before running Pixel Pass."
+            return
+        }
+
+        let currentIcon = GeneratedFoodIconImage(
+            data: data,
+            mimeType: food.generatedIconImageMimeType ?? "image/*"
+        )
+        guard let pixelPassedIcon = Self.pixelPassedTransparentFoodIconImage(from: currentIcon) else {
+            foodEmojiProgressMessage = "Pixel Pass could not process this image."
+            return
+        }
+
+        food.generatedIconImageData = pixelPassedIcon.data
+        food.generatedIconImageMimeType = pixelPassedIcon.mimeType
+        food.generatedIconImageUpdatedAt = .now
+
+        do {
+            try modelContext.save()
+            tursoMirror?.scheduleMirror(reason: "food_icon_image_pixel_pass")
+            foodEmojiProgressMessage = "Pixel Pass applied."
+        } catch {
+            foodEmojiProgressMessage = "Pixel Pass failed to save."
+        }
+    }
+
     private func apply(_ icon: GeneratedFoodIconImage, to food: SavedFood) {
         food.generatedIconImageData = icon.data
         food.generatedIconImageMimeType = icon.mimeType
@@ -2242,7 +2281,7 @@ final class ScanService {
         trace.absorb(attempt)
 
         #if DEBUG
-        print("🧠 Gemini food icon image complete bytes=\(icon.data.count) mime=\(icon.mimeType) duration=\(attempt.durationMs ?? 0)ms")
+        print("🧠 Gemini food icon image complete bytes=\(icon.data.count) mime=\(icon.mimeType) duration=\(attempt.durationMs ?? 0)ms \(Self.debugFoodIconImageCostSummary(imagePricing, attempt: attempt))")
         #endif
 
         return icon
@@ -2250,7 +2289,132 @@ final class ScanService {
 
     private static func optimizedStoredFoodIconImage(from icon: GeneratedFoodIconImage) -> GeneratedFoodIconImage? {
         guard let image = UIImage(data: icon.data) else { return nil }
+        guard let resized = resizedFoodIconImage(from: image, opaque: true, fillColor: .white) else {
+            return nil
+        }
 
+        guard let data = resized.jpegData(compressionQuality: foodIconStoredJPEGQuality) else {
+            return nil
+        }
+        return GeneratedFoodIconImage(data: data, mimeType: foodIconStoredMimeType)
+    }
+
+    private static func pixelPassedTransparentFoodIconImage(from icon: GeneratedFoodIconImage) -> GeneratedFoodIconImage? {
+        guard let image = UIImage(data: icon.data),
+              let resized = resizedFoodIconImage(from: image, opaque: false, fillColor: nil),
+              let cgImage = resized.cgImage else {
+            return nil
+        }
+
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0, height > 0 else { return nil }
+
+        let bytesPerPixel = 4
+        let bytesPerRow = width * bytesPerPixel
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
+        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
+
+        let didDrawImage = pixels.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress,
+                  let context = CGContext(
+                      data: baseAddress,
+                      width: width,
+                      height: height,
+                      bitsPerComponent: 8,
+                      bytesPerRow: bytesPerRow,
+                      space: colorSpace,
+                      bitmapInfo: bitmapInfo.rawValue
+                  ) else {
+                return false
+            }
+
+            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard didDrawImage else {
+            return nil
+        }
+
+        var visited = [Bool](repeating: false, count: width * height)
+        var queue: [Int] = []
+        queue.reserveCapacity(width * height)
+
+        func enqueue(_ x: Int, _ y: Int) {
+            guard x >= 0, x < width, y >= 0, y < height else { return }
+            let pixelIndex = y * width + x
+            guard !visited[pixelIndex] else { return }
+
+            if pixelPassBackgroundAlpha(pixels, byteIndex: pixelIndex * bytesPerPixel) != nil {
+                visited[pixelIndex] = true
+                queue.append(pixelIndex)
+            }
+        }
+
+        for x in 0..<width {
+            enqueue(x, 0)
+            enqueue(x, height - 1)
+        }
+        for y in 0..<height {
+            enqueue(0, y)
+            enqueue(width - 1, y)
+        }
+
+        var head = 0
+        while head < queue.count {
+            let pixelIndex = queue[head]
+            head += 1
+
+            let x = pixelIndex % width
+            let y = pixelIndex / width
+            enqueue(x + 1, y)
+            enqueue(x - 1, y)
+            enqueue(x, y + 1)
+            enqueue(x, y - 1)
+        }
+
+        var softShadowPixelCount = 0
+        for pixelIndex in queue {
+            let byteIndex = pixelIndex * bytesPerPixel
+            let outputAlpha = pixelPassBackgroundAlpha(pixels, byteIndex: byteIndex) ?? 0
+            if outputAlpha > 0 {
+                softShadowPixelCount += 1
+            }
+
+            pixels[byteIndex] = 0
+            pixels[byteIndex + 1] = 0
+            pixels[byteIndex + 2] = 0
+            pixels[byteIndex + 3] = outputAlpha
+        }
+
+        let outputData = Data(pixels)
+        guard let provider = CGDataProvider(data: outputData as CFData),
+              let outputImage = CGImage(
+                  width: width,
+                  height: height,
+                  bitsPerComponent: 8,
+                  bitsPerPixel: 32,
+                  bytesPerRow: bytesPerRow,
+                  space: colorSpace,
+                  bitmapInfo: bitmapInfo,
+                  provider: provider,
+                  decode: nil,
+                  shouldInterpolate: true,
+                  intent: .defaultIntent
+              ),
+              let pngData = UIImage(cgImage: outputImage, scale: 1, orientation: .up).pngData() else {
+            return nil
+        }
+
+        #if DEBUG
+        print("🧪 Food icon Pixel Pass backgroundPixels=\(queue.count)/\(width * height) softShadowPixels=\(softShadowPixelCount) bytes=\(icon.data.count)->\(pngData.count)")
+        #endif
+
+        return GeneratedFoodIconImage(data: pngData, mimeType: foodIconTransparentMimeType)
+    }
+
+    private static func resizedFoodIconImage(from image: UIImage, opaque: Bool, fillColor: UIColor?) -> UIImage? {
         let pixelWidth = image.size.width * image.scale
         let pixelHeight = image.size.height * image.scale
         let longest = max(pixelWidth, pixelHeight)
@@ -2264,18 +2428,40 @@ final class ScanService {
 
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
-        format.opaque = true
+        format.opaque = opaque
         let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
-        let resized = renderer.image { context in
-            UIColor.white.setFill()
-            context.fill(CGRect(origin: .zero, size: targetSize))
+        return renderer.image { context in
+            if let fillColor {
+                fillColor.setFill()
+                context.fill(CGRect(origin: .zero, size: targetSize))
+            }
             image.draw(in: CGRect(origin: .zero, size: targetSize))
         }
+    }
 
-        guard let data = resized.jpegData(compressionQuality: foodIconStoredJPEGQuality) else {
+    private static func pixelPassBackgroundAlpha(_ pixels: [UInt8], byteIndex: Int) -> UInt8? {
+        let alpha = Int(pixels[byteIndex + 3])
+        guard alpha >= 12 else { return 0 }
+
+        let red = Int(pixels[byteIndex])
+        let green = Int(pixels[byteIndex + 1])
+        let blue = Int(pixels[byteIndex + 2])
+        let darkestChannel = min(red, green, blue)
+        let brightestChannel = max(red, green, blue)
+        let distanceFromWhite = max(255 - red, 255 - green, 255 - blue)
+
+        guard darkestChannel >= 185,
+              brightestChannel - darkestChannel <= 44 else {
             return nil
         }
-        return GeneratedFoodIconImage(data: data, mimeType: foodIconStoredMimeType)
+
+        let transparentDistance = 5
+        guard distanceFromWhite > transparentDistance else { return 0 }
+
+        let rampDistance = 82.0
+        let ramp = min(1, Double(distanceFromWhite - transparentDistance) / rampDistance)
+        let eased = ramp * ramp * (3 - 2 * ramp)
+        return UInt8((eased * 96).rounded())
     }
 
     nonisolated static func extractFoodEmoji(from raw: String) -> String? {
@@ -3032,6 +3218,11 @@ final class ScanService {
 
         if let model = chunk.model, model != attempt.model {
             attempt.modelVersion = model
+            modelCatalog?.observeResolvedModel(
+                provider: .openRouter,
+                requestedModelID: attempt.model,
+                resolvedModelID: model
+            )
         }
         if let usage = chunk.usage {
             applyOpenRouterUsageMetadata(usage, to: &attempt)
@@ -3104,6 +3295,16 @@ final class ScanService {
         attempt: inout GeminiModelAttemptLog
     ) throws {
         attempt.streamEventCount += 1
+
+        if let model = event.interaction?.model, model != attempt.model {
+            attempt.modelVersion = model
+            modelCatalog?.observeResolvedModel(
+                provider: .gemini,
+                requestedModelID: attempt.model,
+                resolvedModelID: model
+            )
+        }
+
         applyInteractionUsageMetadata(event.usage, to: &attempt)
         applyInteractionUsageMetadata(event.interaction?.usage, to: &attempt)
         applyInteractionUsageMetadata(event.metadata?.totalUsage, to: &attempt)
@@ -3111,10 +3312,6 @@ final class ScanService {
         if let apiError = event.error {
             attempt.parseStage = "interaction_stream_error"
             throw ScanError.serverError(apiError.code ?? 500, apiError.message ?? "Unknown Gemini error")
-        }
-
-        if let model = event.interaction?.model, model != attempt.model {
-            attempt.modelVersion = model
         }
 
         if let stepType = event.step?.type, stepType.contains("google_search") {
@@ -3247,6 +3444,24 @@ final class ScanService {
         let pricingModel: String
     }
 
+    #if DEBUG
+    private static func debugFoodIconImageCostSummary(
+        _ pricing: FoodIconImagePricingResult,
+        attempt: GeminiModelAttemptLog
+    ) -> String {
+        let cost = String(
+            format: "$%.6f",
+            locale: Locale(identifier: "en_US_POSIX"),
+            pricing.estimatedTotalCostUSD
+        )
+        let outputTokenText = pricing.reportedOutputTokens > 0
+            ? "outputTokens=\(pricing.reportedOutputTokens)"
+            : "outputTokens=\(pricing.billableImageOutputTokens) fallbackOutputTokens=true"
+
+        return "estimatedCost=\(cost) inputTokens=\(pricing.reportedInputTokens) \(outputTokenText) thinkingTokens=\(attempt.thinkingTokenCount) totalTokens=\(attempt.totalTokenCount)"
+    }
+    #endif
+
     private func applyFoodIconImagePricing(
         from responseData: Data,
         to attempt: inout GeminiModelAttemptLog
@@ -3305,6 +3520,16 @@ final class ScanService {
         inputTokens: Int,
         outputTokens: Int
     ) -> GeminiPricingEstimate {
+        if let pricing = modelCatalog?.pricing(
+            provider: .gemini,
+            modelID: modelIdentifier
+        ) {
+            return pricingEstimate(
+                pricing,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens
+            )
+        }
         let normalized = modelIdentifier.lowercased()
         let inputRate: Double
         let outputRate: Double
@@ -3349,6 +3574,16 @@ final class ScanService {
         inputTokens: Int,
         outputTokens: Int
     ) -> GeminiPricingEstimate {
+        if let pricing = modelCatalog?.pricing(
+            provider: .openRouter,
+            modelID: modelIdentifier
+        ) {
+            return pricingEstimate(
+                pricing,
+                inputTokens: inputTokens,
+                outputTokens: outputTokens
+            )
+        }
         let normalized = modelIdentifier.lowercased()
         guard normalized.contains("gemini") || normalized.contains("google/") else {
             return GeminiPricingEstimate(
@@ -3371,6 +3606,28 @@ final class ScanService {
             estimatedCostUSD: geminiEstimate.estimatedCostUSD
         )
         return geminiEstimate
+    }
+
+    private func pricingEstimate(
+        _ pricing: ChatModelPricing,
+        inputTokens: Int,
+        outputTokens: Int
+    ) -> GeminiPricingEstimate {
+        let isLongContext = pricing.longContextThreshold
+            .map { inputTokens > $0 } ?? false
+        let inputRate = pricing.inputPerMillionUSD
+            * (isLongContext ? pricing.longContextInputMultiplier : 1)
+        let outputRate = pricing.outputPerMillionUSD
+            * (isLongContext ? pricing.longContextOutputMultiplier : 1)
+        return GeminiPricingEstimate(
+            pricingModel: pricing.source,
+            inputRatePerMillionTokens: inputRate,
+            outputRatePerMillionTokens: outputRate,
+            estimatedCostUSD: pricing.estimatedCost(for: ChatTokenUsage(
+                input: inputTokens,
+                output: outputTokens
+            ))
+        )
     }
 
     private func extractJSONObjectText(from text: String) -> String {
@@ -3611,8 +3868,6 @@ final class ScanService {
         error: Error? = nil,
         persistImmediately: Bool = true
     ) {
-        guard let modelContext else { return }
-
         let cleanedPrompt = userPrompt?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .nilIfEmpty
@@ -3620,6 +3875,7 @@ final class ScanService {
         let log = GeminiScanLog(
             operation: operation,
             status: status,
+            provider: loggedAIProvider(from: debugTrace),
             scanMode: scanMode?.rawValue,
             primaryModel: primaryModel,
             fallbackModel: fallbackModel,
@@ -3669,16 +3925,35 @@ final class ScanService {
             osVersion: UIDevice.current.systemVersion
         )
 
-        modelContext.insert(log)
-        recordGeminiCost(debugTrace, status: status, in: modelContext)
-        GeminiScanLog.pruneExpired(in: modelContext)
-        guard persistImmediately else { return }
-        do {
-            try modelContext.save()
-            tursoMirror?.scheduleMirror(reason: "gemini_log_saved")
-        } catch {
-            // Preserve diagnostics as best-effort; scan/search UI should not fail on logging.
+        diagnosticSink?.recordDiagnostic(AIDiagnosticEvent(scanLog: log))
+
+        if let modelContext {
+            recordGeminiCost(debugTrace, status: status, in: modelContext)
+            guard persistImmediately else { return }
+            do {
+                try modelContext.save()
+                // Usage aggregates remain part of the optional data mirror.
+                tursoMirror?.scheduleMirror(reason: "ai_usage_saved")
+            } catch {
+                // Usage accounting is best-effort and must never break scanning.
+            }
         }
+    }
+
+    /// Request metadata is already sanitized before persistence. Reading the
+    /// provider from that payload keeps direct-Gemini image work accurate even
+    /// when the user's general scan provider is OpenRouter.
+    private func loggedAIProvider(from trace: GeminiCallTrace?) -> String? {
+        guard
+            let json = trace?.requestMetadataJSON,
+            let data = json.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let provider = object["aiProvider"] as? String,
+            !provider.isEmpty
+        else {
+            return selectedAIProvider.rawValue
+        }
+        return provider
     }
 
     private func recordGeminiCost(

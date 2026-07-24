@@ -4,7 +4,7 @@
 
 ```
 MacrosApp
-└─ ContentView (TabView, 3 tabs, .tabBarMinimizeBehavior(.onScrollDown))
+└─ ContentView (TabView, 5 tabs, .tabBarMinimizeBehavior(.onScrollDown))
    ├─ "Journal" → DailyLogView
    │  ├─ DateSelectorView (chevrons, "Today"/"Yesterday" labels)
    │  ├─ MacroSummaryBar (glass card, calorie headline, 3× MacroRingView)
@@ -90,10 +90,18 @@ enum DailyLogSheet: Identifiable {
 - MacroChartView: segmented picker (cal/protein/carbs/fat), stat pills (avg, goal, vs goal %), bar marks with goal RuleMark
 
 ### SettingsView (`Views/Settings/SettingsView.swift`)
-- **Data exports**: spreadsheet CSV via `NutritionStore.exportCSV()`, restore-grade JSON backup via `NutritionStore.exportBackup(...)`, and Gemini diagnostics CSV via `GeminiScanLog.exportCSV(from:)`
-- **Gemini logs**: export includes scan and AI Search logs from the last 30 days; empty state shows a "No Gemini logs" alert
+- **Data exports**: spreadsheet CSV via `NutritionStore.exportCSV()`, restore-grade JSON backup via `NutritionStore.exportBackup(...)`, and redacted Turso diagnostics CSV via `TursoMirrorService.exportDiagnosticCSV()`
+- **AI logs**: export flushes the bounded delivery outbox and reads scan, AI Search, icon-generation, Assistant, and research diagnostics from Turso's 14-day append-only event table; empty/missing-configuration state shows a "No AI logs" alert
+- **Assistant web research**: separate Model Provider/Tavily/Parallel picker. Tavily exposes Keychain-backed save/remove, fast/balanced/deep depth, a zero-search `/usage` connection test, and key-management link. Parallel exposes its own Keychain key, Turbo/Basic/Advanced mode, and an explicitly billed Turbo Test Search because no free credential-health endpoint is documented.
 - **Gemini usage**: shows estimated token cost, request counts, input/output/thinking tokens, grounded AI Search prompt count, last estimate, and a reset action backed by `GeminiCostAccumulator`
 - **Apple Health**: shows pending HealthKit sync count and a "Sync Missing Nutrition to Apple Health" backfill action for unsynced/stale `NutritionEntry` rows
+
+### ChatView (`Views/Chat/ChatView.swift`)
+- Observes the active thread through a message-level `@Query`; do not derive the transcript only from the thread relationship because CloudKit relationship merges can lag direct message insertion.
+- Button and keyboard sends share synchronous `ChatService.submit(...)`, which makes the user bubble and queued activity visible in the same UI frame.
+- The live glass run card shows persisted phase, elapsed time, real reasoning summaries, grouped tools, Stop, Retry, and suspended Continue. It never displays fabricated chain-of-thought, percentages, or synthetic progress.
+- The context panel shows a frozen next-request estimate while streaming, selected cap, output/tool reserves, provider-reported input/cached input, and compaction/pruning/cache-reconciliation notes.
+- Completed-run disclosures expose rounds, TTFT, tool duration, usage/cost, retries, and request IDs. Other tabs show a compact global Assistant banner; the Assistant tab and originating conversation retain an active marker.
 
 ### Shared Components
 | Component | File | Purpose |

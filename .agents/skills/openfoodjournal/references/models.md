@@ -166,16 +166,17 @@ struct CalculatorSelection: Identifiable, Codable, Hashable, Sendable {
 
 Portion labels are runtime user data. The app must not hard-code a fixed list such as "little/normal/extra"; users can enter whatever labels a restaurant or brand exposes, and build-time quantity multipliers handle double portions or multiple scoops.
 
-## GeminiScanLog (`OpenFoodJournal/Models/GeminiScanLog.swift`)
+## Legacy AI diagnostic models (`GeminiScanLog.swift`, `ChatModels.swift`)
 
 ```swift
 @Model final class GeminiScanLog {
-    static let exportWindowDays = 30
+    static let retentionDays = 14
 
     var id: UUID
     var createdAt: Date
-    var operation: GeminiScanLogOperation  // scan or aiSearch
+    var operation: GeminiScanLogOperation  // scan, aiSearch, icon work, or assistantChat
     var status: GeminiScanLogStatus        // success or failure
+    var provider: String?
     var scanMode: String?
     var primaryModel: String?
     var fallbackModel: String?
@@ -197,6 +198,7 @@ Portion labels are runtime user data. The app must not hard-code a fixed list su
     var rawResponseJSON: String?
     var modelAttemptsJSON: String?
     var inputTokenCount: Int
+    var cachedInputTokenCount: Int
     var outputTokenCount: Int
     var thinkingTokenCount: Int
     var totalTokenCount: Int
@@ -218,7 +220,37 @@ Portion labels are runtime user data. The app must not hard-code a fixed list su
 }
 ```
 
-Gemini logs are diagnostics for scan and AI Search calls. They are pruned/exported on a 30-day window and intentionally exclude API keys, URL keys, base64 image payloads, and raw image bytes. Image logging is limited to dimensions, JPEG quality, and byte counts.
+`GeminiScanLog` and `ChatDiagnosticSpan` remain registered in the SwiftData model
+container only so older local/CloudKit records can decode and migrate. New
+detailed events are never inserted into either model. On launch/foreground,
+`TursoMirrorService.migrateLegacyDiagnostics()` converts existing rows to
+redacted `AIDiagnosticEvent` envelopes, uploads them, and deletes the legacy
+rows locally only after acknowledged Turso writes.
+
+## AIDiagnosticEvent (`OpenFoodJournal/Models/AIDiagnosticEvent.swift`)
+
+Provider-neutral, Codable envelope written to Turso's append-only
+`ofj_ai_diagnostic_events` table. It carries stable event/run/thread/turn/call/
+request IDs, provider/model/deployment, timing, token/cost, HTTP/error, build,
+and bounded operational metadata. It deliberately excludes prompts, answers,
+journal/HealthKit values, source URLs/content, attachments, raw provider bodies,
+image bytes, and chain-of-thought. Each event receives a 14-day `expiresAt`.
+
+`AIDiagnosticOutboxStore` is not an `@Model`: it is a protected, backup-excluded
+delivery file capped at 500 events, 2 MiB, and 48 hours. Successful Turso UUID
+upserts remove acknowledged rows immediately.
+
+## Assistant Runtime Models (`OpenFoodJournal/Models/ChatModels.swift`)
+
+- `ChatMessage` persists a deterministic `transcriptOrdinal` and optional `runID` so direct message queries remain stable across legacy and CloudKit merges.
+- `ChatAgentRun` is the durable run coordinator record. It stores the trigger/boundary, provider/model provenance, phase and timestamps, partial visible answer, pending calls/continuations, retryable failure, terminal outcome, and per-round usage/cost records.
+- `ChatToolRecord` stores queued/running/interrupted/cancelled/completed/denied/failed state, provider call/model-turn order, run ID, timings, arguments/results, and continuation metadata.
+- `ChatContextCheckpoint` and `ChatSourceArtifact` keep provider-neutral compacted context and versioned research/attachment evidence without deleting the original transcript.
+- `ChatToolExecutionRecord` is the exactly-once ledger for writes across retry, relaunch, and provider interruption.
+- `ChatDiagnosticSpan` is a legacy compatibility model. Runtime timing/transport telemetry is converted directly to `AIDiagnosticEvent` and sent to Turso instead of inserting a span into SwiftData/CloudKit.
+- `ChatUsageDailyAggregate` retains daily usage and known cost by provider/model/deployment after detailed diagnostics expire.
+
+All Assistant models are CloudKit-safe: stored properties have defaults or are optional, and model relationships do not use uniqueness constraints.
 
 ## GeminiCostAccumulator (`OpenFoodJournal/Models/GeminiCostAccumulator.swift`)
 
@@ -243,7 +275,7 @@ Gemini logs are diagnostics for scan and AI Search calls. They are pruned/export
 }
 ```
 
-Singleton-style local accumulator for estimated Gemini token cost. It is updated by `ScanService` from Gemini `usageMetadata`, using local Standard paid-tier rates checked 2026-06-19. It intentionally does not include Google Search grounding fees because the API response does not expose the actual billable search query count.
+Singleton-style local accumulator for Assistant and scan token cost. Provider-reported concrete model IDs are priced through the cached models.dev catalog when available; the dated shipped catalog is the offline fallback. It intentionally does not include Google Search grounding fees because the API response does not expose the actual billable search query count.
 
 ## UserGoals (`OpenFoodJournal/Models/UserGoals.swift`)
 

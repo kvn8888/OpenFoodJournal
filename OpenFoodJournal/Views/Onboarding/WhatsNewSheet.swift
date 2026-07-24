@@ -21,6 +21,13 @@ struct WhatsNewSheet: View {
                     // Feature list — one FeatureRow per new capability
                     VStack(spacing: 24) {
                         FeatureRow(
+                            icon: "sparkles",
+                            color: .indigo,
+                            title: "Meet the Assistant",
+                            description: "A new tab for AI chat over your nutrition data. It reads your journal, logs food with your approval, searches the web, and builds calculators from menus and PDFs."
+                        )
+
+                        FeatureRow(
                             icon: "refrigerator",
                             color: .green,
                             title: "More Food Bank Tools",
@@ -76,8 +83,8 @@ struct WhatsNewSheet: View {
     /// Version badge and introductory text at the top of the sheet
     private var headerSection: some View {
         VStack(spacing: 12) {
-            // Version pill — shows the current release number
-            Text("Version 1.3")
+            // Version pill — shows the current release number from Info.plist
+            Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.3")")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
