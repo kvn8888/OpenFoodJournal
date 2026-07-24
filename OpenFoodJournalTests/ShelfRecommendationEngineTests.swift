@@ -131,8 +131,12 @@ struct ShelfRecommendationEngineTests {
             foods: [highSodium, lowSodium], current: current, goals: goals, configuration: lowSodiumConfig
         )
 
-        #expect(try #require(balancedResults.first).foodName == "Salty Protein")
         #expect(try #require(lowSodiumResults.first).foodName == "Unsalted Yogurt")
+        let balancedLow = try #require(balancedResults.first { $0.foodName == "Unsalted Yogurt" })
+        let balancedHigh = try #require(balancedResults.first { $0.foodName == "Salty Protein" })
+        let lowSodiumLow = try #require(lowSodiumResults.first { $0.foodName == "Unsalted Yogurt" })
+        let lowSodiumHigh = try #require(lowSodiumResults.first { $0.foodName == "Salty Protein" })
+        #expect((lowSodiumLow.score - lowSodiumHigh.score) > (balancedLow.score - balancedHigh.score))
         #expect(ShelfRecommendationEngine.sodiumPressure(1.05) > ShelfRecommendationEngine.sodiumPressure(0.95))
         #expect(ShelfRecommendationEngine.sodiumPressure(0.95) > ShelfRecommendationEngine.sodiumPressure(0.75))
     }

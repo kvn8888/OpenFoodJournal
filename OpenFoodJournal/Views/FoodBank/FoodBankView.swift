@@ -30,6 +30,7 @@ struct FoodBankView: View {
     @State private var selectedLog: FoodBankLogSelection?
     @State private var foodToEdit: SavedFood?          // For the edit sheet
     @State private var addSheet: FoodBankAddSheet?
+    @State private var areShelfSuggestionsExpanded = true
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var foodIconGenerationEnabled = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages = false
 
@@ -212,30 +213,58 @@ struct FoodBankView: View {
 
             if !shelfRecommendations.isEmpty {
                 Section {
-                    ForEach(shelfRecommendations) { recommendation in
-                        if let food = allFoods.first(where: { $0.id == recommendation.foodID }) {
-                            Button {
-                                selectedLog = .suggestion(food, recommendation)
-                            } label: {
-                                ShelfSuggestionRow(food: food, recommendation: recommendation)
+                    if areShelfSuggestionsExpanded {
+                        ForEach(shelfRecommendations) { recommendation in
+                            if let food = allFoods.first(where: { $0.id == recommendation.foodID }) {
+                                Button {
+                                    selectedLog = .suggestion(food, recommendation)
+                                } label: {
+                                    ShelfSuggestionRow(food: food, recommendation: recommendation)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityElement(children: .ignore)
+                                .accessibilityLabel(recommendation.foodName)
+                                .accessibilityValue(
+                                    "Recommended \(recommendation.quantityText) \(recommendation.unit). \(recommendation.reason)." +
+                                    (recommendation.hasIncompleteNutrition ? " Nutrition incomplete." : "")
+                                )
+                                .accessibilityHint("Opens an editable food log with the recommended quantity.")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityElement(children: .ignore)
-                            .accessibilityLabel(recommendation.foodName)
-                            .accessibilityValue(
-                                "Recommended \(recommendation.quantityText) \(recommendation.unit). \(recommendation.reason)." +
-                                (recommendation.hasIncompleteNutrition ? " Nutrition incomplete." : "")
-                            )
-                            .accessibilityHint("Opens an editable food log with the recommended quantity.")
                         }
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
                 } header: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Shelf Suggestions")
-                        Text("Good fits from foods you have at home")
-                            .font(.caption)
-                            .textCase(nil)
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) {
+                            areShelfSuggestionsExpanded.toggle()
+                        }
+                    } label: {
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Shelf Suggestions")
+                                    .font(.headline)
+                                Text("Good fits from foods you have at home")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .rotationEffect(.degrees(areShelfSuggestionsExpanded ? 180 : 0))
+                                .accessibilityHidden(true)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        .contentShape(.rect)
                     }
+                    .buttonStyle(.plain)
+                    .textCase(nil)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Shelf Suggestions")
+                    .accessibilityValue(areShelfSuggestionsExpanded ? "Expanded" : "Collapsed")
+                    .accessibilityHint("Double tap to show or hide food suggestions.")
                 }
             }
 
@@ -299,6 +328,14 @@ struct FoodBankView: View {
                     regenerateFoodIcon(for: food)
                 } label: {
                     Label(foodIconActionTitle(for: food), systemImage: useGeneratedFoodIconImages ? "photo.badge.plus" : "sparkles")
+                }
+            }
+
+            if food.hasGeneratedFoodIconImage {
+                Button {
+                    pixelPassFoodIcon(for: food)
+                } label: {
+                    Label("Pixel Pass", systemImage: "wand.and.sparkles")
                 }
             }
 
@@ -458,6 +495,12 @@ struct FoodBankView: View {
             } else {
                 await scanService.refreshFoodEmoji(for: food)
             }
+        }
+    }
+
+    private func pixelPassFoodIcon(for food: SavedFood) {
+        Task {
+            await scanService.pixelPassFoodIconImage(for: food)
         }
     }
 

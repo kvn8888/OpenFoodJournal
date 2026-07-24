@@ -87,6 +87,20 @@ final class TrackedContainer {
 // MARK: - Computed Properties
 
 extension TrackedContainer {
+    /// Returns the end weight from the most recently completed tracking record
+    /// for a Food Bank item. This becomes the next tracking record's start weight.
+    static func mostRecentEndWeight(
+        for savedFoodID: UUID,
+        in containers: [TrackedContainer]
+    ) -> Double? {
+        containers
+            .filter { $0.savedFoodID == savedFoodID && $0.finalWeight != nil }
+            .max {
+                ($0.completedDate ?? $0.startDate) < ($1.completedDate ?? $1.startDate)
+            }?
+            .finalWeight
+    }
+
     /// Whether this container is still being tracked (no final weight entered yet)
     var isActive: Bool {
         finalWeight == nil

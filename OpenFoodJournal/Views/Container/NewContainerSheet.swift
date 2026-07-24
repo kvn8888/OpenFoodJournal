@@ -97,16 +97,13 @@ struct NewContainerSheet: View {
     }
 
     /// The latest completed end weight for the selected food, used as the next
-    /// container weight placeholder when continuing the same physical container.
+    /// container's editable starting weight.
     private var selectedFoodLastEndWeight: Double? {
-        guard let selectedFood,
-              let container = lastCompletedContainer(for: selectedFood) else { return nil }
-        return container.finalWeight
-    }
-
-    private var startWeightPlaceholder: String {
-        guard let selectedFoodLastEndWeight else { return "e.g. 500" }
-        return formatWeight(selectedFoodLastEndWeight)
+        guard let selectedFood else { return nil }
+        return TrackedContainer.mostRecentEndWeight(
+            for: selectedFood.id,
+            in: allContainers
+        )
     }
 
     var body: some View {
@@ -130,6 +127,9 @@ struct NewContainerSheet: View {
                     Spacer()
                     Button("Done") { focusedField = false }
                 }
+            }
+            .onChange(of: selectedFood?.id, initial: true) {
+                prefillStartWeightFromHistory()
             }
         }
     }
@@ -223,7 +223,7 @@ struct NewContainerSheet: View {
                         .foregroundStyle(.secondary)
 
                     HStack {
-                        TextField(startWeightPlaceholder, text: $startWeightText)
+                        TextField("e.g. 500", text: $startWeightText)
                             .keyboardType(.decimalPad)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
                             .focused($focusedField)
@@ -326,12 +326,12 @@ struct NewContainerSheet: View {
         }
     }
 
-    private func lastCompletedContainer(for food: SavedFood) -> TrackedContainer? {
-        allContainers
-            .filter { $0.savedFoodID == food.id && $0.finalWeight != nil }
-            .max {
-                ($0.completedDate ?? $0.startDate) < ($1.completedDate ?? $1.startDate)
-            }
+    private func prefillStartWeightFromHistory() {
+        guard selectedFood != nil else {
+            startWeightText = ""
+            return
+        }
+        startWeightText = selectedFoodLastEndWeight.map(formatWeight) ?? ""
     }
 
     private func formatWeight(_ weight: Double) -> String {
