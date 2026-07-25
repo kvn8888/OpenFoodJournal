@@ -196,7 +196,7 @@ struct ChatToolTests {
     }
 
     @Test func logEntryRequiresApprovalAndPersistsJournalEntry() async throws {
-        let harness = try ChatTestHarness()
+        let harness = try ChatTestHarness(healthSyncEnabled: true)
         let record = try #require(await harness.runTool("log_entry", args: .object([
             "name": .string("Egg Sandwich"), "brand": .string("Cafe"),
             "calories": .number(420), "protein": .number(24),
@@ -208,6 +208,7 @@ struct ChatToolTests {
             "serving_description": .string("1 sandwich"),
         ])))
         let entry = try #require(harness.nutritionStore.fetchAllEntries().first)
+        await Self.waitUntil { harness.health.syncedEntryIDs.contains(entry.id) }
 
         #expect(record.status == .completed)
         #expect(entry.name == "Egg Sandwich")
@@ -216,16 +217,19 @@ struct ChatToolTests {
         #expect(entry.calories == 420)
         #expect(entry.micronutrients["iron"]?.value == 3.5)
         #expect(harness.permissions.requests.last?.title == "Log to Journal")
+        #expect(harness.health.syncedEntryIDs == [entry.id])
     }
 
     @Test func updateEntryChangesOnlyRequestedFields() async throws {
-        let harness = try ChatTestHarness()
+        let harness = try ChatTestHarness(healthSyncEnabled: true)
         let entry = Self.entry(name: "Toast", meal: .breakfast, calories: 100, protein: 3)
         entry.micronutrients = [
             "iron": MicronutrientValue(value: 1, unit: "mg"),
             "sodium": MicronutrientValue(value: 220, unit: "mg"),
         ]
         harness.nutritionStore.log(entry, to: .now)
+        await Self.waitUntil { harness.health.syncedEntryIDs.contains(entry.id) }
+        harness.health.resetNutritionMutations()
 
         let record = try #require(await harness.runTool("update_entry", args: .object([
             "entry_id": .string(entry.id.uuidString),
@@ -236,6 +240,7 @@ struct ChatToolTests {
             ]),
             "remove_micronutrients": .array([.string("Sodium")]),
         ])))
+        await Self.waitUntil { harness.health.syncedEntryIDs.contains(entry.id) }
 
         #expect(record.status == .completed)
         #expect(entry.name == "Toast with Butter")
@@ -243,22 +248,48 @@ struct ChatToolTests {
         #expect(entry.protein == 3)
         #expect(entry.micronutrients["iron"]?.value == 2)
         #expect(entry.micronutrients["sodium"] == nil)
+        #expect(harness.health.syncedEntryIDs == [entry.id])
     }
 
     @Test func deleteEntryRemovesOnlySelectedEntry() async throws {
-        let harness = try ChatTestHarness()
+        let harness = try ChatTestHarness(healthSyncEnabled: true)
         let doomed = Self.entry(name: "Delete Me")
         let retained = Self.entry(name: "Keep Me")
         harness.nutritionStore.log(doomed, to: .now)
         harness.nutritionStore.log(retained, to: .now)
+        await Self.waitUntil {
+            harness.health.syncedEntryIDs.contains(doomed.id) &&
+            harness.health.syncedEntryIDs.contains(retained.id)
+        }
+        harness.health.resetNutritionMutations()
 
         let record = try #require(await harness.runTool(
             "delete_entry",
             args: .object(["entry_id": .string(doomed.id.uuidString)])
         ))
+        await Self.waitUntil { harness.health.deletedEntryIDs.contains(doomed.id) }
 
         #expect(record.status == .completed)
         #expect(harness.nutritionStore.fetchAllEntries().map(\.name) == ["Keep Me"])
+        #expect(harness.health.deletedEntryIDs == [doomed.id])
+    }
+
+    @Test func assistantJournalWriteDoesNotExportWhenAppleHealthIsDisabled() async throws {
+        let harness = try ChatTestHarness(healthSyncEnabled: false)
+        _ = try #require(await harness.runTool("log_entry", args: .object([
+            "name": .string("Local Only"),
+            "calories": .number(250),
+            "protein": .number(12),
+            "carbs": .number(30),
+            "fat": .number(9),
+            "meal": .string("Snack"),
+            "date": .string("2026-07-20"),
+        ])))
+        await Self.yieldForScheduledMutations()
+
+        #expect(harness.nutritionStore.fetchAllEntries().count == 1)
+        #expect(harness.health.syncedEntryIDs.isEmpty)
+        #expect(harness.health.deletedEntryIDs.isEmpty)
     }
 
     @Test func saveFoodPersistsReusableFood() async throws {
@@ -312,7 +343,7 @@ struct ChatToolTests {
     }
 
     @Test func logSavedFoodPreservesLinkAndScalesAllNutrition() async throws {
-        let harness = try ChatTestHarness()
+        let harness = try ChatTestHarness(healthSyncEnabled: true)
         let food = SavedFood(
             name: "Fortified Cereal",
             calories: 200,
@@ -336,6 +367,7 @@ struct ChatToolTests {
             "date": .string("2026-07-20"),
         ])))
         let entry = try #require(harness.nutritionStore.fetchAllEntries().first)
+        await Self.waitUntil { harness.health.syncedEntryIDs.contains(entry.id) }
 
         #expect(record.status == .completed)
         #expect(entry.savedFoodID == food.id)
@@ -344,6 +376,7 @@ struct ChatToolTests {
         #expect(entry.micronutrients["vitamin_b12"]?.value == 3.6)
         #expect(entry.servingQuantity == 1.5)
         #expect(entry.servingUnit == "cup")
+        #expect(harness.health.syncedEntryIDs == [entry.id])
     }
 
     @Test func updateFoodMergesAndRemovesMicronutrients() async throws {
@@ -449,6 +482,19 @@ struct ChatToolTests {
 
     private static func result(_ record: ChatToolRecord) -> [String: JSONValue]? {
         JSONValue.parse(record.resultJSON)?.objectValue
+    }
+
+    private static func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<100 {
+            if condition() { return }
+            await Task.yield()
+        }
+    }
+
+    private static func yieldForScheduledMutations() async {
+        for _ in 0..<10 {
+            await Task.yield()
+        }
     }
 
     private static func day(_ string: String) -> Date? {

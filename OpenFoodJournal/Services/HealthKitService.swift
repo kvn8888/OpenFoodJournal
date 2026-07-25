@@ -192,10 +192,17 @@ final class HealthKitService {
 
     @discardableResult
     func deleteSamples(for entry: NutritionEntry) async -> SyncResult {
+        await deleteSamples(forEntryID: entry.id)
+    }
+
+    /// Deletes deterministic samples without retaining a SwiftData model that
+    /// may already have been removed from its context.
+    @discardableResult
+    func deleteSamples(forEntryID entryID: UUID) async -> SyncResult {
         guard isAvailable, isAuthorized else { return .skipped }
 
         do {
-            try await deleteExistingSamples(for: entry)
+            try await deleteExistingSamples(forEntryID: entryID)
             return .synced
         } catch {
             #if DEBUG
@@ -264,11 +271,15 @@ final class HealthKitService {
     }
 
     private func deleteExistingSamples(for entry: NutritionEntry) async throws {
+        try await deleteExistingSamples(forEntryID: entry.id)
+    }
+
+    private func deleteExistingSamples(forEntryID entryID: UUID) async throws {
         for definition in Self.sampleDefinitions {
             guard let type = HKQuantityType.quantityType(forIdentifier: definition.quantityTypeIdentifier) else { continue }
             let samples = try await samples(
                 type: type,
-                syncIdentifier: syncIdentifier(for: entry.id, sampleKey: definition.key)
+                syncIdentifier: syncIdentifier(for: entryID, sampleKey: definition.key)
             )
             if !samples.isEmpty {
                 try await store.delete(samples)
@@ -409,5 +420,15 @@ final class HealthKitService {
             }
             store.execute(query)
         }
+    }
+}
+
+extension HealthKitService: NutritionEntryHealthSyncing {
+    func syncNutritionEntry(_ entry: NutritionEntry, in modelContext: ModelContext) async {
+        _ = await sync(entry, in: modelContext)
+    }
+
+    func deleteNutritionSamples(forEntryID entryID: UUID) async {
+        _ = await deleteSamples(forEntryID: entryID)
     }
 }

@@ -7,9 +7,7 @@ import SwiftData
 
 struct HistoryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @State private var selectedDate: Date = .now
     @State private var editingEntry: NutritionEntry?
@@ -310,15 +308,7 @@ struct HistoryView: View {
     }
 
     private func deleteEntry(_ entry: NutritionEntry) {
-        guard healthKitEnabled else {
-            nutritionStore.delete(entry)
-            return
-        }
-
-        Task {
-            _ = await healthKit.deleteSamples(for: entry)
-            nutritionStore.delete(entry)
-        }
+        nutritionStore.delete(entry)
     }
 }
 
@@ -326,9 +316,7 @@ struct HistoryView: View {
 
 struct DayDetailView: View {
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     let date: Date
 
     private var log: DailyLog? {
@@ -367,15 +355,7 @@ struct DayDetailView: View {
     }
 
     private func deleteEntry(_ entry: NutritionEntry) {
-        guard healthKitEnabled else {
-            nutritionStore.delete(entry)
-            return
-        }
-
-        Task {
-            _ = await healthKit.deleteSamples(for: entry)
-            nutritionStore.delete(entry)
-        }
+        nutritionStore.delete(entry)
     }
 }
 

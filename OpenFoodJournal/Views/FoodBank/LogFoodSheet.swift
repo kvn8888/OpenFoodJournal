@@ -11,12 +11,9 @@ import UIKit
 struct LogFoodSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
     @Environment(MealTimeSettings.self) private var mealTimeSettings
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
 
     // ── Input: the saved food to potentially log ──────────────────
@@ -338,7 +335,6 @@ struct LogFoodSheet: View {
             entry.servingUnit = selectedUnit
             // NutritionStore refreshes the linked SavedFood's usage via entry.savedFoodID.
             nutritionStore.log(entry, to: logDate)
-            syncToHealthKitIfNeeded(entry)
             dismiss()
         } label: {
             Text("Add to Journal")
@@ -465,13 +461,6 @@ struct LogFoodSheet: View {
         value.truncatingRemainder(dividingBy: 1) == 0
             ? String(format: "%.0f", value)
             : String(format: "%.2f", value)
-    }
-
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
     }
 
     // MARK: - Serving Mappings

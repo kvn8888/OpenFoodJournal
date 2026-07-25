@@ -7,9 +7,7 @@ import SwiftData
 struct DailyLogView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(UserGoals.self) private var goals
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @State private var selectedDate: Date = .now
     @State private var presentedSheet: DailyLogSheet?
@@ -177,15 +175,7 @@ struct DailyLogView: View {
     }
 
     private func deleteEntry(_ entry: NutritionEntry) {
-        guard healthKitEnabled else {
-            nutritionStore.delete(entry)
-            return
-        }
-
-        Task {
-            _ = await healthKit.deleteSamples(for: entry)
-            nutritionStore.delete(entry)
-        }
+        nutritionStore.delete(entry)
     }
 }
 
@@ -216,12 +206,9 @@ enum DailyLogSheet: Identifiable {
 private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(TursoMirrorService.self) private var tursoMirror
-    @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var entry: NutritionEntry
     let logDate: Date
@@ -236,7 +223,6 @@ private struct ScanResultSheet: View {
                 // Log entry only — no Food Bank save
                 applyMealTypeForLog()
                 nutritionStore.log(entry, to: logDate)
-                syncToHealthKitIfNeeded(entry)
                 scanService.pendingResult = nil
                 dismiss()
             },
@@ -247,7 +233,6 @@ private struct ScanResultSheet: View {
                 let saved = saveReviewedFood()
                 entry.savedFoodID = saved.id
                 nutritionStore.log(entry, to: logDate)
-                syncToHealthKitIfNeeded(entry)
 
                 scanService.pendingResult = nil
                 dismiss()
@@ -302,12 +287,6 @@ private struct ScanResultSheet: View {
         dismiss()
     }
 
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
-    }
 }
 
 // MARK: - Scan Progress Overlay

@@ -199,10 +199,13 @@ final class TestChatGoals: ChatGoalsProviding {
 }
 
 @MainActor
-final class TestChatHealth: ChatHealthDataProviding {
+final class TestChatHealth: ChatHealthDataProviding, NutritionEntryHealthSyncing {
     var activeEnergy = 432.0
     var delayNanoseconds: UInt64 = 0
+    var isNutritionSyncEnabled = false
     private(set) var requestedDates: [Date] = []
+    private(set) var syncedEntryIDs: [UUID] = []
+    private(set) var deletedEntryIDs: [UUID] = []
     private(set) var activeRequestCount = 0
     private(set) var maximumConcurrentRequests = 0
 
@@ -215,6 +218,19 @@ final class TestChatHealth: ChatHealthDataProviding {
             try? await Task.sleep(nanoseconds: delayNanoseconds)
         }
         return activeEnergy
+    }
+
+    func syncNutritionEntry(_ entry: NutritionEntry, in modelContext: ModelContext) async {
+        syncedEntryIDs.append(entry.id)
+    }
+
+    func deleteNutritionSamples(forEntryID entryID: UUID) async {
+        deletedEntryIDs.append(entryID)
+    }
+
+    func resetNutritionMutations() {
+        syncedEntryIDs = []
+        deletedEntryIDs = []
     }
 }
 
@@ -301,7 +317,8 @@ final class ChatTestHarness {
         deadlinePolicy: ChatDeadlinePolicy = .fast,
         retryPolicy: ChatRetryPolicy = .fast,
         monotonicClock: (any ChatMonotonicClock)? = nil,
-        modelCatalog: RuntimeModelCatalog? = nil
+        modelCatalog: RuntimeModelCatalog? = nil,
+        healthSyncEnabled: Bool = false
     ) throws {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(
@@ -322,9 +339,15 @@ final class ChatTestHarness {
             configurations: configuration
         )
         context = container.mainContext
-        nutritionStore = NutritionStore(modelContext: context)
         goals = TestChatGoals()
-        health = TestChatHealth()
+        let testHealth = TestChatHealth()
+        testHealth.isNutritionSyncEnabled = healthSyncEnabled
+        health = testHealth
+        nutritionStore = NutritionStore(
+            modelContext: context,
+            healthSyncer: testHealth,
+            isHealthSyncEnabled: { testHealth.isNutritionSyncEnabled }
+        )
         proxy = ScriptedChatModelProxy()
         research = ScriptedChatWebSearchProvider()
         fetcher = StubChatURLFetcher()

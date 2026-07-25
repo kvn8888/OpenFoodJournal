@@ -72,12 +72,10 @@ struct ManualEntryPrefill: Identifiable, Hashable {
 
 struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(TursoMirrorService.self) private var tursoMirror
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     let defaultDate: Date
 
@@ -363,7 +361,6 @@ struct ManualEntryView: View {
             brand: trimmedBrand.isEmpty ? nil : trimmedBrand
         )
         nutritionStore.log(entry, to: defaultDate)
-        syncToHealthKitIfNeeded(entry)
 
         // Optionally save to Food Bank for quick re-logging
         if saveToFoodBank {
@@ -376,12 +373,6 @@ struct ManualEntryView: View {
         dismiss()
     }
 
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
-    }
 }
 
 // MARK: - MacroInputRow
