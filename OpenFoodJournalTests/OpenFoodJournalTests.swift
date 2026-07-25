@@ -156,7 +156,10 @@ struct OpenFoodJournalTests {
         defer { try? FileManager.default.removeItem(at: directory) }
         var requestBodies: [String] = []
         StubChatURLProtocol.handler = { request in
-            requestBodies.append(String(data: request.httpBody ?? Data(), encoding: .utf8) ?? "")
+            requestBodies.append(String(
+                data: StubChatURLProtocol.bodyData(for: request) ?? Data(),
+                encoding: .utf8
+            ) ?? "")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-turso-token")
             let response = HTTPURLResponse(
                 url: try #require(request.url),

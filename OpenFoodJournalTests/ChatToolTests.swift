@@ -373,7 +373,7 @@ struct ChatToolTests {
         #expect(entry.savedFoodID == food.id)
         #expect(entry.calories == 300)
         #expect(entry.micronutrients["iron"]?.value == 13.5)
-        #expect(entry.micronutrients["vitamin_b12"]?.value == 3.6)
+        #expect(abs((entry.micronutrients["vitamin_b12"]?.value ?? 0) - 3.6) < 0.000_001)
         #expect(entry.servingQuantity == 1.5)
         #expect(entry.servingUnit == "cup")
         #expect(harness.health.syncedEntryIDs == [entry.id])

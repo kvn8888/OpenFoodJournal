@@ -35,6 +35,34 @@ final class StubChatURLProtocol: URLProtocol {
         configuration.protocolClasses = [StubChatURLProtocol.self]
         return URLSession(configuration: configuration)
     }
+
+    /// Foundation may expose an uploaded request body as a stream by the time
+    /// a custom URL protocol receives it. Materialize either representation so
+    /// wire-contract tests behave consistently on local and hosted macOS.
+    static func bodyData(for request: URLRequest) -> Data? {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else {
+            return nil
+        }
+
+        stream.open()
+        defer { stream.close() }
+        var result = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let count = stream.read(&buffer, maxLength: buffer.count)
+            if count < 0 {
+                return nil
+            }
+            if count == 0 {
+                break
+            }
+            result.append(buffer, count: count)
+        }
+        return result
+    }
 }
 
 @MainActor

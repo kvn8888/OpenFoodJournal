@@ -1036,6 +1036,7 @@ final class ChatService {
         if let existing = toolMessage(
             callID: record.callID,
             name: record.name,
+            modelTurnID: record.modelTurnID,
             runID: record.runID,
             in: thread
         ) {
@@ -1091,7 +1092,13 @@ final class ChatService {
         run: ChatAgentRun,
         thread: ChatThread
     ) {
-        guard toolMessage(callID: call.callID, name: call.name, runID: run.id, in: thread) == nil else {
+        guard toolMessage(
+            callID: call.callID,
+            name: call.name,
+            modelTurnID: call.modelTurnID,
+            runID: run.id,
+            in: thread
+        ) == nil else {
             return
         }
         let now = Date()
@@ -1131,6 +1138,7 @@ final class ChatService {
     private func toolMessage(
         callID: String,
         name: String,
+        modelTurnID: String?,
         runID: UUID?,
         in thread: ChatThread
     ) -> ChatMessage? {
@@ -1138,6 +1146,7 @@ final class ChatService {
             guard let record = $0.toolRecord else { return false }
             return record.callID == callID
                 && record.name == name
+                && (modelTurnID == nil || record.modelTurnID == modelTurnID)
                 && (runID == nil || record.runID == nil || record.runID == runID)
         }
     }
@@ -1597,11 +1606,13 @@ final class ChatService {
 
             case .model:
                 if let modelTurnID = message.modelTurnID,
-                   index + 1 < messages.count,
-                   messages[index + 1].role == .tool,
-                   messages[index + 1].toolRecord?.modelTurnID == modelTurnID {
+                   messages.contains(where: {
+                       $0.role == .tool && $0.toolRecord?.modelTurnID == modelTurnID
+                   }) {
                     // The visible text bubble is reconstructed together with
-                    // its following function-call group below.
+                    // its function-call group below. Tool chips can be saved
+                    // before the final visible model bubble because they are
+                    // persisted as soon as streaming decodes each call.
                     index += 1
                     continue
                 }
@@ -1662,17 +1673,16 @@ final class ChatService {
                 orderedModelParts.append(contentsOf: continuations.map {
                     ($0.ordinal, 0, .providerContinuation($0))
                 })
-                if index > 0 {
-                    let preceding = messages[index - 1]
-                    if preceding.role == .model,
-                       preceding.modelTurnID == firstRecord.modelTurnID,
-                       !preceding.text.isEmpty {
-                        orderedModelParts.append((
-                            preceding.modelTurnTextOrdinal ?? 0,
-                            1,
-                            .text(preceding.text)
-                        ))
-                    }
+                if let visibleModelMessage = messages.first(where: {
+                    $0.role == .model
+                        && $0.modelTurnID == firstRecord.modelTurnID
+                        && !$0.text.isEmpty
+                }) {
+                    orderedModelParts.append((
+                        visibleModelMessage.modelTurnTextOrdinal ?? 0,
+                        1,
+                        .text(visibleModelMessage.text)
+                    ))
                 }
                 orderedModelParts.append(contentsOf: group.map { item in
                     let call = ChatModelCall(
@@ -2383,6 +2393,7 @@ final class ChatService {
         let existingActivity = toolMessage(
             callID: call.callID,
             name: call.name,
+            modelTurnID: call.modelTurnID,
             runID: agentRun.id,
             in: thread
         )?.toolRecord
@@ -2416,6 +2427,7 @@ final class ChatService {
                     startedAt: toolMessage(
                         callID: call.callID,
                         name: call.name,
+                        modelTurnID: call.modelTurnID,
                         runID: agentRun.id,
                         in: thread
                     )?.toolRecord?.startedAt,
@@ -2602,6 +2614,7 @@ final class ChatService {
         guard let message = toolMessage(
             callID: call.callID,
             name: call.name,
+            modelTurnID: call.modelTurnID,
             runID: run.id,
             in: thread
         ), var record = message.toolRecord else { return }

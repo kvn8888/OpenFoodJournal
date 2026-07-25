@@ -503,12 +503,17 @@ struct ChatFeatureTests {
     @Test func transientPrimaryFailureRetriesFallbackThroughSameProxy() async throws {
         let harness = try ChatTestHarness(primary: "primary-model", fallback: "fallback-model")
         harness.proxy.enqueue(error: ChatError.serverError(503, "busy"))
+        harness.proxy.enqueue(error: ChatError.serverError(503, "still busy"))
         harness.proxy.enqueue(ChatModelTurn(text: "Fallback worked."))
         let thread = harness.makeThread()
 
         await harness.service.send("Hello", in: thread)
 
-        #expect(harness.proxy.turns.map(\.model) == ["primary-model", "fallback-model"])
+        #expect(harness.proxy.turns.map(\.model) == [
+            "primary-model",
+            "primary-model",
+            "fallback-model",
+        ])
         #expect(thread.safeMessages.last?.text == "Fallback worked.")
         #expect(harness.service.lastError == nil)
     }
@@ -649,7 +654,7 @@ struct ChatFeatureTests {
             #expect(request.url == TavilyChatWebSearchProvider.searchURL)
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer test-tavily-key")
-            let body = try #require(request.httpBody)
+            let body = try #require(StubChatURLProtocol.bodyData(for: request))
             let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
             #expect(json["query"] as? String == "FDA sodium daily value")
             #expect(json["search_depth"] as? String == "fast")
@@ -751,7 +756,7 @@ struct ChatFeatureTests {
             #expect(request.url == ParallelChatWebSearchProvider.searchURL)
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "x-api-key") == "test-parallel-key")
-            let body = try #require(request.httpBody)
+            let body = try #require(StubChatURLProtocol.bodyData(for: request))
             let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
             #expect(json["objective"] as? String == "Find current FDA sodium guidance")
             #expect(json["search_queries"] as? [String] == [
