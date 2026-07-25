@@ -1,0 +1,62 @@
+name: Cloud CI
+
+on:
+  pull_request:
+    branches:
+      - app-store
+      - testflight
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloud-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Compile and unit tests
+    runs-on: xcode-27
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify pinned Xcode toolchain
+        run: bash .github/scripts/verify-xcode.sh
+
+      - name: Compile app and all test targets
+        run: |
+          xcodebuild \
+            -project OpenFoodJournal.xcodeproj \
+            -scheme OpenFoodJournal \
+            -destination generic/platform=iOS \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData-generic" \
+            CODE_SIGNING_ALLOWED=NO \
+            build-for-testing
+
+      - name: Select unit-test simulator
+        run: bash .github/scripts/select-unit-test-simulator.sh
+
+      - name: Execute non-UI unit and provider-contract tests
+        run: |
+          xcodebuild \
+            -project OpenFoodJournal.xcodeproj \
+            -scheme OpenFoodJournalUnitTests \
+            -destination "platform=iOS Simulator,id=${UNIT_TEST_SIMULATOR_ID}" \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData-unit-tests" \
+            -resultBundlePath "${RUNNER_TEMP}/OpenFoodJournalUnitTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Retain failed test diagnostics briefly
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unit-test-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/OpenFoodJournalUnitTests.xcresult
+          if-no-files-found: ignore
+          retention-days: 3

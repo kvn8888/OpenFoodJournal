@@ -1,0 +1,181 @@
+name: App Store Promotion
+
+on:
+  push:
+    branches:
+      - app-store
+  workflow_dispatch:
+    inputs:
+      submit_for_review:
+        description: Submit the staged build to App Review after strict validation
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openfoodjournal-app-store-promotion
+  cancel-in-progress: false
+
+jobs:
+  cloud-ci:
+    name: Validate branch
+    uses: ./.github/workflows/cloud-ci.yml
+
+  promote:
+    name: Promote tested build
+    needs: cloud-ci
+    if: vars.ENABLE_APP_STORE_AUTOMATION == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 45
+    environment: app-store-production
+
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out App Store source and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify pinned Xcode toolchain
+        run: bash .github/scripts/verify-xcode.sh
+
+      - name: Install pinned App Store Connect CLI
+        run: bash .github/scripts/install-asc.sh
+
+      - name: Resolve tested TestFlight manifest
+        id: promotion
+        run: |
+          tag_prefix="$(jq -r '.testFlightTagPrefix' ci/release-config.json)"
+          testflight_tag="$(
+            git tag --merged HEAD --list "${tag_prefix}*" --sort=-creatordate |
+              head -n 1
+          )"
+          if [[ -z "${testflight_tag}" ]]; then
+            echo "No tested TestFlight prerelease is reachable from app-store HEAD." >&2
+            exit 1
+          fi
+
+          manifest_dir="${RUNNER_TEMP}/promotion-manifest"
+          mkdir -p "${manifest_dir}"
+          gh release download "${testflight_tag}" \
+            --pattern release-manifest.json \
+            --dir "${manifest_dir}"
+          manifest_path="${manifest_dir}/release-manifest.json"
+          bash .github/scripts/verify-promotion.sh "${testflight_tag}" "${manifest_path}"
+
+          printf 'build_id=%s\n' "$(jq -r '.buildID' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
+          printf 'build_number=%s\n' "$(jq -r '.buildNumber' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
+          printf 'manifest=%s\n' "${manifest_path}" >> "${GITHUB_OUTPUT}"
+          printf 'tag=%s\n' "${testflight_tag}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "$(jq -r '.version' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Confirm build remains valid in App Store Connect
+        run: |
+          asc builds info \
+            --build-id "${{ steps.promotion.outputs.build_id }}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/build-info.json"
+          processing_state="$(jq -r '.data.attributes.processingState // .attributes.processingState // empty' "${RUNNER_TEMP}/build-info.json")"
+          if [[ "${processing_state}" != "VALID" ]]; then
+            echo "Build processing state is ${processing_state:-unknown}, not VALID." >&2
+            exit 1
+          fi
+
+      - name: Find the current public version
+        id: public_version
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          versions_json="$(asc versions list --app "${app_id}" --platform IOS --output json)"
+          source_version="$(
+            jq -r '
+              [
+                .data[]
+                | select(
+                    .attributes.appStoreState == "READY_FOR_SALE"
+                    or .attributes.appVersionState == "READY_FOR_DISTRIBUTION"
+                  )
+              ]
+              | sort_by(.attributes.createdDate)
+              | last
+              | .attributes.versionString // empty
+            ' <<< "${versions_json}"
+          )"
+          if [[ -z "${source_version}" ]]; then
+            echo "No public App Store version is available as the metadata source." >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${source_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Stage exact TestFlight build for the App Store
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          asc release stage \
+            --app "${app_id}" \
+            --version "${{ steps.promotion.outputs.version }}" \
+            --build "${{ steps.promotion.outputs.build_id }}" \
+            --copy-metadata-from "${{ steps.public_version.outputs.version }}" \
+            --exclude-fields whatsNew \
+            --checkpoint-file "${RUNNER_TEMP}/app-store-stage-checkpoint.json" \
+            --confirm \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/app-store-stage.json"
+
+      - name: Apply reviewed release notes from the manifest
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          locale="$(jq -r '.primaryLocale' ci/release-config.json)"
+          metadata_dir="${RUNNER_TEMP}/metadata"
+          metadata_file="${metadata_dir}/version/${{ steps.promotion.outputs.version }}/${locale}.json"
+          mkdir -p "$(dirname "${metadata_file}")"
+          jq '{whatsNew: .notes}' "${{ steps.promotion.outputs.manifest }}" > "${metadata_file}"
+          asc metadata validate --dir "${metadata_dir}" --output json
+          asc metadata push \
+            --app "${app_id}" \
+            --version "${{ steps.promotion.outputs.version }}" \
+            --platform IOS \
+            --dir "${metadata_dir}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/metadata-push.json"
+
+      - name: Run strict submission readiness checks
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          asc validate \
+            --app "${app_id}" \
+            --version "${{ steps.promotion.outputs.version }}" \
+            --platform IOS \
+            --strict \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/app-store-validation.json"
+
+      - name: Submit to App Review
+        if: inputs.submit_for_review == true
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          asc review submit \
+            --app "${app_id}" \
+            --version "${{ steps.promotion.outputs.version }}" \
+            --build "${{ steps.promotion.outputs.build_id }}" \
+            --confirm \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/app-review-submission.json"
+
+      - name: Write promotion summary
+        run: |
+          {
+            echo "## App Store promotion"
+            echo
+            echo "- Version: ${{ steps.promotion.outputs.version }}"
+            echo "- Build: ${{ steps.promotion.outputs.build_number }}"
+            echo "- Tested manifest: \`${{ steps.promotion.outputs.tag }}\`"
+            echo "- Rebuilt: no; exact TestFlight build promoted"
+            echo "- Submitted for review: ${{ inputs.submit_for_review || false }}"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,0 +1,258 @@
+name: Internal TestFlight
+
+on:
+  push:
+    branches:
+      - testflight
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openfoodjournal-testflight-upload
+  cancel-in-progress: false
+
+jobs:
+  cloud-ci:
+    name: Validate candidate
+    uses: ./.github/workflows/cloud-ci.yml
+
+  deploy:
+    name: Build and distribute
+    needs: cloud-ci
+    if: vars.ENABLE_TESTFLIGHT_AUTOMATION == 'true'
+    runs-on: xcode-27
+    timeout-minutes: 90
+    environment: testflight-internal
+
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_B64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_B64 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      APPLE_PROVISIONING_PROFILE_B64: ${{ secrets.APPLE_PROVISIONING_PROFILE_B64 }}
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out trusted TestFlight source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify pinned Xcode toolchain
+        run: bash .github/scripts/verify-xcode.sh
+
+      - name: Install pinned App Store Connect CLI
+        run: bash .github/scripts/install-asc.sh
+
+      - name: Validate App Store Connect credentials
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          asc apps view --id "${app_id}" --output json > "${RUNNER_TEMP}/app.json"
+
+      - name: Resolve build number and release notes
+        id: release
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          locale="$(jq -r '.primaryLocale' ci/release-config.json)"
+          version_json="$(
+            asc xcode version view \
+              --project OpenFoodJournal.xcodeproj \
+              --target OpenFoodJournal \
+              --configuration Release \
+              --output json
+          )"
+          version="$(jq -r '.version' <<< "${version_json}")"
+          build_json="$(
+            asc builds next-build-number \
+              --app "${app_id}" \
+              --version "${version}" \
+              --platform IOS \
+              --output json
+          )"
+          build_number="$(jq -r '.nextBuildNumber' <<< "${build_json}")"
+
+          if [[ -z "${version}" || "${version}" == "null" || -z "${build_number}" || "${build_number}" == "null" ]]; then
+            echo "Could not resolve the release version or a remote-safe build number." >&2
+            exit 1
+          fi
+
+          previous_tag="$(
+            git tag --merged HEAD --list 'testflight/*' --sort=-creatordate |
+              head -n 1
+          )"
+          if [[ -n "${previous_tag}" ]]; then
+            notes_json="$(
+              asc release-notes generate \
+                --since-tag "${previous_tag}" \
+                --until-ref HEAD \
+                --max-chars 4000 \
+                --output json
+            )"
+          else
+            notes_json="$(
+              asc release-notes generate \
+                --since-ref origin/app-store \
+                --until-ref HEAD \
+                --max-chars 4000 \
+                --output json
+            )"
+          fi
+
+          notes="$(jq -r '.notes // empty' <<< "${notes_json}")"
+          if [[ -z "${notes}" ]]; then
+            notes="Internal build ${version} (${build_number}) for commit ${GITHUB_SHA:0:12}."
+          fi
+
+          printf '%s\n' "${notes}" > "${RUNNER_TEMP}/what-to-test.txt"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
+          printf 'build_number=%s\n' "${build_number}" >> "${GITHUB_OUTPUT}"
+          printf 'app_id=%s\n' "${app_id}" >> "${GITHUB_OUTPUT}"
+          printf 'locale=%s\n' "${locale}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install distribution signing assets
+        run: bash .github/scripts/install-signing-assets.sh
+
+      - name: Prepare export configuration
+        run: |
+          bundle_id="$(jq -r '.bundleIdentifier' ci/release-config.json)"
+          signing_certificate="$(jq -r '.signingCertificateName' ci/release-config.json)"
+          export_options="${RUNNER_TEMP}/ExportOptions.plist"
+          cp ci/ExportOptions.plist "${export_options}"
+          /usr/libexec/PlistBuddy \
+            -c "Set :provisioningProfiles:${bundle_id} ${OFJ_PROFILE_NAME}" \
+            "${export_options}"
+          /usr/libexec/PlistBuddy \
+            -c "Set :signingCertificate ${signing_certificate}" \
+            "${export_options}"
+          plutil -lint "${export_options}"
+          printf 'OFJ_EXPORT_OPTIONS=%s\n' "${export_options}" >> "${GITHUB_ENV}"
+
+      - name: Create signed archive
+        run: |
+          team_id="$(jq -r '.teamID' ci/release-config.json)"
+          signing_certificate="$(jq -r '.signingCertificateName' ci/release-config.json)"
+          asc xcode archive \
+            --project OpenFoodJournal.xcodeproj \
+            --scheme OpenFoodJournal \
+            --configuration Release \
+            --clean \
+            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --xcodebuild-flag=-destination \
+            --xcodebuild-flag=generic/platform=iOS \
+            --xcodebuild-flag="CODE_SIGN_STYLE=Manual" \
+            --xcodebuild-flag="DEVELOPMENT_TEAM=${team_id}" \
+            --xcodebuild-flag="CURRENT_PROJECT_VERSION=${{ steps.release.outputs.build_number }}" \
+            --xcodebuild-flag="PROVISIONING_PROFILE_SPECIFIER=${OFJ_PROFILE_NAME}" \
+            --xcodebuild-flag="CODE_SIGN_IDENTITY=${signing_certificate}" \
+            --output json
+
+      - name: Export signed IPA
+        run: |
+          asc xcode export \
+            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --export-options "${OFJ_EXPORT_OPTIONS}" \
+            --ipa-path "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+            --timeout 20m \
+            --output json
+
+      - name: Upload and distribute to internal TestFlight
+        run: |
+          asc publish testflight \
+            --app "${{ steps.release.outputs.app_id }}" \
+            --ipa "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+            --group "$(jq -r '.testFlightGroupID' ci/release-config.json)" \
+            --test-notes "$(cat "${RUNNER_TEMP}/what-to-test.txt")" \
+            --locale "${{ steps.release.outputs.locale }}" \
+            --wait \
+            --timeout 45m \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/testflight-publish.json"
+
+      - name: Create immutable release manifest
+        id: manifest
+        run: |
+          build_json="$(
+            asc builds list \
+              --app "${{ steps.release.outputs.app_id }}" \
+              --version "${{ steps.release.outputs.version }}" \
+              --build-number "${{ steps.release.outputs.build_number }}" \
+              --platform IOS \
+              --processing-state VALID \
+              --output json
+          )"
+          build_id="$(jq -r '.data[0].id // empty' <<< "${build_json}")"
+          if [[ -z "${build_id}" ]]; then
+            echo "The processed build could not be resolved after upload." >&2
+            exit 1
+          fi
+
+          ipa_sha="$(shasum -a 256 "${RUNNER_TEMP}/OpenFoodJournal.ipa" | awk '{print $1}')"
+          notes="$(cat "${RUNNER_TEMP}/what-to-test.txt")"
+          manifest="${RUNNER_TEMP}/release-manifest.json"
+          jq -n \
+            --arg appStoreAppID "${{ steps.release.outputs.app_id }}" \
+            --arg buildID "${build_id}" \
+            --arg buildNumber "${{ steps.release.outputs.build_number }}" \
+            --arg commitSHA "${GITHUB_SHA}" \
+            --arg createdAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg ipaSHA256 "${ipa_sha}" \
+            --arg notes "${notes}" \
+            --arg version "${{ steps.release.outputs.version }}" \
+            --arg xcodeBuild "$(jq -r '.requiredXcodeBuild' ci/release-config.json)" \
+            '{
+              schemaVersion: 1,
+              appStoreAppID: $appStoreAppID,
+              buildID: $buildID,
+              buildNumber: $buildNumber,
+              commitSHA: $commitSHA,
+              createdAt: $createdAt,
+              ipaSHA256: $ipaSHA256,
+              notes: $notes,
+              notesSource: "deterministic-git-history",
+              version: $version,
+              xcodeBuild: $xcodeBuild
+            }' > "${manifest}"
+
+          tag="testflight/${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}"
+          printf 'manifest=%s\n' "${manifest}" >> "${GITHUB_OUTPUT}"
+          printf 'tag=%s\n' "${tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish immutable manifest prerelease
+        run: |
+          gh release create "${{ steps.manifest.outputs.tag }}" \
+            --target "${GITHUB_SHA}" \
+            --title "TestFlight ${{ steps.release.outputs.version }} (${{ steps.release.outputs.build_number }})" \
+            --notes-file "${RUNNER_TEMP}/what-to-test.txt" \
+            --prerelease \
+            --draft
+          gh release upload "${{ steps.manifest.outputs.tag }}" \
+            "${{ steps.manifest.outputs.manifest }}#release-manifest.json" \
+            "${RUNNER_TEMP}/what-to-test.txt#what-to-test.txt"
+          gh release edit "${{ steps.manifest.outputs.tag }}" \
+            --draft=false \
+            --prerelease
+
+      - name: Retain manifest without retaining DerivedData
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: testflight-manifest-${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}
+          path: |
+            ${{ steps.manifest.outputs.manifest }}
+            ${{ runner.temp }}/what-to-test.txt
+            ${{ runner.temp }}/testflight-publish.json
+          retention-days: 14
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "## Internal TestFlight"
+            echo
+            echo "- Version: ${{ steps.release.outputs.version }}"
+            echo "- Build: ${{ steps.release.outputs.build_number }}"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Manifest tag: \`${{ steps.manifest.outputs.tag }}\`"
+            echo "- DerivedData and archive retention: ephemeral runner only"
+          } >> "${GITHUB_STEP_SUMMARY}"
