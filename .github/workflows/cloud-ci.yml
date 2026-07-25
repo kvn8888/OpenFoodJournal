@@ -49,6 +49,7 @@ jobs:
             -destination "platform=iOS Simulator,id=${UNIT_TEST_SIMULATOR_ID}" \
             -derivedDataPath "${RUNNER_TEMP}/DerivedData-unit-tests" \
             -resultBundlePath "${RUNNER_TEMP}/OpenFoodJournalUnitTests.xcresult" \
+            -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             test
 
