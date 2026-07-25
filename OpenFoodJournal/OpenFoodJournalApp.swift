@@ -40,9 +40,21 @@ struct MacrosApp: App {
         modelContainer = container
         let tursoMirror = TursoMirrorService(modelContext: container.mainContext)
         _tursoMirrorService = State(initialValue: tursoMirror)
-        _nutritionStore = State(initialValue: NutritionStore(modelContext: container.mainContext, tursoMirror: tursoMirror))
-        _scanService = State(initialValue: ScanService(modelContext: container.mainContext, tursoMirror: tursoMirror))
-        _healthKitService = State(initialValue: HealthKitService(tursoMirror: tursoMirror))
+        let health = HealthKitService(tursoMirror: tursoMirror)
+        _healthKitService = State(initialValue: health)
+        let store = NutritionStore(
+            modelContext: container.mainContext,
+            tursoMirror: tursoMirror,
+            healthSyncer: health,
+            isHealthSyncEnabled: {
+                UserDefaults.standard.bool(forKey: "healthkit.enabled")
+            }
+        )
+        _nutritionStore = State(initialValue: store)
+        _scanService = State(initialValue: ScanService(
+            modelContext: container.mainContext,
+            tursoMirror: tursoMirror
+        ))
 
         // Ensure the Preferences singleton exists in SwiftData
         _ = Preferences.current(in: container.mainContext)
@@ -66,12 +78,9 @@ struct MacrosApp: App {
                     .environment(mealTimeSettings)
                     .environment(offService)
                     .task {
-                        // Request HealthKit auth on first launch if user has previously enabled it
-                        if UserDefaults.standard.bool(forKey: "healthkit.enabled") {
-                            await healthKitService.requestAuthorization()
-                        }
                         // Keep entry/day relationships healthy after CloudKit sync or app updates.
                         nutritionStore.repairDailyLogEntryRelationships()
+                        await reconcilePendingHealthKitEntries()
 
                         // One-time migration: link old entries to SavedFoods and dedup mappings
                         if !hasRetrolinkedMappings {
@@ -84,6 +93,9 @@ struct MacrosApp: App {
                     .onChange(of: scenePhase) { _, phase in
                         if phase == .active {
                             tursoMirrorService.scheduleMirror(reason: "app_foreground")
+                            Task {
+                                await reconcilePendingHealthKitEntries()
+                            }
                         }
                     }
             } else {
@@ -98,5 +110,24 @@ struct MacrosApp: App {
                     .environment(offService)
             }
         }
+    }
+
+    /// HealthKit is a derived export target, so any mutation interrupted by
+    /// backgrounding or an older app build must be reconciled from SwiftData.
+    /// This also repairs Assistant-created entries that predate centralized
+    /// mutation-side synchronization.
+    private func reconcilePendingHealthKitEntries() async {
+        guard UserDefaults.standard.bool(forKey: "healthkit.enabled") else { return }
+        if !healthKitService.isAuthorized {
+            await healthKitService.requestAuthorization()
+        }
+        guard healthKitService.isAuthorized else { return }
+
+        let pending = nutritionStore.entriesNeedingHealthSync()
+        guard !pending.isEmpty else { return }
+        _ = await healthKitService.syncMissingEntries(
+            pending,
+            in: modelContainer.mainContext
+        )
     }
 }

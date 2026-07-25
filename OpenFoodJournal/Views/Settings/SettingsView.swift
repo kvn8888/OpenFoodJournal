@@ -677,11 +677,7 @@ struct SettingsView: View {
     }
 
     private var entriesNeedingHealthKitSync: [NutritionEntry] {
-        _ = nutritionStore.changeCount
-        return nutritionStore.fetchAllEntries().filter { entry in
-            entry.healthKitSyncStatus != HealthKitSyncStatus.synced ||
-            entry.healthKitLastWriteHash != entry.healthKitWriteHash
-        }
+        nutritionStore.entriesNeedingHealthSync()
     }
 
     private var healthKitPendingSyncCount: Int {

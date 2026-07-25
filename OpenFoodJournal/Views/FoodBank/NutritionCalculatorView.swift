@@ -273,10 +273,8 @@ struct NutritionCalculatorBuildView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(TursoMirrorService.self) private var tursoMirror
     @Environment(MealTimeSettings.self) private var mealTimeSettings
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var calculator: SavedFood
     let logDate: Date
@@ -494,7 +492,6 @@ struct NutritionCalculatorBuildView: View {
         calculator.markLoggedForFoodBank()
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: "nutrition_calculator_logged")
-        syncToHealthKitIfNeeded(entry)
         dismiss()
     }
 
@@ -517,12 +514,6 @@ struct NutritionCalculatorBuildView: View {
         didApplyDefaultMealType = true
     }
 
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
-    }
 }
 
 private struct CalculatorIngredientEditorSheet: View {

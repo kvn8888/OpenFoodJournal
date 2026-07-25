@@ -2,26 +2,29 @@
 
 ## NutritionStore (`OpenFoodJournal/Services/NutritionStore.swift`)
 
-`@Observable @MainActor` — SwiftData persistence layer.
+`@Observable @MainActor` — SwiftData persistence layer and canonical journal-mutation boundary.
 
-**Init**: Takes `ModelContext` from the app's `ModelContainer` and optional `TursoMirrorService`.
+**Init**: Takes `ModelContext` from the app's `ModelContainer`, optional `TursoMirrorService`, optional `NutritionEntryHealthSyncing`, and an injected Apple Health enablement closure. Production supplies `HealthKitService`; previews/tests can omit it or inject a spy.
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `log` | `func log(_ entry: NutritionEntry, to date: Date)` | Aligns `entry.timestamp` to the selected journal date, marks stale HealthKit sync metadata when needed, inserts entry, and appends to DailyLog (creates if needed) |
+| `log` | `func log(_ entry: NutritionEntry, to date: Date)` | Aligns `entry.timestamp` to the selected journal date, marks stale HealthKit sync metadata when needed, inserts entry, appends to DailyLog, then schedules HealthKit export after a successful save |
 | `fetchLog` | `func fetchLog(for date: Date) -> DailyLog?` | Matches by startOfDay |
 | `fetchLogs` | `func fetchLogs(from: Date, to: Date) -> [DailyLog]` | Sorted reverse chronological |
 | `fetchAllLogs` | `func fetchAllLogs() -> [DailyLog]` | All logs |
 | `fetchAllEntries` | `func fetchAllEntries() -> [NutritionEntry]` | All nutrition entries sorted by timestamp; used by HealthKit backfill |
-| `delete` | `func delete(_ entry: NutritionEntry)` | Removes from context |
-| `delete` | `func delete(_ log: DailyLog)` | Cascade deletes entries |
+| `entriesNeedingHealthSync` | `func entriesNeedingHealthSync() -> [NutritionEntry]` | Unsynced or hash-stale rows used by automatic launch/foreground reconciliation and Settings |
+| `saveEntry` | `func saveEntry(_ entry: NutritionEntry)` | Persists edits, marks changed HealthKit data stale, then schedules replacement export |
+| `moveEntry` | `func moveEntry(_ entry: NutritionEntry, to newDate: Date)` | Relinks the journal day and schedules replacement export at the corrected HealthKit timestamp |
+| `delete` | `func delete(_ entry: NutritionEntry)` | Removes from SwiftData and schedules deterministic HealthKit sample deletion by entry UUID |
+| `delete` | `func delete(_ log: DailyLog)` | Cascade deletes entries and schedules HealthKit sample deletion for every contained entry UUID |
 | `repairDailyLogEntryRelationships` | `func repairDailyLogEntryRelationships() -> Int` | Idempotently reattaches direct NutritionEntry rows to canonical DailyLogs so journal days match CSV/export data after CloudKit relationship drift |
 | `exportCSV` | `func exportCSV() -> String` | Spreadsheet CSV for analysis. Includes stable IDs, ISO dates, core macros, serving basics, selectionSummary, savedFoodID, scanDurationMs, dynamic micronutrient columns, and quote escaping. Not a restore format. |
 | `exportBackup` | `func exportBackup(goals: UserGoals, appSettings: AppSettingsRecord) throws -> Data` | Versioned JSON backup with DailyLog, NutritionEntry, SavedFood, TrackedContainer, Preferences, goals, and non-sensitive app settings. |
 | `importBackup` | `func importBackup(_ backup: OpenFoodJournalBackup, goals: UserGoals) throws -> BackupImportSummary` | Idempotent restore path. Upserts by UUID and relinks entries to DailyLogs without duplicating repeated imports. |
 | `saveChanges` | `func saveChanges()` | Public save for edit flows |
 
-Successful saves schedule `TursoMirrorService.scheduleMirror(reason:)` when the optional mirror is enabled. Turso failures must not block SwiftData, CloudKit, HealthKit, or UI flows.
+Successful journal mutations schedule `TursoMirrorService.scheduleMirror(reason:)` and, when enabled, the matching HealthKit operation. Callers must not duplicate HealthKit calls in views or Assistant tools. Launch/foreground reconciliation retries persisted pending writes so interrupted tasks and entries created by older builds converge. Turso or HealthKit failures must not roll back SwiftData/CloudKit, which remain authoritative.
 
 ## OpenFoodJournalBackup (`OpenFoodJournal/Services/OpenFoodJournalBackup.swift`)
 
@@ -140,6 +143,7 @@ func scheduleMirror(reason: String)
 | `requestAuthorization` | `func requestAuthorization() async` | System permission dialog |
 | `sync` | `func sync(_ entry: NutritionEntry, in modelContext: ModelContext? = nil, force: Bool = false) async -> SyncResult` | Idempotent entry sync. Skips if the stored write hash is current; otherwise deletes OpenFoodJournal-owned samples for that entry and saves replacements. |
 | `deleteSamples` | `func deleteSamples(for entry: NutritionEntry) async -> SyncResult` | Deletes only samples with this app's deterministic sync identifiers for the entry. Use before deleting a `NutritionEntry`. |
+| `deleteSamples` | `func deleteSamples(forEntryID entryID: UUID) async -> SyncResult` | Deletes deterministic samples after the SwiftData object has been removed; used by the centralized mutation boundary. |
 | `syncMissingEntries` | `func syncMissingEntries(_ entries: [NutritionEntry], in modelContext: ModelContext) async -> SyncSummary` | Settings backfill path for unsynced/stale entries. |
 | `write` | `func write(_ entry: NutritionEntry) async` | Backward-compatible wrapper that calls `sync(..., force: true)`; prefer `sync` with a `ModelContext`. |
 | `fetchActiveEnergy` | `func fetchActiveEnergy(for date: Date) async -> Double` | kcal burned that day |
@@ -150,8 +154,9 @@ func scheduleMirror(reason: String)
 - OpenFoodJournal remains the source of truth; HealthKit is a derived export target.
 - Each nutrient sample uses `HKMetadataKeySyncIdentifier = "k3vnc.OpenFoodJournal.\(entry.id).\(nutrientKey)"`.
 - Edits replace samples by deleting app-owned samples first, then saving the current values.
-- Deletes should call `deleteSamples(for:)` before removing the SwiftData entry.
+- Journal callers delete through `NutritionStore`; it schedules `deleteSamples(forEntryID:)` centrally. Views and Assistant tools must not coordinate HealthKit themselves.
 - HealthKit samples use `entry.healthKitSampleTimestamp`, which prefers the linked journal day when an older entry's stored timestamp falls on a different creation day.
+- App launch and foreground automatically reconcile `NutritionStore.entriesNeedingHealthSync()` after authorization, including entries left pending by interruption or older builds.
 - Settings → Integrations → "Sync Missing Nutrition to Apple Health" backfills entries where `healthKitSyncStatus != .synced` or `healthKitLastWriteHash` differs from `entry.healthKitWriteHash`.
 
 ## UserGoals (`OpenFoodJournal/Models/UserGoals.swift`)

@@ -9,11 +9,8 @@ import SwiftData
 struct CompleteContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(MealTimeSettings.self) private var mealTimeSettings
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     // ── Input ─────────────────────────────────────────────────────
     @Bindable var container: TrackedContainer
@@ -203,7 +200,6 @@ struct CompleteContainerSheet: View {
                 // Create a NutritionEntry for the consumed amount and log it
                 if let entry = container.toNutritionEntry(mealType: mealTypeForLog) {
                     nutritionStore.log(entry, to: logDate)
-                    syncToHealthKitIfNeeded(entry)
                 }
 
                 dismiss()
@@ -237,12 +233,6 @@ struct CompleteContainerSheet: View {
         didApplyDefaultMealType = true
     }
 
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
-    }
 }
 
 // MARK: - Result Macro Cell

@@ -9,10 +9,7 @@ import SwiftData
 /// Macros scale proportionally when the user changes quantity or unit.
 struct EditEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(HealthKitService.self) private var healthKit
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
 
     @Bindable var entry: NutritionEntry
 
@@ -140,7 +137,6 @@ struct EditEntryView: View {
                             nutritionStore.saveEntry(entry)
                         }
 
-                        syncToHealthKitIfNeeded(entry)
                         dismiss()
                     }
                     .fontWeight(.semibold)
@@ -334,25 +330,9 @@ struct EditEntryView: View {
         nutritionStore.replaceMapping(at: index, with: mapping, on: entry)
     }
 
-    private func syncToHealthKitIfNeeded(_ entry: NutritionEntry) {
-        guard healthKitEnabled else { return }
-        Task {
-            await healthKit.sync(entry, in: modelContext)
-        }
-    }
-
     private func deleteEntry() {
-        guard healthKitEnabled else {
-            nutritionStore.delete(entry)
-            dismiss()
-            return
-        }
-
-        Task {
-            _ = await healthKit.deleteSamples(for: entry)
-            nutritionStore.delete(entry)
-            dismiss()
-        }
+        nutritionStore.delete(entry)
+        dismiss()
     }
 }
 

@@ -5,6 +5,16 @@ import Foundation
 import SwiftData
 import Observation
 
+/// Provider-neutral boundary for Apple Health side effects caused by journal
+/// mutations. Keeping this beside the persistence boundary means every caller
+/// (views, Assistant tools, and future App Intents) can share one
+/// mutation contract instead of remembering a second HealthKit call.
+@MainActor
+protocol NutritionEntryHealthSyncing: AnyObject {
+    func syncNutritionEntry(_ entry: NutritionEntry, in modelContext: ModelContext) async
+    func deleteNutritionSamples(forEntryID entryID: UUID) async
+}
+
 @Observable
 @MainActor
 final class NutritionStore {
@@ -12,12 +22,23 @@ final class NutritionStore {
     let modelContext: ModelContext
     @ObservationIgnored
     private let tursoMirror: TursoMirrorService?
+    @ObservationIgnored
+    private let healthSyncer: (any NutritionEntryHealthSyncing)?
+    @ObservationIgnored
+    private let isHealthSyncEnabled: () -> Bool
     /// Bumped on every write so SwiftUI views that read it re-evaluate their computed properties
     private(set) var changeCount = 0
 
-    init(modelContext: ModelContext, tursoMirror: TursoMirrorService? = nil) {
+    init(
+        modelContext: ModelContext,
+        tursoMirror: TursoMirrorService? = nil,
+        healthSyncer: (any NutritionEntryHealthSyncing)? = nil,
+        isHealthSyncEnabled: @escaping () -> Bool = { false }
+    ) {
         self.modelContext = modelContext
         self.tursoMirror = tursoMirror
+        self.healthSyncer = healthSyncer
+        self.isHealthSyncEnabled = isHealthSyncEnabled
     }
 
     // MARK: - Log Entry
@@ -29,7 +50,9 @@ final class NutritionStore {
         link(entry, to: log)
         markHealthKitSyncStaleIfNeeded(entry)
         refreshSavedFoodUsageIfLinked(to: entry)
-        save()
+        if save() {
+            scheduleHealthSync(for: entry)
+        }
     }
 
     private func refreshSavedFoodUsageIfLinked(to entry: NutritionEntry) {
@@ -90,16 +113,32 @@ final class NutritionStore {
         return (try? modelContext.fetch(descriptor)) ?? []
     }
 
+    func entriesNeedingHealthSync() -> [NutritionEntry] {
+        _ = changeCount
+        return fetchAllEntries().filter { entry in
+            entry.healthKitSyncStatus != HealthKitSyncStatus.synced ||
+            entry.healthKitLastWriteHash != entry.healthKitWriteHash
+        }
+    }
+
     // MARK: - Delete
 
     func delete(_ entry: NutritionEntry) {
+        let entryID = entry.id
         modelContext.delete(entry)
-        save()
+        if save() {
+            scheduleHealthDelete(forEntryID: entryID)
+        }
     }
 
     func delete(_ log: DailyLog) {
+        let entryIDs = log.safeEntries.map(\.id)
         modelContext.delete(log)
-        save()
+        if save() {
+            for entryID in entryIDs {
+                scheduleHealthDelete(forEntryID: entryID)
+            }
+        }
     }
 
     // MARK: - Export
@@ -355,7 +394,9 @@ final class NutritionStore {
     /// Save an entry's edits locally
     func saveEntry(_ entry: NutritionEntry) {
         markHealthKitSyncStaleIfNeeded(entry)
-        save()
+        if save() {
+            scheduleHealthSync(for: entry)
+        }
     }
 
     // MARK: - Serving Mapping Propagation
@@ -564,7 +605,9 @@ final class NutritionStore {
         entry.timestamp = Self.timestamp(on: newDate, preservingTimeFrom: entry.timestamp)
         link(entry, to: newLog)
         markHealthKitSyncStaleIfNeeded(entry)
-        save()
+        if save() {
+            scheduleHealthSync(for: entry)
+        }
     }
 
     // MARK: - Micronutrient Aggregation
@@ -735,14 +778,32 @@ final class NutritionStore {
         return log
     }
 
-    private func save() {
+    @discardableResult
+    private func save() -> Bool {
         do {
             try modelContext.save()
             tursoMirror?.scheduleMirror(reason: "nutrition_store_save")
+            changeCount += 1
+            return true
         } catch {
             // Keep existing non-throwing write behavior for UI flows.
+            changeCount += 1
+            return false
         }
-        changeCount += 1
+    }
+
+    private func scheduleHealthSync(for entry: NutritionEntry) {
+        guard isHealthSyncEnabled(), let healthSyncer else { return }
+        Task {
+            await healthSyncer.syncNutritionEntry(entry, in: modelContext)
+        }
+    }
+
+    private func scheduleHealthDelete(forEntryID entryID: UUID) {
+        guard isHealthSyncEnabled(), let healthSyncer else { return }
+        Task {
+            await healthSyncer.deleteNutritionSamples(forEntryID: entryID)
+        }
     }
 
     private static func timestamp(on date: Date, preservingTimeFrom timestamp: Date) -> Date {
