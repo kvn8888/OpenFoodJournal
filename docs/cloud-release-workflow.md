@@ -1,6 +1,6 @@
 # Cloud CI, TestFlight, and App Store Workflow
 
-Status: workflows, GitHub environments, verified credentials, and the remote `testflight` branch exist; deployment remains disabled while environment protections and enablement variables are completed.
+Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, and immutable future releases are configured. Deployment remains disabled until the enablement variables are intentionally turned on.
 
 Last updated: 2026-07-26
 
@@ -41,8 +41,8 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 | Upload | Manual `asc` archive/export/upload | Trusted `testflight` push runs signed archive, export, upload, processing wait, and internal distribution |
 | Release identity | Build number and local notes had to be tracked manually | TestFlight prerelease stores commit SHA, build ID, version, IPA hash, toolchain, and notes |
 | App Store | A new local archive could be made for release | The exact TestFlight build is promoted; binary changes after the tested tag are rejected |
-| Metadata | Maintained in docs and entered manually | Existing public metadata is copied; release notes are applied from the reviewed manifest |
-| AI role | Ad hoc assistance | AI may draft bounded metadata from release evidence; deterministic code owns state changes |
+| Metadata | Maintained in docs and entered manually | Existing public metadata is copied; version-specific notes are drafted, validated, sealed into the TestFlight manifest, and shown before approval |
+| AI role | Ad hoc assistance | GitHub Models drafts bounded public notes from commit-derived evidence; deterministic fallback and validation own the artifact |
 | Public submission | Manual | Still requires an explicit workflow input and protected-environment approval |
 
 ## Implemented workflows
@@ -60,10 +60,11 @@ It:
 
 1. Uses the pinned `xcode-27` image.
 2. Confirms Xcode 27.0 build `27A5218g`.
-3. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
-4. Selects an available hosted iPhone simulator.
-5. Executes only `OpenFoodJournalUnitTests`, which includes provider-contract tests.
-6. Uploads an `.xcresult` for three days only when the test job fails.
+3. Runs the release-note and promotion-manifest contract tests.
+4. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
+5. Selects an available hosted iPhone simulator.
+6. Executes only `OpenFoodJournalUnitTests`, which includes provider-contract tests.
+7. Uploads an `.xcresult` for three days only when the test job fails.
 
 It receives no App Store Connect, signing, or AI-provider credentials. Live provider tests continue to skip when their opt-in credentials are absent.
 
@@ -86,29 +87,37 @@ After cloud CI succeeds, it:
 1. Enters the protected `testflight-internal` environment.
 2. Installs the pinned `asc` 3.1.1 binary after SHA-256 verification.
 3. Validates the App Store Connect API credentials.
-4. Asks App Store Connect for the next remote-safe build number.
-5. Generates deterministic draft “What to Test” notes from commits since the previous TestFlight tag.
-6. Imports the distribution certificate into a temporary keychain.
-7. Installs the provisioning profile on the ephemeral runner.
-8. Archives and exports the signed IPA.
-9. Uploads the IPA, waits for processing, and assigns it to the internal `Testing` group.
-10. Creates `testflight/<version>-<build>` as a GitHub prerelease pointing to the exact source commit.
-11. Attaches an immutable release manifest and the test notes.
-12. Retains the manifest and upload result for 14 days, but does not retain DerivedData or the archive.
+4. Reads the source-controlled marketing version and rejects malformed versions; a release PR must intentionally change `MARKETING_VERSION` when moving from 1.4 to 1.5.
+5. Asks App Store Connect for the next remote-safe build number. Build numbers are automatic.
+6. Generates deterministic “What to Test” evidence from commits since the previous TestFlight tag.
+7. Uses GitHub Models to draft public “What’s New” text from that bounded evidence, with deterministic notes as a fallback.
+8. Validates the locale, non-empty content, control characters, and Apple’s 4,000-character limit.
+9. Imports the distribution certificate into a temporary keychain and installs the provisioning profile.
+10. Archives once, exports the signed IPA, uploads it, waits for processing, and assigns it to the internal `Testing` group.
+11. Creates `testflight/<version>-<build>` as a GitHub prerelease pointing to the exact source commit.
+12. Attaches the immutable schema-2 manifest, “What to Test,” “What’s New,” and generation metadata.
+13. Retains small release evidence for 14 days, but does not retain DerivedData, the archive, or the IPA.
 
 The prerelease manifest is the bridge between TestFlight and App Store promotion:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "appStoreAppID": "6761086648",
   "buildID": "App Store Connect build UUID",
   "buildNumber": "11",
   "commitSHA": "full Git commit SHA",
   "createdAt": "ISO-8601 timestamp",
   "ipaSHA256": "SHA-256 of the uploaded IPA",
-  "notes": "Reviewed release notes",
-  "notesSource": "deterministic-git-history",
+  "primaryLocale": "en-US",
+  "whatToTest": "Internal verification notes",
+  "whatsNew": "Public, version-specific release notes",
+  "whatsNewSHA256": "SHA-256 of the attached notes file",
+  "releaseNotes": {
+    "source": "github-models",
+    "model": "openai/gpt-4.1",
+    "requiresHumanApproval": true
+  },
   "version": "1.4",
   "xcodeBuild": "27A5218g"
 }
@@ -120,18 +129,20 @@ Triggers on pushes to `app-store` or manual dispatch. The promotion job runs onl
 
 After cloud CI succeeds, it:
 
-1. Enters the protected `app-store-production` environment.
+1. Runs an unprivileged preparation job with no Apple credentials.
 2. Finds the newest `testflight/*` prerelease tag reachable from `app-store`.
-3. Downloads and validates the release manifest.
+3. Downloads and verifies the schema-2 manifest and the hash-bound “What’s New” asset.
 4. Rejects promotion if app source or Xcode project files changed after that tested tag.
-5. Verifies that the App Store Connect build is still `VALID`.
-6. Copies version metadata from the current public App Store version, excluding “What’s New.”
-7. Attaches the exact TestFlight build to the target version.
-8. Applies the manifest release notes as “What’s New.”
-9. Runs strict App Store submission validation.
-10. Submits to App Review only when a manual dispatch explicitly sets `submit_for_review` and the protected job is approved.
+5. Publishes a promotion-plan artifact and job summary showing the exact version, build, note source, requested action, and public text.
+6. Pauses at the protected `app-store-production` environment. Secrets are unavailable until approval.
+7. Re-downloads the plan into the approved job and re-verifies provenance and notes.
+8. Verifies that the App Store Connect build is still `VALID`.
+9. Copies version metadata from the current public App Store version, excluding “What’s New.”
+10. Attaches the exact TestFlight build to the target version and applies the approved manifest text.
+11. Runs strict App Store submission validation.
+12. Submits to App Review only when a manual dispatch explicitly sets `submit_for_review=true` and the protected job is approved.
 
-A normal push stages and validates the release. It does not silently submit it for public review.
+A normal push is the required staging run: it requests approval to stage and validate with `submit_for_review=false`. Public submission requires a separate intentional manual dispatch and protected-environment approval. Neither path recompiles the app.
 
 ## Versioned release configuration
 
@@ -145,6 +156,7 @@ Non-secret identifiers and toolchain pins live in [`ci/release-config.json`](../
 - GitHub runner label.
 - Required Xcode version and build.
 - Pinned `asc` version and checksums.
+- Default GitHub Models release-note model.
 - TestFlight tag prefix.
 
 These values are reviewable configuration, not credentials.
@@ -202,13 +214,15 @@ The current scripts consume GitHub environment secrets as environment variables.
 
 - Require `Cloud CI / Compile and unit tests`.
 - Accept promotion pull requests from `testflight`.
-- Require linear or otherwise auditable history.
+- Preserve the `testflight` commit with a normal merge commit so the immutable TestFlight tag remains an ancestor of `app-store`; do not squash or rebase promotion PRs.
 - Prevent force pushes and deletion.
 - Do not permit app-affecting commits after the selected TestFlight tag. The workflow enforces this again before promotion.
 
 The legacy `main` branch remains historical and is not part of the release train.
 
 ## AI release assistant boundary
+
+The TestFlight workflow currently uses GitHub Models `openai/gpt-4.1` through the job’s short-lived `GITHUB_TOKEN` and `models: read` permission. It sends only bounded commit-derived change evidence—never source code, app data, Apple credentials, signing assets, or AI-provider keys. `RELEASE_NOTES_MODEL` may override the versioned default. A reviewed file at `metadata/releases/<version>/<locale>/whats-new.txt` takes precedence when exact copy is required.
 
 AI can safely prepare a release proposal containing:
 
@@ -219,7 +233,7 @@ AI can safely prepare a release proposal containing:
 - A checklist of screenshots, privacy metadata, entitlements, or disclosures that may have changed.
 - Links to the source PRs and tests supporting each claim.
 
-AI output must be written to a reviewable artifact or pull request. It must follow a versioned JSON schema and include source commit/PR references. If generation fails, deterministic commit-derived notes remain the fallback.
+AI output is written to the TestFlight prerelease, promotion artifact, and workflow summary. It follows a versioned JSON schema and remains explicitly unapproved until the protected production job is approved. If inference or validation fails, deterministic commit-derived notes remain the fallback.
 
 AI must not own:
 
@@ -232,8 +246,6 @@ AI must not own:
 - Export-compliance, privacy, content-rights, health-claim, or age-rating certification.
 - Final public submission without an explicit owner action and protected-environment approval.
 
-The first implementation intentionally uses deterministic git-derived notes. Connecting an AI drafting provider is a separate step because the provider, model, data-sharing policy, and secret source have not been selected.
-
 ## Owner setup checklist
 
 1. Use the reconciled `app-store` head as the reviewed source for `testflight`.
@@ -241,14 +253,14 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 3. Keep the remote `testflight` branch aligned with reviewed release candidates.
 4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
 5. Keep the verified environment secrets in place and rerun **Release Credential Check** after any key, certificate, password, or profile rotation.
-6. Configure required reviewers and deployment-branch restrictions.
+6. Keep `testflight-internal` restricted to `testflight`; keep `app-store-production` restricted to `app-store` with Kevin as a required reviewer.
 7. Enable immutable releases in the repository's GitHub settings.
 8. Add the branch protection rules and required `Cloud CI` check.
 9. Run `Cloud CI` manually once while both deployment variables remain disabled.
-10. Set `ENABLE_TESTFLIGHT_AUTOMATION=true`.
+10. Keep `ENABLE_TESTFLIGHT_AUTOMATION=true` after the first validated workflow rollout.
 11. Push a reviewed commit to `testflight` and verify the first cloud-signed build.
 12. Confirm the prerelease manifest points to the correct commit and build.
-13. Set `ENABLE_APP_STORE_AUTOMATION=true` only after TestFlight promotion succeeds.
+13. Keep `ENABLE_APP_STORE_AUTOMATION=true` after the first schema-2 TestFlight manifest exists.
 14. Promote `testflight` to `app-store`; leave `submit_for_review` false for the first staging run.
 15. Review strict validation, metadata, legal declarations, and reviewer notes before manually dispatching submission.
 
@@ -256,13 +268,12 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 
 - `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
 - `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
-- Neither deployment environment currently has required reviewers or deployment-branch restrictions.
-- The repository enablement variables are absent, so both deployment jobs remain disabled.
-- GitHub release immutability is not yet confirmed enabled.
+- `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
+- Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
+- Repository release immutability is enabled for future releases.
+- The repository enablement variables are still absent, so neither deployment job can mutate App Store Connect yet.
+- The first production promotion requires a new schema-2 TestFlight build; legacy schema-1 manifests fail closed.
 - `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
-- The exact AI provider/model and data policy for release-note drafting are not selected.
-
-The workflows remain non-deploying until their enablement variables are set, so committing this foundation alone cannot upload or submit a build.
 
 ## Storage behavior
 

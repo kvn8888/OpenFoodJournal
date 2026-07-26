@@ -28,6 +28,9 @@ jobs:
       - name: Verify pinned Xcode toolchain
         run: bash .github/scripts/verify-xcode.sh
 
+      - name: Verify release workflow contracts
+        run: bash .github/scripts/test-release-workflow.sh
+
       - name: Compile app and all test targets
         run: |
           xcodebuild \
