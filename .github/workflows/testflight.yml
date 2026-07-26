@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  models: read
 
 concurrency:
   group: openfoodjournal-testflight-upload
@@ -52,7 +53,7 @@ jobs:
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
           asc apps view --id "${app_id}" --output json > "${RUNNER_TEMP}/app.json"
 
-      - name: Resolve build number and release notes
+      - name: Resolve marketing version and build number
         id: release
         run: |
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
@@ -65,6 +66,10 @@ jobs:
               --output json
           )"
           version="$(jq -r '.version' <<< "${version_json}")"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "MARKETING_VERSION must be intentionally set in the Xcode project (for example, 1.4 or 1.5.0)." >&2
+            exit 1
+          fi
           build_json="$(
             asc builds next-build-number \
               --app "${app_id}" \
@@ -111,6 +116,22 @@ jobs:
           printf 'build_number=%s\n' "${build_number}" >> "${GITHUB_OUTPUT}"
           printf 'app_id=%s\n' "${app_id}" >> "${GITHUB_OUTPUT}"
           printf 'locale=%s\n' "${locale}" >> "${GITHUB_OUTPUT}"
+
+      - name: Draft and validate version-specific release notes
+        id: notes
+        env:
+          RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+        run: |
+          model="${RELEASE_NOTES_MODEL:-$(jq -r '.releaseNotesModel' ci/release-config.json)}"
+          bash .github/scripts/generate-release-notes.sh \
+            "${{ steps.release.outputs.version }}" \
+            "${{ steps.release.outputs.build_number }}" \
+            "${{ steps.release.outputs.locale }}" \
+            "${RUNNER_TEMP}/what-to-test.txt" \
+            "${RUNNER_TEMP}/whats-new.txt" \
+            "${RUNNER_TEMP}/release-notes-metadata.json" \
+            "${model}"
+          printf 'source=%s\n' "$(jq -r '.source' "${RUNNER_TEMP}/release-notes-metadata.json")" >> "${GITHUB_OUTPUT}"
 
       - name: Install distribution signing assets
         run: bash .github/scripts/install-signing-assets.sh
@@ -190,7 +211,9 @@ jobs:
           fi
 
           ipa_sha="$(shasum -a 256 "${RUNNER_TEMP}/OpenFoodJournal.ipa" | awk '{print $1}')"
-          notes="$(cat "${RUNNER_TEMP}/what-to-test.txt")"
+          what_to_test="$(cat "${RUNNER_TEMP}/what-to-test.txt")"
+          whats_new="$(cat "${RUNNER_TEMP}/whats-new.txt")"
+          whats_new_sha="$(shasum -a 256 "${RUNNER_TEMP}/whats-new.txt" | awk '{print $1}')"
           manifest="${RUNNER_TEMP}/release-manifest.json"
           jq -n \
             --arg appStoreAppID "${{ steps.release.outputs.app_id }}" \
@@ -199,19 +222,26 @@ jobs:
             --arg commitSHA "${GITHUB_SHA}" \
             --arg createdAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
             --arg ipaSHA256 "${ipa_sha}" \
-            --arg notes "${notes}" \
+            --arg primaryLocale "${{ steps.release.outputs.locale }}" \
+            --arg whatToTest "${what_to_test}" \
+            --arg whatsNew "${whats_new}" \
+            --arg whatsNewSHA256 "${whats_new_sha}" \
             --arg version "${{ steps.release.outputs.version }}" \
             --arg xcodeBuild "$(jq -r '.requiredXcodeBuild' ci/release-config.json)" \
+            --slurpfile notesMetadata "${RUNNER_TEMP}/release-notes-metadata.json" \
             '{
-              schemaVersion: 1,
+              schemaVersion: 2,
               appStoreAppID: $appStoreAppID,
               buildID: $buildID,
               buildNumber: $buildNumber,
               commitSHA: $commitSHA,
               createdAt: $createdAt,
               ipaSHA256: $ipaSHA256,
-              notes: $notes,
-              notesSource: "deterministic-git-history",
+              primaryLocale: $primaryLocale,
+              whatToTest: $whatToTest,
+              whatsNew: $whatsNew,
+              whatsNewSHA256: $whatsNewSHA256,
+              releaseNotes: $notesMetadata[0],
               version: $version,
               xcodeBuild: $xcodeBuild
             }' > "${manifest}"
@@ -230,7 +260,9 @@ jobs:
             --draft
           gh release upload "${{ steps.manifest.outputs.tag }}" \
             "${{ steps.manifest.outputs.manifest }}#release-manifest.json" \
-            "${RUNNER_TEMP}/what-to-test.txt#what-to-test.txt"
+            "${RUNNER_TEMP}/what-to-test.txt#what-to-test.txt" \
+            "${RUNNER_TEMP}/whats-new.txt#whats-new.txt" \
+            "${RUNNER_TEMP}/release-notes-metadata.json#release-notes-metadata.json"
           gh release edit "${{ steps.manifest.outputs.tag }}" \
             --draft=false \
             --prerelease
@@ -242,6 +274,8 @@ jobs:
           path: |
             ${{ steps.manifest.outputs.manifest }}
             ${{ runner.temp }}/what-to-test.txt
+            ${{ runner.temp }}/whats-new.txt
+            ${{ runner.temp }}/release-notes-metadata.json
             ${{ runner.temp }}/testflight-publish.json
           retention-days: 14
 
@@ -254,5 +288,11 @@ jobs:
             echo "- Build: ${{ steps.release.outputs.build_number }}"
             echo "- Commit: \`${GITHUB_SHA}\`"
             echo "- Manifest tag: \`${{ steps.manifest.outputs.tag }}\`"
+            echo "- What's New source: \`${{ steps.notes.outputs.source }}\`"
+            echo "- Public notes require App Store environment approval before use"
             echo "- DerivedData and archive retention: ephemeral runner only"
+            echo
+            echo "### Draft What's New"
+            echo
+            cat "${RUNNER_TEMP}/whats-new.txt"
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -7,3 +7,4 @@ self-hosted-runner:
 config-variables:
   - ENABLE_APP_STORE_AUTOMATION
   - ENABLE_TESTFLIGHT_AUTOMATION
+  - RELEASE_NOTES_MODEL
