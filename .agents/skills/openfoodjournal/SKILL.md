@@ -476,10 +476,10 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 **CursorEndModifier**: Applied once at the app root with `.cursorAtEnd()`. It keeps `UITextField` cursors at the end on focus and installs a non-canceling window tap recognizer that dismisses the keyboard when tapping outside text inputs. Keep this centralized instead of adding competing per-view whitespace tap gestures.
 
-## Current State (Last Updated: 2026-07-25)
+## Current State (Last Updated: 2026-07-26)
 
 - **Branch: `app-store`** — CloudKit is the primary sync path, with optional push-only Turso mirror for user-owned SQL debugging
-- **Cloud release foundation** — Workflow, signing, manifest, promotion, credential-smoke, storage-retention, and documentation files are pushed on `app-store`. The two GitHub environments exist. `app-store-production` authentication and app/build read access pass; the TestFlight provisioning profile passes decode, team/bundle, and expiration checks. Deployment remains disabled because `testflight-internal` currently resolves `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64` as empty, the remote `testflight` branch and environment protections are absent, and the enablement variables are unset.
+- **Cloud release foundation** — Workflow, signing, manifest, promotion, credential-smoke, storage-retention, and documentation files are pushed on `app-store`. On 2026-07-26, both environments passed App Store Connect authentication and app/build reads; `testflight-internal` also passed distribution-certificate decode/password/identity and provisioning-profile decode/bundle/team/expiration checks. Deployment remains disabled because the remote `testflight` branch and environment protections are absent and the enablement variables are unset.
 - **Internal TestFlight: version 1.4 build 10** — uploaded 2026-07-25, App Store Connect processing state `VALID`, internal state `IN_BETA_TESTING`; includes centralized HealthKit synchronization and pending-entry reconciliation
 - App structure complete: all models, services, and views implemented
 - 5-tab layout: Journal, Food Bank, History, Assistant, Settings (Containers accessed via RadialMenuButton)

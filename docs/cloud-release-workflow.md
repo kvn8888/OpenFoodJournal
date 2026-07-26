@@ -2,7 +2,7 @@
 
 Status: workflows and GitHub environments exist; deployment remains disabled while TestFlight credentials, environment protections, the remote branch, and enablement variables are completed.
 
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 
 ## Decision
 
@@ -240,7 +240,7 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 2. Keep the centralized HealthKit, Assistant, container, and cloud-release work together; it is reconciled and pushed.
 3. Create the remote `testflight` branch from the chosen reviewed commit.
 4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
-5. Replace the empty `testflight-internal` values for `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64`, then rerun **Release Credential Check**.
+5. Keep the verified environment secrets in place and rerun **Release Credential Check** after any key, certificate, password, or profile rotation.
 6. Configure required reviewers and deployment-branch restrictions.
 7. Enable immutable releases in the repository's GitHub settings.
 8. Add the branch protection rules and required `Cloud CI` check.
@@ -255,8 +255,8 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 ## Current blockers
 
 - The remote `testflight` branch does not exist.
-- `testflight-internal` has empty values for `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64`. Its key ID, issuer ID, certificate password, and provisioning profile are present; the profile independently passed decode, bundle/team, and expiration checks on 2026-07-25.
-- `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-25. This proves authentication/read access, not mutation permissions.
+- `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
+- `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
 - Neither deployment environment currently has required reviewers or deployment-branch restrictions.
 - The repository enablement variables are absent, so both deployment jobs remain disabled.
 - GitHub release immutability is not yet confirmed enabled.
