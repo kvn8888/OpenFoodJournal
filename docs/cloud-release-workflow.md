@@ -1,6 +1,6 @@
 # Cloud CI, TestFlight, and App Store Workflow
 
-Status: workflows and GitHub environments exist; deployment remains disabled while TestFlight credentials, environment protections, the remote branch, and enablement variables are completed.
+Status: workflows, GitHub environments, verified credentials, and the remote `testflight` branch exist; deployment remains disabled while environment protections and enablement variables are completed.
 
 Last updated: 2026-07-26
 
@@ -238,7 +238,7 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 
 1. Use the reconciled `app-store` head as the reviewed source for `testflight`.
 2. Keep the centralized HealthKit, Assistant, container, and cloud-release work together; it is reconciled and pushed.
-3. Create the remote `testflight` branch from the chosen reviewed commit.
+3. Keep the remote `testflight` branch aligned with reviewed release candidates.
 4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
 5. Keep the verified environment secrets in place and rerun **Release Credential Check** after any key, certificate, password, or profile rotation.
 6. Configure required reviewers and deployment-branch restrictions.
@@ -254,7 +254,6 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 
 ## Current blockers
 
-- The remote `testflight` branch does not exist.
 - `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
 - `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
 - Neither deployment environment currently has required reviewers or deployment-branch restrictions.
