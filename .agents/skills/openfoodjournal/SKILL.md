@@ -445,6 +445,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) for the old-versus-new comparison, workflow behavior, security model, secrets, branch protections, rollout checklist, and current blockers.
 
 - `.github/workflows/cloud-ci.yml` compiles all targets and executes `OpenFoodJournalUnitTests` on a hosted simulator. It never runs UI tests or receives deployment/provider secrets.
+- `.github/workflows/release-credentials-check.yml` is a manual, read-only smoke workflow. It checks App Store Connect app/build access from both deployment environments and independently validates the TestFlight certificate/password and provisioning profile without allocating a build number, archiving, uploading, staging, or submitting.
 - `.github/workflows/testflight.yml` is gated by `ENABLE_TESTFLIGHT_AUTOMATION=true` and the `testflight-internal` GitHub environment. It uses ephemeral signing assets, pinned `asc` checksums, serialized build-number allocation, internal distribution, and a draft-then-publish commit/build/IPA-hash manifest protected by GitHub release immutability. DerivedData, archives, and signing material are not retained.
 - `.github/workflows/app-store.yml` is gated by `ENABLE_APP_STORE_AUTOMATION=true` and the `app-store-production` environment. It validates manifest ancestry and source identity, promotes the existing `VALID` TestFlight build, copies prior public metadata, applies reviewed release notes, and runs strict readiness checks. It submits only on an explicit manual dispatch.
 - `ci/release-config.json` owns non-secret Apple identifiers and toolchain pins. Credentials stay in protected GitHub environment secrets or an external secrets manager.
@@ -478,7 +479,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 ## Current State (Last Updated: 2026-07-25)
 
 - **Branch: `app-store`** — CloudKit is the primary sync path, with optional push-only Turso mirror for user-owned SQL debugging
-- **Cloud release foundation** — Workflow, signing, manifest, promotion, storage-retention, and documentation files exist locally. Deployment is intentionally disabled pending remote `testflight` creation, GitHub environments/secrets/protections, and enablement variables.
+- **Cloud release foundation** — Workflow, signing, manifest, promotion, credential-smoke, storage-retention, and documentation files are pushed on `app-store`. The two GitHub environments exist. `app-store-production` authentication and app/build read access pass; the TestFlight provisioning profile passes decode, team/bundle, and expiration checks. Deployment remains disabled because `testflight-internal` currently resolves `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64` as empty, the remote `testflight` branch and environment protections are absent, and the enablement variables are unset.
 - **Internal TestFlight: version 1.4 build 10** — uploaded 2026-07-25, App Store Connect processing state `VALID`, internal state `IN_BETA_TESTING`; includes centralized HealthKit synchronization and pending-entry reconciliation
 - App structure complete: all models, services, and views implemented
 - 5-tab layout: Journal, Food Bank, History, Assistant, Settings (Containers accessed via RadialMenuButton)

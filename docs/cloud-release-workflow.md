@@ -1,6 +1,6 @@
 # Cloud CI, TestFlight, and App Store Workflow
 
-Status: implementation foundation added; deployment remains disabled until the owner configures GitHub environments, secrets, branch protections, and enablement variables.
+Status: workflows and GitHub environments exist; deployment remains disabled while TestFlight credentials, environment protections, the remote branch, and enablement variables are completed.
 
 Last updated: 2026-07-25
 
@@ -66,6 +66,16 @@ It:
 6. Uploads an `.xcresult` for three days only when the test job fails.
 
 It receives no App Store Connect, signing, or AI-provider credentials. Live provider tests continue to skip when their opt-in credentials are absent.
+
+### `.github/workflows/release-credentials-check.yml`
+
+Runs only by manual dispatch and performs no release mutation. It authenticates
+to App Store Connect from both deployment environments, reads the configured app
+and build list, and independently verifies the TestFlight distribution
+certificate/password and provisioning profile. Splitting the certificate and
+profile checks ensures one missing secret does not hide the state of the other
+asset. It does not allocate a build number, archive, upload, distribute, change
+metadata, stage a version, or submit for review.
 
 ### `.github/workflows/testflight.yml`
 
@@ -226,11 +236,11 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 
 ## Owner setup checklist
 
-1. Decide which commit should seed `testflight`. The current local `app-store` checkout contains work that is not all present on `origin/app-store`.
-2. Merge or otherwise reconcile the current focused HealthKit PR and the separate local build-10 work.
+1. Use the reconciled `app-store` head as the reviewed source for `testflight`.
+2. Keep the centralized HealthKit, Assistant, container, and cloud-release work together; it is reconciled and pushed.
 3. Create the remote `testflight` branch from the chosen reviewed commit.
-4. Create the `testflight-internal` and `app-store-production` GitHub environments.
-5. Add the environment secrets listed above through GitHub or the selected secrets manager.
+4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
+5. Replace the empty `testflight-internal` values for `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64`, then rerun **Release Credential Check**.
 6. Configure required reviewers and deployment-branch restrictions.
 7. Enable immutable releases in the repository's GitHub settings.
 8. Add the branch protection rules and required `Cloud CI` check.
@@ -245,12 +255,13 @@ The first implementation intentionally uses deterministic git-derived notes. Con
 ## Current blockers
 
 - The remote `testflight` branch does not exist.
-- GitHub deployment environments, protections, variables, and secrets are not configured.
+- `testflight-internal` has empty values for `ASC_PRIVATE_KEY_B64` and `APPLE_DISTRIBUTION_CERTIFICATE_B64`. Its key ID, issuer ID, certificate password, and provisioning profile are present; the profile independently passed decode, bundle/team, and expiration checks on 2026-07-25.
+- `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-25. This proves authentication/read access, not mutation permissions.
+- Neither deployment environment currently has required reviewers or deployment-branch restrictions.
+- The repository enablement variables are absent, so both deployment jobs remain disabled.
 - GitHub release immutability is not yet confirmed enabled.
-- The signing certificate and provisioning profile must be exported into the selected secrets manager.
 - `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
 - The exact AI provider/model and data policy for release-note drafting are not selected.
-- The current local `app-store` working tree is dirty and ahead of the remote branch. Creating `testflight` from the wrong ref would omit current work or publish unrelated work.
 
 The workflows remain non-deploying until their enablement variables are set, so committing this foundation alone cannot upload or submit a build.
 
