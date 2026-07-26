@@ -214,7 +214,7 @@ The current scripts consume GitHub environment secrets as environment variables.
 
 - Require `Cloud CI / Compile and unit tests`.
 - Accept promotion pull requests from `testflight`.
-- Require linear or otherwise auditable history.
+- Preserve the `testflight` commit with a normal merge commit so the immutable TestFlight tag remains an ancestor of `app-store`; do not squash or rebase promotion PRs.
 - Prevent force pushes and deletion.
 - Do not permit app-affecting commits after the selected TestFlight tag. The workflow enforces this again before promotion.
 
@@ -269,7 +269,7 @@ AI must not own:
 - `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
 - `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
 - `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
-- Both release branches require pull requests, linear history, resolved review conversations, and the `Compile and unit tests` check; force pushes and deletion are disabled.
+- Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
 - Repository release immutability is enabled for future releases.
 - The repository enablement variables are still absent, so neither deployment job can mutate App Store Connect yet.
 - The first production promotion requires a new schema-2 TestFlight build; legacy schema-1 manifests fail closed.
