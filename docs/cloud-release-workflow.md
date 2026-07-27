@@ -1,6 +1,6 @@
 # Cloud CI, TestFlight, and App Store Workflow
 
-Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, and immutable future releases are configured. Deployment remains disabled until the enablement variables are intentionally turned on.
+Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, immutable future releases, and both deployment enablement variables are configured. Future trusted branch updates now use the cloud release train.
 
 Last updated: 2026-07-26
 
@@ -271,7 +271,6 @@ AI must not own:
 - `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
 - Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
 - Repository release immutability is enabled for future releases.
-- The repository enablement variables are still absent, so neither deployment job can mutate App Store Connect yet.
 - The first production promotion requires a new schema-2 TestFlight build; legacy schema-1 manifests fail closed.
 - `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
 
