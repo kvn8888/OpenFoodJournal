@@ -1,7 +1,8 @@
 // OpenFoodJournal — NewContainerSheet
-// Lets the user start tracking a new food container.
+// Lets the user either start tracking a changing gross container weight or
+// immediately log a food portion measured with an empty-container tare.
 // Step 1: Pick a food from the Food Bank (or enter manually)
-// Step 2: Enter the serving size in grams + starting container weight
+// Step 2: Enter grams per serving and choose the weight workflow
 // AGPL-3.0 License
 
 import SwiftUI
@@ -32,6 +33,8 @@ struct NewContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(NutritionStore.self) private var nutritionStore
+    @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     // ── SwiftData: all saved foods for the picker ─────────────────
@@ -48,11 +51,16 @@ struct NewContainerSheet: View {
     @State private var startWeightText = ""
     @State private var tareWeightText = ""
     @State private var loadedWeightText = ""
+    @State private var selectedMealType: MealType = .snack
+    @State private var mealTypeWasEdited = false
+    @State private var didApplyDefaultMealType = false
     @State private var searchText = ""
     @FocusState private var focusedField: NewContainerField?
     private let recentlyUsedLimit = 8
+    let logDate: Date
 
-    init(preselectedFood: SavedFood? = nil) {
+    init(preselectedFood: SavedFood? = nil, logDate: Date = .now) {
+        self.logDate = logDate
         _selectedFood = State(initialValue: preselectedFood)
         let gramMapping = preselectedFood?.servingMappings.first {
             $0.to.unit.lowercased() == "g"
@@ -141,7 +149,7 @@ struct NewContainerSheet: View {
                     weightForm
                 }
             }
-            .navigationTitle(selectedFood == nil ? "Pick a Food" : "Start Tracking")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -154,6 +162,9 @@ struct NewContainerSheet: View {
             }
             .onChange(of: selectedFood?.id, initial: true) {
                 prefillStartWeightFromHistory()
+            }
+            .onAppear {
+                applyDefaultMealTypeIfNeeded()
             }
         }
     }
@@ -239,10 +250,10 @@ struct NewContainerSheet: View {
 
                 // Starting weight method
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Starting weight")
+                    Text("Weight method")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text("Enter the total directly, or calculate it from an empty container.")
+                    Text("Track a gross starting weight over time, or use an empty-container tare to log the food on the scale now.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
@@ -252,7 +263,7 @@ struct NewContainerSheet: View {
                         }
                     }
                     .pickerStyle(.segmented)
-                    .accessibilityHint("Choose whether to enter the total weight or calculate it using an empty container")
+                    .accessibilityHint("Choose whether to start tracking a gross weight or log a tared food portion now")
 
                     switch weightMethod {
                     case .total:
@@ -263,39 +274,12 @@ struct NewContainerSheet: View {
                 }
                 .animation(.spring(duration: 0.2), value: weightMethod)
 
-                // Start tracking button
+                // The selected weight method owns the outcome: gross weight
+                // starts tracking, while a complete tare measurement logs now.
                 Button {
-                    guard let food = selectedFood,
-                          let grams = Double(gramsPerServingText), grams > 0,
-                          let weight = selectedStartWeight else { return }
-
-                    let container = TrackedContainer.from(
-                        food,
-                        tareWeight: selectedTareWeight,
-                        startWeight: weight,
-                        gramsPerServing: grams
-                    )
-                    modelContext.insert(container)
-
-                    // Auto-save the grams-per-serving mapping back to the food
-                    // so it pre-fills next time this food is used in a container.
-                    let hasGramMapping = food.servingMappings.contains { $0.to.unit.lowercased() == "g" }
-                    if !hasGramMapping {
-                        let unit = food.servingUnit ?? "serving"
-                        let qty = food.servingQuantity ?? 1.0
-                        let mapping = ServingMapping(
-                            from: ServingAmount(value: qty, unit: unit),
-                            to: ServingAmount(value: grams, unit: "g")
-                        )
-                        food.servingMappings.append(mapping)
-                    }
-
-                    try? modelContext.save()
-                    tursoMirror.scheduleMirror(reason: "container_created")
-
-                    dismiss()
+                    performPrimaryAction()
                 } label: {
-                    Label("Start Tracking", systemImage: "scalemass")
+                    Label(primaryActionTitle, systemImage: primaryActionIcon)
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -348,7 +332,7 @@ struct NewContainerSheet: View {
 
             if let foodWeight = tareCalculation?.initialFoodWeight {
                 HStack {
-                    Label("Food added", systemImage: "plus.circle.fill")
+                    Label("Food to log", systemImage: "plus.circle.fill")
                         .font(.subheadline)
                         .fontWeight(.medium)
                     Spacer()
@@ -359,12 +343,28 @@ struct NewContainerSheet: View {
                 .padding()
                 .glassEffect(in: .rect(cornerRadius: 20))
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Food added \(formatWeight(foodWeight)) grams")
+                .accessibilityLabel("Food to log \(formatWeight(foodWeight)) grams")
             } else if let tareValidationMessage {
                 Label(tareValidationMessage, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .accessibilityLabel(tareValidationMessage)
+            }
+
+            Text("This logs the measured food immediately. It does not create an active tracked container.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Log as")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Picker("Meal", selection: mealTypeBinding) {
+                    ForEach(MealType.allCases) { meal in
+                        Text(meal.rawValue.capitalized).tag(meal)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
         .transition(.opacity.combined(with: .move(edge: .trailing)))
@@ -435,8 +435,7 @@ struct NewContainerSheet: View {
 
     private var isFormValid: Bool {
         guard selectedFood != nil else { return false }
-        guard let grams = Double(gramsPerServingText), grams > 0 else { return false }
-        return selectedStartWeight != nil
+        return selectedWeightAction != nil
     }
 
     private var tareCalculation: ContainerWeightCalculation? {
@@ -451,29 +450,26 @@ struct NewContainerSheet: View {
         )
     }
 
-    private var selectedStartWeight: Double? {
+    private var selectedWeightAction: ContainerWeightAction? {
+        guard let gramsPerServing = Double(gramsPerServingText) else { return nil }
         switch weightMethod {
         case .total:
-            guard let weight = Double(startWeightText) else { return nil }
-            let calculation = ContainerWeightCalculation(
-                tareWeight: nil,
-                initialGrossWeight: weight,
-                endingGrossWeight: nil
+            guard let initialGrossWeight = Double(startWeightText) else { return nil }
+            return ContainerWeightAction.enterWeight(
+                initialGrossWeight: initialGrossWeight,
+                gramsPerServing: gramsPerServing
             )
-            return calculation.isValidStart ? weight : nil
         case .tare:
-            guard let calculation = tareCalculation, calculation.isValidStart else { return nil }
-            return calculation.initialGrossWeight
+            guard let emptyContainerWeight = Double(tareWeightText),
+                  let loadedGrossWeight = Double(loadedWeightText) else {
+                return nil
+            }
+            return ContainerWeightAction.useTare(
+                emptyContainerWeight: emptyContainerWeight,
+                loadedGrossWeight: loadedGrossWeight,
+                gramsPerServing: gramsPerServing
+            )
         }
-    }
-
-    private var selectedTareWeight: Double? {
-        guard weightMethod == .tare,
-              let calculation = tareCalculation,
-              calculation.isValidStart else {
-            return nil
-        }
-        return calculation.tareWeight
     }
 
     private var tareValidationMessage: String? {
@@ -495,6 +491,88 @@ struct NewContainerSheet: View {
     }
 
     // MARK: - Helpers
+
+    private var navigationTitle: String {
+        guard selectedFood != nil else { return "Pick a Food" }
+        return weightMethod == .tare ? "Log by Tare" : "Start Tracking"
+    }
+
+    private var primaryActionTitle: String {
+        weightMethod == .tare ? "Log to Journal" : "Start Tracking"
+    }
+
+    private var primaryActionIcon: String {
+        weightMethod == .tare ? "book.pages.fill" : "scalemass"
+    }
+
+    private var mealTypeBinding: Binding<MealType> {
+        Binding {
+            selectedMealType
+        } set: { newValue in
+            selectedMealType = newValue
+            mealTypeWasEdited = true
+        }
+    }
+
+    private var mealTypeForLog: MealType {
+        mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType()
+    }
+
+    private func performPrimaryAction() {
+        guard let food = selectedFood,
+              let action = selectedWeightAction else {
+            return
+        }
+
+        switch action {
+        case let .startTracking(initialGrossWeight, gramsPerServing):
+            persistGramMappingIfNeeded(for: food, gramsPerServing: gramsPerServing)
+            let container = TrackedContainer.from(
+                food,
+                startWeight: initialGrossWeight,
+                gramsPerServing: gramsPerServing
+            )
+            modelContext.insert(container)
+            try? modelContext.save()
+            tursoMirror.scheduleMirror(reason: "container_created")
+
+        case let .logTaredFood(plan):
+            persistGramMappingIfNeeded(for: food, gramsPerServing: plan.gramsPerServing)
+            nutritionStore.logTaredFood(
+                plan,
+                from: food,
+                mealType: mealTypeForLog,
+                to: logDate
+            )
+        }
+
+        dismiss()
+    }
+
+    private func persistGramMappingIfNeeded(
+        for food: SavedFood,
+        gramsPerServing: Double
+    ) {
+        let hasGramMapping = food.servingMappings.contains {
+            $0.to.unit.lowercased() == "g"
+        }
+        guard !hasGramMapping else { return }
+
+        let unit = food.servingUnit ?? "serving"
+        let quantity = food.servingQuantity ?? 1
+        food.servingMappings.append(
+            ServingMapping(
+                from: ServingAmount(value: quantity, unit: unit),
+                to: ServingAmount(value: gramsPerServing, unit: "g")
+            )
+        )
+    }
+
+    private func applyDefaultMealTypeIfNeeded() {
+        guard !didApplyDefaultMealType else { return }
+        selectedMealType = mealTimeSettings.mealType()
+        didApplyDefaultMealType = true
+    }
 
     /// Selects a food and pre-fills grams per serving from its mappings if available
     private func selectFood(_ food: SavedFood) {

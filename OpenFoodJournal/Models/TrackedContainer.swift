@@ -285,3 +285,90 @@ struct ContainerWeightCalculation: Equatable, Sendable {
         return max(0, endingGrossWeight - tareWeight)
     }
 }
+
+// MARK: - Weight Entry Actions
+
+/// The two weight-entry methods intentionally produce different outcomes.
+///
+/// A gross starting weight begins a long-running tracked container. A tare
+/// measurement already identifies the food on the scale, so it is a complete
+/// journal portion and must not create an active container that requires a
+/// second measurement.
+enum ContainerWeightAction: Equatable, Sendable {
+    case startTracking(initialGrossWeight: Double, gramsPerServing: Double)
+    case logTaredFood(TareFoodLogPlan)
+
+    static func enterWeight(
+        initialGrossWeight: Double,
+        gramsPerServing: Double
+    ) -> ContainerWeightAction? {
+        guard gramsPerServing.isFinite, gramsPerServing > 0 else { return nil }
+        let calculation = ContainerWeightCalculation(
+            tareWeight: nil,
+            initialGrossWeight: initialGrossWeight,
+            endingGrossWeight: nil
+        )
+        guard calculation.isValidStart else { return nil }
+        return .startTracking(
+            initialGrossWeight: initialGrossWeight,
+            gramsPerServing: gramsPerServing
+        )
+    }
+
+    static func useTare(
+        emptyContainerWeight: Double,
+        loadedGrossWeight: Double,
+        gramsPerServing: Double
+    ) -> ContainerWeightAction? {
+        guard gramsPerServing.isFinite, gramsPerServing > 0 else { return nil }
+        let calculation = ContainerWeightCalculation(
+            tareWeight: emptyContainerWeight,
+            initialGrossWeight: loadedGrossWeight,
+            endingGrossWeight: nil
+        )
+        guard calculation.isValidStart,
+              let foodWeight = calculation.initialFoodWeight else {
+            return nil
+        }
+        return .logTaredFood(
+            TareFoodLogPlan(
+                emptyContainerWeight: emptyContainerWeight,
+                loadedGrossWeight: loadedGrossWeight,
+                foodWeight: foodWeight,
+                gramsPerServing: gramsPerServing
+            )
+        )
+    }
+}
+
+/// A validated, immediate journal portion produced by an empty-container tare.
+struct TareFoodLogPlan: Equatable, Sendable {
+    let emptyContainerWeight: Double
+    let loadedGrossWeight: Double
+    let foodWeight: Double
+    let gramsPerServing: Double
+
+    var servings: Double {
+        foodWeight / gramsPerServing
+    }
+
+    func makeNutritionEntry(
+        from food: SavedFood,
+        mealType: MealType
+    ) -> NutritionEntry {
+        let entry = food.toNutritionEntry(mealType: mealType)
+        let factor = servings
+
+        entry.calories *= factor
+        entry.protein *= factor
+        entry.carbs *= factor
+        entry.fat *= factor
+        entry.micronutrients = entry.micronutrients.mapValues {
+            MicronutrientValue(value: $0.value * factor, unit: $0.unit)
+        }
+        entry.servingCount = factor
+        entry.servingQuantity = foodWeight
+        entry.servingUnit = "g"
+        return entry
+    }
+}
