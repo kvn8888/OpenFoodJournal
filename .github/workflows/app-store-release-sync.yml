@@ -1,0 +1,134 @@
+name: Sync Public App Store Release
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: openfoodjournal-public-release-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Publish verified GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Check out production history and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825a76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve the public App Store version
+        id: app_store
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          country="$(jq -r '.appStoreCountry' ci/release-config.json)"
+          lookup_url="https://itunes.apple.com/lookup?id=${app_id}&country=${country}"
+          lookup_json="$(
+            curl \
+              --fail \
+              --location \
+              --proto '=https' \
+              --retry 3 \
+              --show-error \
+              --silent \
+              --tlsv1.2 \
+              "${lookup_url}"
+          )"
+          result_count="$(jq -r '.resultCount // 0' <<< "${lookup_json}")"
+          public_app_id="$(jq -r '.results[0].trackId // empty' <<< "${lookup_json}")"
+          public_version="$(jq -r '.results[0].version // empty' <<< "${lookup_json}")"
+          if [[ "${result_count}" -ne 1 || "${public_app_id}" != "${app_id}" ]]; then
+            echo "Apple's public lookup did not return the configured app ${app_id}." >&2
+            exit 1
+          fi
+          if [[ ! "${public_version}" =~ ^[0-9]+([.][0-9]+){1,2}$ ]]; then
+            echo "Apple returned malformed public version ${public_version:-<missing>}." >&2
+            exit 1
+          fi
+          printf 'version=%s\n' "${public_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve the matching GitHub release
+        id: release
+        run: |
+          release_tag="$(jq -r '.publicReleaseTagPrefix' ci/release-config.json)${{ steps.app_store.outputs.version }}"
+          release_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --paginate |
+              jq -cs --arg tag "${release_tag}" \
+                '[.[][] | select(.tag_name == $tag)] | first // empty'
+          )"
+          if [[ -z "${release_json}" ]]; then
+            echo "Public App Store ${release_tag} has no prepared GitHub release." >&2
+            exit 1
+          fi
+
+          release_id="$(jq -r '.id' <<< "${release_json}")"
+          is_draft="$(jq -r '.draft' <<< "${release_json}")"
+          printf '%s\n' "${release_json}" > "${RUNNER_TEMP}/release.json"
+          printf 'id=%s\n' "${release_id}" >> "${GITHUB_OUTPUT}"
+          printf 'tag=%s\n' "${release_tag}" >> "${GITHUB_OUTPUT}"
+          printf 'publish=%s\n' "${is_draft}" >> "${GITHUB_OUTPUT}"
+
+      - name: Download sealed release evidence
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          assets_json="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${{ steps.release.outputs.id }}/assets"
+          )"
+          manifest_asset="$(
+            jq -r '[.[] | select(.name == "release-manifest.json")] | first | .id // empty' \
+              <<< "${assets_json}"
+          )"
+          notes_asset="$(
+            jq -r '[.[] | select(.name == "whats-new.txt")] | first | .id // empty' \
+              <<< "${assets_json}"
+          )"
+          if [[ -z "${manifest_asset}" || -z "${notes_asset}" ]]; then
+            echo "Release draft is missing its manifest or What's New asset." >&2
+            exit 1
+          fi
+          gh api \
+            -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${manifest_asset}" \
+            > "${RUNNER_TEMP}/release-manifest.json"
+          gh api \
+            -H 'Accept: application/octet-stream' \
+            "repos/${GITHUB_REPOSITORY}/releases/assets/${notes_asset}" \
+            > "${RUNNER_TEMP}/whats-new.txt"
+
+      - name: Verify the public release candidate
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          bash .github/scripts/verify-public-release-candidate.sh \
+            "${{ steps.app_store.outputs.version }}" \
+            "${RUNNER_TEMP}/release.json" \
+            "${RUNNER_TEMP}/release-manifest.json" \
+            "${RUNNER_TEMP}/whats-new.txt"
+
+      - name: Publish the immutable GitHub release
+        if: steps.release.outputs.publish == 'true'
+        run: |
+          gh release edit "${{ steps.release.outputs.tag }}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false \
+            --latest
+
+      - name: Write synchronization summary
+        run: |
+          {
+            echo "## Public App Store release synchronization"
+            echo
+            echo "- Public App Store version: ${{ steps.app_store.outputs.version }}"
+            echo "- GitHub release: \`${{ steps.release.outputs.tag }}\`"
+            echo "- Published in this run: ${{ steps.release.outputs.publish }}"
+            echo "- Public status source: Apple iTunes Lookup API"
+            echo "- Build provenance source: immutable TestFlight schema-2 manifest"
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "appStoreAppID": "6761086648",
+  "appStoreCountry": "us",
   "bundleIdentifier": "k3vnc.OpenFoodJournal",
   "teamID": "83B48K23H4",
   "signingCertificateName": "iPhone Distribution",
@@ -15,5 +16,6 @@
     "arm64": "47d9be058359ab29c4f562361abfed710b7f24acdaa79c78777bc6e25e118fef",
     "x86_64": "8fbb62de183d62828bf94a433d446bcc5dfd3b26f51de9d4105200df9aacd806"
   },
-  "testFlightTagPrefix": "testflight/"
+  "testFlightTagPrefix": "testflight/",
+  "publicReleaseTagPrefix": "v"
 }
