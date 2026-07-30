@@ -7,6 +7,27 @@
 import SwiftUI
 import SwiftData
 
+private enum ContainerStartWeightMethod: String, CaseIterable, Identifiable {
+    case total
+    case tare
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .total: "Enter Weight"
+        case .tare: "Use Tare"
+        }
+    }
+}
+
+private enum NewContainerField: Hashable {
+    case gramsPerServing
+    case totalWeight
+    case tareWeight
+    case loadedWeight
+}
+
 struct NewContainerSheet: View {
     // ── Environment ───────────────────────────────────────────────
     @Environment(\.dismiss) private var dismiss
@@ -23,9 +44,12 @@ struct NewContainerSheet: View {
     // ── State ─────────────────────────────────────────────────────
     @State private var selectedFood: SavedFood?
     @State private var gramsPerServingText = ""
+    @State private var weightMethod: ContainerStartWeightMethod = .total
     @State private var startWeightText = ""
+    @State private var tareWeightText = ""
+    @State private var loadedWeightText = ""
     @State private var searchText = ""
-    @FocusState private var focusedField: Bool
+    @FocusState private var focusedField: NewContainerField?
     private let recentlyUsedLimit = 8
 
     init(preselectedFood: SavedFood? = nil) {
@@ -125,7 +149,7 @@ struct NewContainerSheet: View {
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedField = false }
+                    Button("Done") { focusedField = nil }
                 }
             }
             .onChange(of: selectedFood?.id, initial: true) {
@@ -204,7 +228,7 @@ struct NewContainerSheet: View {
                         TextField("e.g. 39", text: $gramsPerServingText)
                             .keyboardType(.decimalPad)
                             .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .focused($focusedField)
+                            .focused($focusedField, equals: .gramsPerServing)
                         Text("g")
                             .font(.title3)
                             .foregroundStyle(.secondary)
@@ -213,41 +237,44 @@ struct NewContainerSheet: View {
                     .background(.quaternary, in: .rect(cornerRadius: 12))
                 }
 
-                // Starting weight input
+                // Starting weight method
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Container weight")
+                    Text("Starting weight")
                         .font(.subheadline)
                         .fontWeight(.medium)
-                    Text("Place the container on a scale. Include the container itself.")
+                    Text("Enter the total directly, or calculate it from an empty container.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    HStack {
-                        TextField("e.g. 500", text: $startWeightText)
-                            .keyboardType(.decimalPad)
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .focused($focusedField)
-                        Text("g")
-                            .font(.title3)
-                            .foregroundStyle(.secondary)
+                    Picker("Starting weight method", selection: $weightMethod) {
+                        ForEach(ContainerStartWeightMethod.allCases) { method in
+                            Text(method.title).tag(method)
+                        }
                     }
-                    .padding()
-                    .background(.quaternary, in: .rect(cornerRadius: 12))
+                    .pickerStyle(.segmented)
+                    .accessibilityHint("Choose whether to enter the total weight or calculate it using an empty container")
 
-                    if let selectedFoodLastEndWeight {
-                        Text("Last end weight: \(formatWeight(selectedFoodLastEndWeight))g")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    switch weightMethod {
+                    case .total:
+                        totalWeightInput
+                    case .tare:
+                        tareWeightInputs
                     }
                 }
+                .animation(.spring(duration: 0.2), value: weightMethod)
 
                 // Start tracking button
                 Button {
                     guard let food = selectedFood,
                           let grams = Double(gramsPerServingText), grams > 0,
-                          let weight = Double(startWeightText), weight > 0 else { return }
+                          let weight = selectedStartWeight else { return }
 
-                    let container = TrackedContainer.from(food, startWeight: weight, gramsPerServing: grams)
+                    let container = TrackedContainer.from(
+                        food,
+                        tareWeight: selectedTareWeight,
+                        startWeight: weight,
+                        gramsPerServing: grams
+                    )
                     modelContext.insert(container)
 
                     // Auto-save the grams-per-serving mapping back to the food
@@ -280,6 +307,100 @@ struct NewContainerSheet: View {
         }
     }
 
+    // MARK: - Starting Weight
+
+    private var totalWeightInput: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            weightField(
+                title: "Container + food",
+                explanation: "Place the container on a scale. Include the container itself.",
+                placeholder: "e.g. 500",
+                text: $startWeightText,
+                field: .totalWeight
+            )
+
+            if let selectedFoodLastEndWeight {
+                Text("Last end weight: \(formatWeight(selectedFoodLastEndWeight))g")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .leading)))
+    }
+
+    private var tareWeightInputs: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            weightField(
+                title: "Empty container",
+                explanation: "Weigh the empty bowl, including any lid or accessories you will keep on it.",
+                placeholder: "e.g. 350",
+                text: $tareWeightText,
+                field: .tareWeight
+            )
+
+            weightField(
+                title: "Container + food",
+                explanation: "Add the food, then weigh the same container again.",
+                placeholder: "e.g. 500",
+                text: $loadedWeightText,
+                field: .loadedWeight
+            )
+
+            if let foodWeight = tareCalculation?.initialFoodWeight {
+                HStack {
+                    Label("Food added", systemImage: "plus.circle.fill")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    Spacer()
+                    Text("\(formatWeight(foodWeight))g")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                }
+                .padding()
+                .glassEffect(in: .rect(cornerRadius: 20))
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Food added \(formatWeight(foodWeight)) grams")
+            } else if let tareValidationMessage {
+                Label(tareValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityLabel(tareValidationMessage)
+            }
+        }
+        .transition(.opacity.combined(with: .move(edge: .trailing)))
+    }
+
+    private func weightField(
+        title: String,
+        explanation: String,
+        placeholder: String,
+        text: Binding<String>,
+        field: NewContainerField
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.subheadline)
+                .fontWeight(.medium)
+            Text(explanation)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            HStack {
+                TextField(placeholder, text: text)
+                    .keyboardType(.decimalPad)
+                    .font(.system(size: 24, weight: .bold, design: .rounded))
+                    .focused($focusedField, equals: field)
+                    .accessibilityLabel(title)
+                Text("g")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .padding()
+            .background(.quaternary, in: .rect(cornerRadius: 12))
+        }
+    }
+
     // MARK: - Selected Food Card
 
     /// Shows a compact summary of the selected food
@@ -300,6 +421,9 @@ struct NewContainerSheet: View {
                 selectedFood = nil
                 gramsPerServingText = ""
                 startWeightText = ""
+                tareWeightText = ""
+                loadedWeightText = ""
+                weightMethod = .total
             }
             .font(.caption)
         }
@@ -312,8 +436,62 @@ struct NewContainerSheet: View {
     private var isFormValid: Bool {
         guard selectedFood != nil else { return false }
         guard let grams = Double(gramsPerServingText), grams > 0 else { return false }
-        guard let weight = Double(startWeightText), weight > 0 else { return false }
-        return true
+        return selectedStartWeight != nil
+    }
+
+    private var tareCalculation: ContainerWeightCalculation? {
+        guard let tareWeight = Double(tareWeightText),
+              let loadedWeight = Double(loadedWeightText) else {
+            return nil
+        }
+        return ContainerWeightCalculation(
+            tareWeight: tareWeight,
+            initialGrossWeight: loadedWeight,
+            endingGrossWeight: nil
+        )
+    }
+
+    private var selectedStartWeight: Double? {
+        switch weightMethod {
+        case .total:
+            guard let weight = Double(startWeightText) else { return nil }
+            let calculation = ContainerWeightCalculation(
+                tareWeight: nil,
+                initialGrossWeight: weight,
+                endingGrossWeight: nil
+            )
+            return calculation.isValidStart ? weight : nil
+        case .tare:
+            guard let calculation = tareCalculation, calculation.isValidStart else { return nil }
+            return calculation.initialGrossWeight
+        }
+    }
+
+    private var selectedTareWeight: Double? {
+        guard weightMethod == .tare,
+              let calculation = tareCalculation,
+              calculation.isValidStart else {
+            return nil
+        }
+        return calculation.tareWeight
+    }
+
+    private var tareValidationMessage: String? {
+        guard !tareWeightText.isEmpty || !loadedWeightText.isEmpty else { return nil }
+        guard let tareWeight = Double(tareWeightText),
+              tareWeight.isFinite,
+              tareWeight > 0 else {
+            return "Enter a positive empty-container weight."
+        }
+        guard let loadedWeight = Double(loadedWeightText),
+              loadedWeight.isFinite,
+              loadedWeight > 0 else {
+            return "Enter the container-and-food weight."
+        }
+        guard loadedWeight > tareWeight else {
+            return "Container + food must be heavier than the empty container."
+        }
+        return nil
     }
 
     // MARK: - Helpers
@@ -329,6 +507,8 @@ struct NewContainerSheet: View {
     private func prefillStartWeightFromHistory() {
         guard selectedFood != nil else {
             startWeightText = ""
+            tareWeightText = ""
+            loadedWeightText = ""
             return
         }
         startWeightText = selectedFoodLastEndWeight.map(formatWeight) ?? ""
@@ -339,9 +519,13 @@ struct NewContainerSheet: View {
     }
 
     private static func formatInitialWeight(_ weight: Double) -> String {
-        if weight.rounded() == weight {
-            return String(format: "%.0f", weight)
+        var text = String(format: "%.3f", weight)
+        while text.last == "0" {
+            text.removeLast()
         }
-        return String(format: "%.1f", weight)
+        if text.last == "." {
+            text.removeLast()
+        }
+        return text
     }
 }

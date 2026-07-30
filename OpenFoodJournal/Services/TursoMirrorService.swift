@@ -193,6 +193,7 @@ enum TursoSchema {
             .init(name: "carbs_per_serving", type: "REAL"),
             .init(name: "fat_per_serving", type: "REAL"),
             .init(name: "grams_per_serving", type: "REAL"),
+            .init(name: "tare_weight", type: "REAL"),
             .init(name: "start_weight", type: "REAL"),
             .init(name: "final_weight", type: "REAL"),
             .init(name: "start_date", type: "TEXT"),
@@ -1014,6 +1015,35 @@ final class TursoMirrorService {
         return TursoSQLStatement(sql: sql, args: columns.compactMap { row.columns[$0] })
     }
 
+    static func trackedContainerMirrorRow(
+        _ container: TrackedContainer,
+        generation: String,
+        startDate: String,
+        completedDate: String?,
+        micronutrientsJSON: String
+    ) -> TursoMirrorRow {
+        TursoMirrorRow(table: "ofj_tracked_containers", columns: [
+            "id": .text(container.id.uuidString),
+            "food_name": .text(container.foodName),
+            "food_brand": container.foodBrand.map(TursoSQLValue.text) ?? .null,
+            "calories_per_serving": .real(container.caloriesPerServing),
+            "protein_per_serving": .real(container.proteinPerServing),
+            "carbs_per_serving": .real(container.carbsPerServing),
+            "fat_per_serving": .real(container.fatPerServing),
+            "grams_per_serving": .real(container.gramsPerServing),
+            "tare_weight": container.tareWeight.map(TursoSQLValue.real) ?? .null,
+            "start_weight": .real(container.startWeight),
+            "final_weight": container.finalWeight.map(TursoSQLValue.real) ?? .null,
+            "start_date": .text(startDate),
+            "completed_date": completedDate.map(TursoSQLValue.text) ?? .null,
+            "saved_food_id": container.savedFoodID.map {
+                .text($0.uuidString)
+            } ?? .null,
+            "micronutrients_json": .text(micronutrientsJSON),
+            "mirror_generation": .text(generation)
+        ])
+    }
+
     private func upsertSyncRun(
         id: String,
         generation: String,
@@ -1135,23 +1165,13 @@ final class TursoMirrorService {
         }
 
         for container in containers {
-            append(TursoMirrorRow(table: "ofj_tracked_containers", columns: [
-                "id": .text(container.id.uuidString),
-                "food_name": .text(container.foodName),
-                "food_brand": optionalString(container.foodBrand),
-                "calories_per_serving": .real(container.caloriesPerServing),
-                "protein_per_serving": .real(container.proteinPerServing),
-                "carbs_per_serving": .real(container.carbsPerServing),
-                "fat_per_serving": .real(container.fatPerServing),
-                "grams_per_serving": .real(container.gramsPerServing),
-                "start_weight": .real(container.startWeight),
-                "final_weight": optionalDouble(container.finalWeight),
-                "start_date": .text(iso(container.startDate)),
-                "completed_date": optionalDate(container.completedDate),
-                "saved_food_id": optionalUUID(container.savedFoodID),
-                "micronutrients_json": .text(jsonString(container.micronutrientsPerServing)),
-                "mirror_generation": .text(generation)
-            ]))
+            append(Self.trackedContainerMirrorRow(
+                container,
+                generation: generation,
+                startDate: iso(container.startDate),
+                completedDate: container.completedDate.map { iso($0) },
+                micronutrientsJSON: jsonString(container.micronutrientsPerServing)
+            ))
         }
 
         append(TursoMirrorRow(table: "ofj_preferences", columns: [
