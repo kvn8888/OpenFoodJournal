@@ -23,11 +23,12 @@ jobs:
     name: Build and distribute
     needs: cloud-ci
     if: vars.ENABLE_TESTFLIGHT_AUTOMATION == 'true'
-    runs-on: xcode-27
+    runs-on: macos-26
     timeout-minutes: 90
     environment: testflight-internal
 
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}

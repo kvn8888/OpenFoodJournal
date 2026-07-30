@@ -6,9 +6,9 @@
   "signingCertificateName": "iPhone Distribution",
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
   "primaryLocale": "en-US",
-  "xcodeRunner": "xcode-27",
-  "requiredXcodeVersion": "Xcode 27.0",
-  "requiredXcodeBuild": "27A5218g",
+  "xcodeRunner": "macos-26",
+  "requiredXcodeVersion": "Xcode 26.6",
+  "requiredXcodeBuild": "17F113",
   "ascVersion": "3.1.1",
   "releaseNotesModel": "openai/gpt-4.1",
   "ascSHA256": {

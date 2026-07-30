@@ -28,11 +28,11 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 
 | Concern | Previous workflow | New workflow |
 | --- | --- | --- |
-| Build host | Kevin's local Mac and external SSD | Ephemeral GitHub `xcode-27` runner |
+| Build host | Kevin's local Mac and external SSD | Ephemeral GitHub `macos-26` runner |
 | Source branch | `app-store` was development, TestFlight, and App Store release state | `testflight` is integration/beta; `app-store` is production promotion |
 | Pull requests | Local compile verification was performed when requested | Every PR to either protected branch runs cloud compile and non-UI tests |
-| Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Pinned GitHub `xcode-27` preview image |
-| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5218g` and fails on drift |
+| Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Stable Xcode 26.6 on GitHub `macos-26` |
+| Xcode drift | Selected manually | Workflow requires Xcode 26.6 build `17F113` and fails on drift |
 | DerivedData | Accumulated under local `.asc` or other local paths | Created under `RUNNER_TEMP` and destroyed after the job |
 | Unit tests | Often compile-only because the local simulator store is unreliable | Executed on a hosted iPhone simulator through the unit-test-only scheme |
 | UI tests | Not required | UI-test execution remains excluded |
@@ -58,8 +58,8 @@ Triggers on:
 
 It:
 
-1. Uses the pinned `xcode-27` image.
-2. Confirms Xcode 27.0 build `27A5218g`.
+1. Uses the pinned `macos-26` image.
+2. Selects and confirms stable Xcode 26.6 build `17F113`.
 3. Runs the release-note and promotion-manifest contract tests.
 4. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
 5. Selects an available hosted iPhone simulator.
@@ -119,7 +119,7 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
     "requiresHumanApproval": true
   },
   "version": "1.4",
-  "xcodeBuild": "27A5218g"
+  "xcodeBuild": "17F113"
 }
 ```
 
@@ -272,7 +272,7 @@ AI must not own:
 - Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
 - Repository release immutability is enabled for future releases.
 - The first production promotion requires a new schema-2 TestFlight build; legacy schema-1 manifests fail closed.
-- `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
+- Release archives use stable Xcode 26.6 rather than an Xcode beta. Beta toolchains can become invalid for App Store Connect uploads as soon as Apple advances the supported beta.
 
 ## Storage behavior
 
