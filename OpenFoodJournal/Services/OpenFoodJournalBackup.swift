@@ -439,6 +439,7 @@ struct TrackedContainerRecord: Codable {
     var fatPerServing: Double
     var micronutrientsPerServing: [String: MicronutrientValue]
     var gramsPerServing: Double
+    var tareWeight: Double?
     var startWeight: Double
     var finalWeight: Double?
     var startDate: Date
@@ -455,6 +456,7 @@ struct TrackedContainerRecord: Codable {
         fatPerServing = container.fatPerServing
         micronutrientsPerServing = container.micronutrientsPerServing
         gramsPerServing = container.gramsPerServing
+        tareWeight = container.tareWeight
         startWeight = container.startWeight
         finalWeight = container.finalWeight
         startDate = container.startDate
@@ -473,6 +475,7 @@ struct TrackedContainerRecord: Codable {
             fatPerServing: fatPerServing,
             micronutrientsPerServing: micronutrientsPerServing,
             gramsPerServing: gramsPerServing,
+            tareWeight: tareWeight,
             startWeight: startWeight,
             startDate: startDate,
             savedFoodID: savedFoodID
@@ -491,6 +494,7 @@ struct TrackedContainerRecord: Codable {
         container.fatPerServing = fatPerServing
         container.micronutrientsPerServing = micronutrientsPerServing
         container.gramsPerServing = gramsPerServing
+        container.tareWeight = tareWeight
         container.startWeight = startWeight
         container.finalWeight = finalWeight
         container.startDate = startDate
