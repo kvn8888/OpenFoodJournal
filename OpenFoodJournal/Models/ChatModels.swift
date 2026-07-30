@@ -692,8 +692,8 @@ extension ChatDiagnosticSpan {
         ]
         let formatter = ISO8601DateFormatter()
         var rows = [header.map(csv).joined(separator: ",")]
-        rows.append(contentsOf: spans.map { span in
-            [
+        for span in spans {
+            let columns: [String] = [
                 span.id.uuidString,
                 formatter.string(from: span.startedAt),
                 formatter.string(from: span.endedAt),
@@ -715,8 +715,9 @@ extension ChatDiagnosticSpan {
                 span.tlsMs.map(String.init) ?? "",
                 span.uploadMs.map(String.init) ?? "",
                 span.serverWaitMs.map(String.init) ?? "",
-            ].map(csv).joined(separator: ",")
-        })
+            ]
+            rows.append(columns.map(csv).joined(separator: ","))
+        }
         return rows.joined(separator: "\n")
     }
 }

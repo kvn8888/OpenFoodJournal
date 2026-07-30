@@ -5,6 +5,35 @@ set -euo pipefail
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "${fixture_root}"' EXIT
 
+release_runner="$(jq -r '.xcodeRunner' ci/release-config.json)"
+required_xcode_version="$(jq -r '.requiredXcodeVersion' ci/release-config.json)"
+required_xcode_build="$(jq -r '.requiredXcodeBuild' ci/release-config.json)"
+xcode_app_version="${required_xcode_version#Xcode }"
+developer_dir="/Applications/Xcode_${xcode_app_version}.app/Contents/Developer"
+
+for workflow in \
+  .github/workflows/cloud-ci.yml \
+  .github/workflows/testflight.yml \
+  .github/workflows/app-store.yml \
+  .github/workflows/release-credentials-check.yml
+do
+  if ! grep -Fq "runs-on: ${release_runner}" "${workflow}"; then
+    echo "${workflow} does not use the configured release runner ${release_runner}." >&2
+    exit 1
+  fi
+done
+
+for workflow in \
+  .github/workflows/cloud-ci.yml \
+  .github/workflows/testflight.yml \
+  .github/workflows/app-store.yml
+do
+  if ! grep -Fq "DEVELOPER_DIR: ${developer_dir}" "${workflow}"; then
+    echo "${workflow} does not select configured ${required_xcode_version} (${required_xcode_build})." >&2
+    exit 1
+  fi
+done
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
