@@ -259,7 +259,7 @@ private struct ScanResultSheet: View {
             applyDefaultMealTypeIfNeeded()
         }
         .sheet(item: $savedFoodToTrack, onDismiss: finishScanResult) { food in
-            NewContainerSheet(preselectedFood: food)
+            NewContainerSheet(preselectedFood: food, logDate: logDate)
         }
     }
 

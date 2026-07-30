@@ -55,6 +55,21 @@ final class NutritionStore {
         }
     }
 
+    /// Logs a food portion that has already been fully measured with an
+    /// empty-container tare. Unlike gross-weight tracking, this is a complete
+    /// journal mutation and must not create a pending TrackedContainer.
+    @discardableResult
+    func logTaredFood(
+        _ plan: TareFoodLogPlan,
+        from food: SavedFood,
+        mealType: MealType,
+        to date: Date
+    ) -> NutritionEntry {
+        let entry = plan.makeNutritionEntry(from: food, mealType: mealType)
+        log(entry, to: date)
+        return entry
+    }
+
     private func refreshSavedFoodUsageIfLinked(to entry: NutritionEntry) {
         guard let foodID = entry.savedFoodID else { return }
 

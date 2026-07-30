@@ -5,6 +5,145 @@ import Testing
 
 struct ContainerTrackingTests {
     @Test
+    func weightEntryMethodsResolveToDifferentActions() throws {
+        let enteredWeight = try #require(
+            ContainerWeightAction.enterWeight(
+                initialGrossWeight: 500,
+                gramsPerServing: 50
+            )
+        )
+        let taredWeight = try #require(
+            ContainerWeightAction.useTare(
+                emptyContainerWeight: 350,
+                loadedGrossWeight: 500,
+                gramsPerServing: 50
+            )
+        )
+
+        #expect(
+            enteredWeight == .startTracking(
+                initialGrossWeight: 500,
+                gramsPerServing: 50
+            )
+        )
+        #expect(
+            taredWeight == .logTaredFood(
+                TareFoodLogPlan(
+                    emptyContainerWeight: 350,
+                    loadedGrossWeight: 500,
+                    foodWeight: 150,
+                    gramsPerServing: 50
+                )
+            )
+        )
+    }
+
+    @Test
+    func tareLogPlanCreatesGramBasedJournalEntryWithMicronutrients() throws {
+        let food = SavedFood(
+            name: "Greek Yogurt",
+            brand: "Test",
+            calories: 100,
+            protein: 5,
+            carbs: 10,
+            fat: 2,
+            micronutrients: [
+                "sodium": MicronutrientValue(value: 200, unit: "mg"),
+                "fiber": MicronutrientValue(value: 4, unit: "g")
+            ],
+            servingQuantity: 1,
+            servingUnit: "serving"
+        )
+        let action = try #require(
+            ContainerWeightAction.useTare(
+                emptyContainerWeight: 350,
+                loadedGrossWeight: 500,
+                gramsPerServing: 50
+            )
+        )
+        guard case let .logTaredFood(plan) = action else {
+            Issue.record("Use Tare must resolve to an immediate journal action.")
+            return
+        }
+
+        let entry = plan.makeNutritionEntry(from: food, mealType: .lunch)
+
+        #expect(plan.foodWeight == 150)
+        #expect(plan.servings == 3)
+        #expect(entry.mealType == .lunch)
+        #expect(entry.calories == 300)
+        #expect(entry.protein == 15)
+        #expect(entry.carbs == 30)
+        #expect(entry.fat == 6)
+        #expect(entry.micronutrients["sodium"]?.value == 600)
+        #expect(entry.micronutrients["fiber"]?.value == 12)
+        #expect(entry.servingCount == 3)
+        #expect(entry.servingQuantity == 150)
+        #expect(entry.servingUnit == "g")
+        #expect(entry.savedFoodID == food.id)
+    }
+
+    @MainActor
+    @Test
+    func nutritionStoreLogsTaredFoodWithoutCreatingTrackedContainer() throws {
+        let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
+        let modelContainer = try ModelContainer(
+            for: DailyLog.self,
+            NutritionEntry.self,
+            SavedFood.self,
+            TrackedContainer.self,
+            configurations: configuration
+        )
+        let context = modelContainer.mainContext
+        let store = NutritionStore(modelContext: context)
+        let food = SavedFood(
+            name: "Rice",
+            calories: 200,
+            protein: 4,
+            carbs: 45,
+            fat: 1,
+            micronutrients: [
+                "iron": MicronutrientValue(value: 2, unit: "mg")
+            ],
+            servingQuantity: 1,
+            servingUnit: "serving"
+        )
+        context.insert(food)
+        try context.save()
+
+        let action = try #require(
+            ContainerWeightAction.useTare(
+                emptyContainerWeight: 300,
+                loadedGrossWeight: 400,
+                gramsPerServing: 50
+            )
+        )
+        guard case let .logTaredFood(plan) = action else {
+            Issue.record("Use Tare must resolve to an immediate journal action.")
+            return
+        }
+        let logDate = Date(timeIntervalSince1970: 1_800_000_000)
+
+        let entry = store.logTaredFood(
+            plan,
+            from: food,
+            mealType: .dinner,
+            to: logDate
+        )
+
+        let entries = try context.fetch(FetchDescriptor<NutritionEntry>())
+        let containers = try context.fetch(FetchDescriptor<TrackedContainer>())
+        let log = try #require(store.fetchLog(for: logDate))
+
+        #expect(entries.count == 1)
+        #expect(containers.isEmpty)
+        #expect(log.safeEntries.map(\.id) == [entry.id])
+        #expect(entry.calories == 400)
+        #expect(entry.micronutrients["iron"]?.value == 4)
+        #expect(entry.savedFoodID == food.id)
+    }
+
+    @Test
     func tareCalculationDerivesFoodAdded() {
         let calculation = ContainerWeightCalculation(
             tareWeight: 350,

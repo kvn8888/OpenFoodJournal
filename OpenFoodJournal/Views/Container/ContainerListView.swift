@@ -62,7 +62,7 @@ struct ContainerListView: View {
                 case .complete(let container):
                     CompleteContainerSheet(container: container, logDate: logDate)
                 case .newContainer(let food):
-                    NewContainerSheet(preselectedFood: food)
+                    NewContainerSheet(preselectedFood: food, logDate: logDate)
                 }
             }
             .alert("Food No Longer Available", isPresented: $showMissingFoodAlert) {
