@@ -197,14 +197,15 @@ struct ChatRuntimeHardeningTests {
         harness.proxy.enqueue(ChatModelTurn(calls: calls))
         harness.proxy.enqueue(ChatModelTurn(text: "Parallel reads complete"))
         let thread = harness.makeThread()
-        let started = ContinuousClock.now
 
         await harness.service.send("Read four days", in: thread)
-        let elapsed = started.duration(to: .now)
         let records = thread.safeMessages.compactMap(\.toolRecord)
 
+        // The fake provider records overlap directly. A wall-clock ceiling here
+        // makes the contract depend on hosted-runner load rather than whether
+        // the reads actually ran concurrently.
+        #expect(harness.health.requestedDates.count == calls.count)
         #expect(harness.health.maximumConcurrentRequests == 3)
-        #expect(elapsed < .milliseconds(350))
         #expect(records.map(\.callID) == calls.map(\.callID))
         #expect(records.allSatisfy { $0.status == .completed })
     }
