@@ -5,6 +5,14 @@ set -euo pipefail
 fixture_root="$(mktemp -d)"
 trap 'rm -rf "${fixture_root}"' EXIT
 
+expected_checkout_ref="actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+while IFS= read -r checkout_ref; do
+  if [[ "${checkout_ref}" != "${expected_checkout_ref}" ]]; then
+    echo "Unexpected actions/checkout pin: ${checkout_ref}" >&2
+    exit 1
+  fi
+done < <(grep -Rho 'actions/checkout@[^ ]*' .github/workflows)
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
