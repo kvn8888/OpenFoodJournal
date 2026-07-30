@@ -1,8 +1,8 @@
 # Cloud CI, TestFlight, and App Store Workflow
 
-Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, immutable future releases, and both deployment enablement variables are configured. Future trusted branch updates now use the cloud release train.
+Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, immutable releases, public-release synchronization, and both deployment enablement variables are configured. Future trusted branch updates now use the cloud release train.
 
-Last updated: 2026-07-26
+Last updated: 2026-07-30
 
 ## Decision
 
@@ -18,8 +18,12 @@ testflight
 immutable TestFlight build + release manifest
     ↓ promote the exact processed build
 app-store
-    ↓ metadata staging, strict validation, optional reviewed submission
+    ↓ metadata staging, strict validation, GitHub release draft, optional reviewed submission
 App Review
+    ↓ Apple publishes the approved version
+public App Store listing
+    ↓ scheduled public-version and manifest verification
+immutable GitHub vX.Y release
 ```
 
 TestFlight and the App Store do not receive separately rebuilt binaries. A binary uploaded to App Store Connect becomes a build resource that can be assigned to internal TestFlight testers and later attached to an App Store version. The production workflow therefore promotes the exact tested build instead of recompiling it.
@@ -42,6 +46,7 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 | Release identity | Build number and local notes had to be tracked manually | TestFlight prerelease stores commit SHA, build ID, version, IPA hash, toolchain, and notes |
 | App Store | A new local archive could be made for release | The exact TestFlight build is promoted; binary changes after the tested tag are rejected |
 | Metadata | Maintained in docs and entered manually | Existing public metadata is copied; version-specific notes are drafted, validated, sealed into the TestFlight manifest, and shown before approval |
+| GitHub release | Public releases could remain stale after an App Store update | Promotion prepares a private `vX.Y` draft; scheduled synchronization publishes it only after Apple exposes that version publicly |
 | AI role | Ad hoc assistance | GitHub Models drafts bounded public notes from commit-derived evidence; deterministic fallback and validation own the artifact |
 | Public submission | Manual | Still requires an explicit workflow input and protected-environment approval |
 
@@ -140,15 +145,35 @@ After cloud CI succeeds, it:
 9. Copies version metadata from the current public App Store version, excluding “What’s New.”
 10. Attaches the exact TestFlight build to the target version and applies the approved manifest text.
 11. Runs strict App Store submission validation.
-12. Submits to App Review only when a manual dispatch explicitly sets `submit_for_review=true` and the protected job is approved.
+12. Prepares a private `vX.Y` GitHub release draft targeting the manifest commit, with the immutable TestFlight manifest and hash-bound “What’s New” text attached.
+13. Submits to App Review only when a manual dispatch explicitly sets `submit_for_review=true` and the protected job is approved.
 
 A normal push is the required staging run: it requests approval to stage and validate with `submit_for_review=false`. Public submission requires a separate intentional manual dispatch and protected-environment approval. Neither path recompiles the app.
+
+### `.github/workflows/app-store-release-sync.yml`
+
+Runs every six hours and by manual dispatch from the default `app-store` branch.
+It does not receive Apple credentials. Instead, it:
+
+1. Reads the currently public version from Apple’s HTTPS iTunes Lookup API.
+2. Finds the matching private GitHub `vX.Y` release draft.
+3. Downloads the draft’s `release-manifest.json` and `whats-new.txt` assets.
+4. Requires a schema-2 manifest whose app ID, version, build, TestFlight tag,
+   commit, target, note content, and note hash all match.
+5. Publishes the draft and marks it Latest only after every check passes.
+6. Does nothing when the matching public release is already published.
+
+This separation is intentional. App Review submission is not proof of public
+availability and can precede release by hours or days. The scheduled workflow
+therefore fails closed instead of publishing a GitHub release early. The draft
+and its assets become immutable when published.
 
 ## Versioned release configuration
 
 Non-secret identifiers and toolchain pins live in [`ci/release-config.json`](../ci/release-config.json):
 
 - App Store Connect app ID.
+- Public App Store storefront country.
 - Bundle ID.
 - Apple team ID.
 - Internal TestFlight group ID.
@@ -158,6 +183,7 @@ Non-secret identifiers and toolchain pins live in [`ci/release-config.json`](../
 - Pinned `asc` version and checksums.
 - Default GitHub Models release-note model.
 - TestFlight tag prefix.
+- Public GitHub release tag prefix.
 
 These values are reviewable configuration, not credentials.
 
@@ -217,6 +243,9 @@ The current scripts consume GitHub environment secrets as environment variables.
 - Preserve the `testflight` commit with a normal merge commit so the immutable TestFlight tag remains an ancestor of `app-store`; do not squash or rebase promotion PRs.
 - Prevent force pushes and deletion.
 - Do not permit app-affecting commits after the selected TestFlight tag. The workflow enforces this again before promotion.
+- Permit the approved promotion workflow to prepare `vX.Y` drafts and the
+  public-release synchronization workflow to publish them after Apple’s public
+  storefront reports the same version.
 
 The legacy `main` branch remains historical and is not part of the release train.
 
@@ -263,6 +292,9 @@ AI must not own:
 13. Keep `ENABLE_APP_STORE_AUTOMATION=true` after the first schema-2 TestFlight manifest exists.
 14. Promote `testflight` to `app-store`; leave `submit_for_review` false for the first staging run.
 15. Review strict validation, metadata, legal declarations, and reviewer notes before manually dispatching submission.
+16. After Apple releases the version, verify **Sync Public App Store Release**
+    published the matching immutable `vX.Y` release. Manual dispatch is
+    available if the six-hour schedule has not run yet.
 
 ## Current blockers
 
@@ -271,7 +303,12 @@ AI must not own:
 - `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
 - Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
 - Repository release immutability is enabled for future releases.
-- The first production promotion requires a new schema-2 TestFlight build; legacy schema-1 manifests fail closed.
+- Public GitHub releases 1.2 (build 1) and 1.3 (build 3) were backfilled from
+  live App Store Connect records on 2026-07-30; v1.3 is Latest. TestFlight 1.4
+  (build 11) remains a prerelease and must not become v1.4 until Apple publishes
+  App Store version 1.4.
+- Public-release automation requires a schema-2 TestFlight manifest; legacy
+  schema-1 manifests fail closed.
 - `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
 
 ## Storage behavior
@@ -283,6 +320,9 @@ Cloud runners are ephemeral:
 - TestFlight manifests and upload results remain for 14 days.
 - App Store Connect retains the processed build.
 - GitHub prereleases retain the small manifest and notes, not the IPA.
+- Private App Store release drafts retain the public notes and schema-2
+  manifest. Publishing locks the draft’s tag and assets through repository
+  release immutability.
 
 This removes ongoing Xcode/DerivedData/archive growth from the local SSD while preserving enough evidence to reproduce and audit a release.
 

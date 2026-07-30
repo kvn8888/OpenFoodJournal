@@ -55,7 +55,11 @@ mkdir -p \
   "${promotion_repo}/ci"
 cp .github/scripts/validate-release-notes.sh "${promotion_repo}/.github/scripts/"
 cp .github/scripts/verify-promotion.sh "${promotion_repo}/.github/scripts/"
-printf '%s\n' '{"appStoreAppID":"6761086648"}' > "${promotion_repo}/ci/release-config.json"
+cp .github/scripts/prepare-github-app-store-release.sh "${promotion_repo}/.github/scripts/"
+cp .github/scripts/verify-public-release-candidate.sh "${promotion_repo}/.github/scripts/"
+printf '%s\n' \
+  '{"appStoreAppID":"6761086648","publicReleaseTagPrefix":"v","testFlightTagPrefix":"testflight/"}' \
+  > "${promotion_repo}/ci/release-config.json"
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal/App.swift"
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal.xcodeproj/project.pbxproj"
 
@@ -92,6 +96,40 @@ jq -n \
     }
   }' > "${fixture_manifest}"
 
+fake_bin="${fixture_root}/fake-bin"
+fake_gh_capture="${fixture_root}/gh-release-create.args"
+mkdir -p "${fake_bin}"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'set -euo pipefail' \
+  'if [[ "$1" == "api" ]]; then' \
+  '  printf "%s\n" "[]"' \
+  'elif [[ "$1" == "release" && "$2" == "create" ]]; then' \
+  '  printf "%s\n" "$@" > "${GH_CAPTURE:?}"' \
+  'else' \
+  '  echo "Unexpected fake gh command: $*" >&2' \
+  '  exit 1' \
+  'fi' \
+  > "${fake_bin}/gh"
+chmod +x "${fake_bin}/gh"
+
+(
+  cd "${promotion_repo}"
+  PATH="${fake_bin}:${PATH}" \
+    GH_CAPTURE="${fake_gh_capture}" \
+    GITHUB_REPOSITORY="kvn8888/OpenFoodJournal" \
+    RUNNER_TEMP="${fixture_root}" \
+    bash .github/scripts/prepare-github-app-store-release.sh \
+      "${fixture_manifest}" \
+      "${fixture_whats_new}" >/dev/null
+)
+grep -qx 'v1.4' "${fake_gh_capture}"
+grep -qx -- '--draft' "${fake_gh_capture}"
+grep -qx -- '--target' "${fake_gh_capture}"
+grep -qx "${fixture_commit}" "${fake_gh_capture}"
+grep -qx "${fixture_manifest}#release-manifest.json" "${fake_gh_capture}"
+grep -qx "${fixture_whats_new}#whats-new.txt" "${fake_gh_capture}"
+
 (
   cd "${promotion_repo}"
   bash .github/scripts/verify-promotion.sh \
@@ -109,6 +147,52 @@ if (
     "${fixture_whats_new}" >/dev/null 2>&1
 ); then
   echo "Legacy manifest schema unexpectedly passed promotion verification." >&2
+  exit 1
+fi
+
+fixture_release="${promotion_repo}/release.json"
+jq -n \
+  --arg commit "${fixture_commit}" \
+  '{
+    tag_name: "v1.4",
+    name: "v1.4",
+    draft: true,
+    prerelease: false,
+    target_commitish: $commit
+  }' > "${fixture_release}"
+
+(
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-public-release-candidate.sh \
+    1.4 \
+    "${fixture_release}" \
+    "${fixture_manifest}" \
+    "${fixture_whats_new}" >/dev/null
+)
+
+jq '.tag_name = "v1.5"' "${fixture_release}" > "${fixture_release}.wrong-version"
+if (
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-public-release-candidate.sh \
+    1.4 \
+    "${fixture_release}.wrong-version" \
+    "${fixture_manifest}" \
+    "${fixture_whats_new}" >/dev/null 2>&1
+); then
+  echo "Mismatched public release version unexpectedly passed verification." >&2
+  exit 1
+fi
+
+printf '%s\n' 'Tampered public notes.' > "${fixture_whats_new}.tampered"
+if (
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-public-release-candidate.sh \
+    1.4 \
+    "${fixture_release}" \
+    "${fixture_manifest}" \
+    "${fixture_whats_new}.tampered" >/dev/null 2>&1
+); then
+  echo "Tampered public release notes unexpectedly passed verification." >&2
   exit 1
 fi
 

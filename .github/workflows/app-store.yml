@@ -113,6 +113,8 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 45
     environment: app-store-production
+    permissions:
+      contents: write
 
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
@@ -224,6 +226,12 @@ jobs:
             --strict \
             --output json \
             --pretty > "${RUNNER_TEMP}/app-store-validation.json"
+
+      - name: Prepare the exact GitHub release draft
+        run: |
+          bash .github/scripts/prepare-github-app-store-release.sh \
+            "${RUNNER_TEMP}/promotion-manifest/release-manifest.json" \
+            "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
 
       - name: Submit to App Review
         if: inputs.submit_for_review == true
