@@ -237,7 +237,7 @@ enum OFJType {
     static let rowSubtitle = Font.caption
     static let formLabel = Font.subheadline
     static let calendarWeekday = Font.caption.weight(.semibold)
-    static let calendarDay = Font.title3.weight(.semibold)
+    static let calendarDay = Font.title3
     static let cameraMode = Font.caption.weight(.semibold)
     static let cameraZoom = Font.caption2.weight(.bold)
     static let macroChip = Font.system(size: 10, weight: .semibold, design: .rounded)

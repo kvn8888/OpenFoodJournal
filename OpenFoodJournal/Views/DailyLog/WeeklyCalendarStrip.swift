@@ -104,6 +104,10 @@ struct WeeklyCalendarStrip: View {
     /// The currently selected date — bound to the parent's state.
     @Binding var selectedDate: Date
 
+    /// Optional deterministic progress values for previews and snapshot tests.
+    /// Production callers omit this and continue reading from NutritionStore.
+    private let calorieProgressByDate: [Date: Double]?
+
     /// NutritionStore is used to look up whether past days have logged entries.
     @Environment(NutritionStore.self) private var nutritionStore
 
@@ -112,6 +116,14 @@ struct WeeklyCalendarStrip: View {
 
     /// Calendar used for all date math
     private let calendar = Calendar.current
+
+    init(
+        selectedDate: Binding<Date>,
+        calorieProgressByDate: [Date: Double]? = nil
+    ) {
+        _selectedDate = selectedDate
+        self.calorieProgressByDate = calorieProgressByDate
+    }
 
     /// Number of weeks of history to make scrollable
     private let weeksOfHistory = 52
@@ -222,7 +234,9 @@ struct WeeklyCalendarStrip: View {
 
         // Calculate calorie progress for this day
         let progress: Double
-        if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
+        if let calorieProgressByDate {
+            progress = calorieProgressByDate[startOfDate] ?? 0
+        } else if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
             let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
             progress = totalCalories / goals.dailyCalories
         } else {
@@ -379,7 +393,7 @@ private struct DayCellView: View {
                 // The date number text
                 Text(dayNumber)
                     .font(OFJType.calendarDay)
-                    .fontWeight(state.isSelected ? .bold : .semibold)
+                    .fontWeight(state.isSelected ? .bold : .regular)
                     .foregroundStyle(dateTextColor)
             }
             .frame(
@@ -411,13 +425,41 @@ private struct DayCellView: View {
 // MARK: - Preview
 
 /// A simple wrapper view that provides the required environment objects for previewing.
+@MainActor
 private struct CalendarStripPreview: View {
     @State private var date = Date.now
+    private let container: ModelContainer
+    private let nutritionStore: NutritionStore
+
+    private var calorieProgressByDate: [Date: Double] {
+        guard let weekStart = Calendar.current.dateInterval(
+            of: .weekOfYear,
+            for: date
+        )?.start else {
+            return [:]
+        }
+
+        let progress = [0.38, 0.64, 0.81, 0.97, 1.08, 0.9, 0.0]
+        return Dictionary(uniqueKeysWithValues: progress.enumerated().compactMap { offset, value in
+            Calendar.current.date(byAdding: .day, value: offset, to: weekStart)
+                .map { (Calendar.current.startOfDay(for: $0), value) }
+        })
+    }
+
+    init() {
+        let container = ModelContainer.calendarPreview
+        self.container = container
+        self.nutritionStore = NutritionStore(modelContext: container.mainContext)
+    }
 
     var body: some View {
-        WeeklyCalendarStrip(selectedDate: $date)
+        WeeklyCalendarStrip(
+            selectedDate: $date,
+            calorieProgressByDate: calorieProgressByDate
+        )
             .padding()
-            .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
+            .modelContainer(container)
+            .environment(nutritionStore)
             .environment(UserGoals())
     }
 }
@@ -452,7 +494,6 @@ private struct CalendarStateMatrixPreview: View {
 
 #Preview("Calendar Strip") {
     CalendarStripPreview()
-        .modelContainer(.preview)
 }
 
 #Preview("Calendar States · Light") {
