@@ -28,7 +28,7 @@ This is the single source of truth for any LLM agent working on this project. Re
 ```
 MacrosApp (creates ModelContainer w/ CloudKit + @Observable services)
   └─ ContentView (4-tab TabView)
-       ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
+       ├─ Journal tab → DailyLogView (selected month/year title, WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
        ├─ Food Bank tab → FoodBankView (searchable, sortable active saved food list, swipe-to-archive/edit, "+" menu: AI Search/Composite/Nutrition Calculator/Search OFF/Manual/Archive)
        ├─ History tab → HistoryView (CalendarGridView with progress rings, MacroChartView, macro cards → NutritionDetailView)
        └─ Assistant tab → ChatView (streaming AI chat over nutrition data, persistent CloudKit-synced threads)
@@ -479,7 +479,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 **CursorEndModifier**: Applied once at the app root with `.cursorAtEnd()`. It keeps `UITextField` cursors at the end on focus and installs a non-canceling window tap recognizer that dismisses the keyboard when tapping outside text inputs. Keep this centralized instead of adding competing per-view whitespace tap gestures.
 
-**Executable UI foundations**: `Views/Shared/OFJDesignSystem.swift` owns `OFJColor`, `OFJSpace`, `OFJRadius`, `OFJType`, `OFJMotion`, `OFJLayout`, and stable content phases. Seed values match the existing Liquid Glass UI; architecture-only migrations must be pixel-equivalent unless a separate reviewed design issue authorizes a visual change.
+**Executable UI foundations**: `Views/Shared/OFJDesignSystem.swift` owns `OFJColor`, `OFJSpace`, `OFJRadius`, `OFJType`, `OFJMotion`, `OFJLayout`, calendar calorie state, and stable content phases. Seed values match the existing Liquid Glass UI; architecture-only migrations must be pixel-equivalent unless a separate reviewed design issue authorizes a visual change. Issue #45 authorizes only the Journal calendar/header treatment: selected month/year title, no outer calendar glass card, rounded selected-day rectangle, larger weekday labels, dashed future rings, calendar-only adaptive black/green/`#D86669` status colors, and a subtle selected-day calorie gradient.
 
 ## Current State (Last Updated: 2026-07-30)
 
@@ -510,7 +510,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 - **LogFoodSheet editable micronutrients**: collapsible DisclosureGroup with editable text fields for each micronutrient, values applied at log time
 - **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass
 - **Swipe gesture lag fix**: swipe actions consolidated on MealSectionView Button wrapper (removed from EntryRowView), SavedFoodRowView has `.contentShape(Rectangle())`, EntryRowView uses static DateFormatter
-- WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping
+- WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping; selected dates use a rounded rectangular material state, future dates use disabled dashed rings, and calendar progress uses a Journal-only adaptive black/green/`#D86669` palette. The strip has no outer glass card or duplicate month header; `DailyLogView` shows the selected month/year as its large title and derives a subtle background gradient from the selected day's calorie state.
 - Comprehensive micronutrient tracking: 30 FDA nutrients with daily values
 - Entitlements configured: iCloud (CloudKit), Push Notifications, Camera, HealthKit descriptions
 - BYOK Gemini integration: direct REST API calls, no server proxy needed
