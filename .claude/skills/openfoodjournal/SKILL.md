@@ -15,7 +15,7 @@ This is the single source of truth for any LLM agent working on this project. Re
 | UI Framework | SwiftUI + Liquid Glass (no `#available` gating needed) |
 | Data Layer | SwiftData (`@Model`) + CloudKit Private Database (`iCloud.k3vnc.OpenFoodJournal`) |
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
-| Bundle ID | `k3vnc.OpenFoodJournal` |
+| Bundle IDs | Release: `k3vnc.OpenFoodJournal`; Debug: `k3vnc.OpenFoodJournal.dev` (`OFJ Dev` on device) |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
 | Build Verify Command | `xcodebuild -project OpenFoodJournal.xcodeproj -scheme OpenFoodJournal -destination generic/platform=iOS build` |
 | Build Notes | No iOS simulators installed. Use `generic/platform=iOS` for compile-only verification. Physical device (iPhone 18,3) available when connected. Device support symbols at `/Volumes/DevDisk/Developer/Xcode/iOS DeviceSupport/`. |
@@ -178,6 +178,7 @@ if (!cols.includes("serving_type")) {
 14. **`@Model` enum defaults must be fully qualified** — `var mealType: MealType = .snack` fails during macro expansion. Use `MealType.snack`. The error message is unhelpful (just says macro expansion failed).
 15. **CloudKit optional relationships need `safeEntries` pattern** — `var entries: [NutritionEntry]? = []` requires unwrapping everywhere. Add `var safeEntries: [NutritionEntry] { entries ?? [] }` and use that for reads. Use `log.entries?.append(entry)` for writes.
 16. **`KnownMicronutrient.Category` cases are `.vitamin`/`.mineral`** — not `.vitamins`/`.minerals`. The enum raw values are plural ("Vitamins"/"Minerals") but the Swift case names are singular.
+17. **Debug must remain a separate installed app** — the app target's Debug configuration uses `k3vnc.OpenFoodJournal.dev` and display name `OFJ Dev`; Release uses `k3vnc.OpenFoodJournal`. Do not collapse these bundle IDs. Both configurations name the same CloudKit container, while development signing routes Debug to CloudKit's Development environment and TestFlight distribution uses Production.
 
 ## What's New Sheet Pattern
 
@@ -228,6 +229,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 ## Current State (Last Updated: 2026-04-02)
 
 - **Branch: `app-store`** — CloudKit migration complete, all Turso sync code removed
+- Debug builds install as `OFJ Dev` (`k3vnc.OpenFoodJournal.dev`) alongside the TestFlight app, with a separate local sandbox
 - App structure complete: all models, services, and views implemented
 - 4-tab layout: Journal, Food Bank, History, Settings (Containers accessed via RadialMenuButton)
 - Builds successfully with `xcodebuild -destination generic/platform=iOS` (no simulators installed; compile-only verification)
