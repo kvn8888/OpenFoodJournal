@@ -18,6 +18,8 @@ struct MacrosApp: App {
     @State private var mealTimeSettings = MealTimeSettings()
     @State private var offService = OpenFoodFactsService()
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(OFJAccentTheme.storageKey) private var accentThemeRawValue =
+        OFJAccentTheme.defaultTheme.rawValue
 
     init() {
         let environment = ProcessInfo.processInfo.environment
@@ -158,11 +160,17 @@ struct MacrosApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("hasRetrolinkedMappings") private var hasRetrolinkedMappings = false
 
+    private var accentTheme: OFJAccentTheme {
+        OFJAccentTheme.resolved(from: accentThemeRawValue)
+    }
+
     var body: some Scene {
         WindowGroup {
             if hasCompletedOnboarding {
                 ContentView()
                     .cursorAtEnd()
+                    .tint(accentTheme.accentColor)
+                    .environment(\.ofjAccentTheme, accentTheme)
                     .modelContainer(modelContainer)
                     .environment(nutritionStore)
                     .environment(scanService)
@@ -206,6 +214,8 @@ struct MacrosApp: App {
                     }
             } else {
                 OnboardingView()
+                    .tint(accentTheme.accentColor)
+                    .environment(\.ofjAccentTheme, accentTheme)
                     .modelContainer(modelContainer)
                     .environment(nutritionStore)
                     .environment(scanService)

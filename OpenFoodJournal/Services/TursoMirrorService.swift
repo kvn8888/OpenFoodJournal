@@ -252,6 +252,7 @@ enum TursoSchema {
         ]),
         TursoTableDefinition(name: "ofj_app_settings", columns: [
             .init(name: "id", type: "TEXT PRIMARY KEY"),
+            .init(name: "accent_theme", type: "TEXT"),
             .init(name: "use_gemini_pro", type: "INTEGER"),
             .init(name: "food_bank_auto_generate_emojis", type: "INTEGER"),
             .init(name: "food_bank_use_generated_icon_images", type: "INTEGER"),
@@ -1226,6 +1227,12 @@ final class TursoMirrorService {
 
         append(TursoMirrorRow(table: "ofj_app_settings", columns: [
             "id": .text("default"),
+            "accent_theme": .text(
+                OFJAccentTheme.resolved(
+                    from: defaults.string(forKey: OFJAccentTheme.storageKey)
+                        ?? OFJAccentTheme.defaultTheme.rawValue
+                ).rawValue
+            ),
             "use_gemini_pro": .bool(defaults.bool(forKey: "scan.useProModel")),
             "food_bank_auto_generate_emojis": .bool(defaults.bool(forKey: FoodBankEmojiSettings.autoGenerateKey)),
             "food_bank_use_generated_icon_images": .bool(defaults.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey)),

@@ -642,6 +642,7 @@ struct UserGoalsRecord: Codable {
 }
 
 struct AppSettingsRecord: Codable {
+    var accentTheme: String
     var aiProvider: String
     var assistantProvider: String
     var assistantResearchProvider: String
@@ -664,6 +665,7 @@ struct AppSettingsRecord: Codable {
     var dinnerStartMinutes: Int
 
     init(
+        accentTheme: String = OFJAccentTheme.defaultTheme.rawValue,
         aiProvider: String = AIProviderSettings.defaultProvider.rawValue,
         assistantProvider: String? = nil,
         assistantResearchProvider: String = AssistantResearchProvider.modelProvider.rawValue,
@@ -685,6 +687,7 @@ struct AppSettingsRecord: Codable {
         lunchStartMinutes: Int = MealScheduleDefaults.lunchStartMinutes,
         dinnerStartMinutes: Int = MealScheduleDefaults.dinnerStartMinutes
     ) {
+        self.accentTheme = OFJAccentTheme.resolved(from: accentTheme).rawValue
         self.aiProvider = aiProvider
         self.assistantProvider = assistantProvider ?? aiProvider
         self.assistantResearchProvider = assistantResearchProvider
@@ -708,6 +711,7 @@ struct AppSettingsRecord: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case accentTheme
         case aiProvider
         case assistantProvider
         case assistantResearchProvider
@@ -732,6 +736,10 @@ struct AppSettingsRecord: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        accentTheme = OFJAccentTheme.resolved(
+            from: try container.decodeIfPresent(String.self, forKey: .accentTheme)
+                ?? OFJAccentTheme.defaultTheme.rawValue
+        ).rawValue
         aiProvider = try container.decodeIfPresent(String.self, forKey: .aiProvider) ?? AIProviderSettings.defaultProvider.rawValue
         assistantProvider = try container.decodeIfPresent(String.self, forKey: .assistantProvider) ?? aiProvider
         assistantResearchProvider = try container.decodeIfPresent(String.self, forKey: .assistantResearchProvider) ?? AssistantResearchProvider.modelProvider.rawValue

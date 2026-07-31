@@ -48,6 +48,7 @@ Built with SwiftUI, SwiftData, and Liquid Glass for iOS 26+.
 - **Optional Turso integration** — Push a debuggable copy of local/iCloud app data and append redacted AI diagnostics to your own Turso database for SQL inspection. SwiftData remains the source of truth for app state.
 - **Spreadsheet CSV export** — Export journal entries with stable IDs, ISO dates, macros, serving basics, and micronutrient columns for analysis.
 - **Backup export/import** — Versioned JSON backup restores journal entries, Food Bank foods, containers, preferences, and goals by UUID without duplicating repeated imports.
+- **Appearance themes** — Blue, Harvest Orange, Leaf Green, and Berry Purple tint the app; the Log Food sheet pairs the selected accent with a compact quantity, nutrition, micronutrient, unit, and meal workflow.
 - **AI diagnostic export** — Export the last 14 days of redacted scan, search, Assistant, tool, latency, token, and cost telemetry from your configured Turso database. Prompts, answers, journal/HealthKit values, sources, attachments, and API keys are excluded.
 - **Gemini usage total** — Settings shows a local running estimate of Gemini token cost and token usage, with reset controls.
 

@@ -467,6 +467,8 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 **Repeat logging and scan-to-container UX**: `LogFoodSheet` applies the most recent valid quantity + unit for the linked `SavedFood` on first appearance, falling back to the template when history is missing or its unit is no longer available. Scan results expose an explicit "Save to Food Bank & Track Container" action that saves without journal logging and presents `NewContainerSheet(preselectedFood:)`; dismissing container setup keeps the Food Bank item.
 
+**Appearance and Log Food**: Settings offers Blue, Harvest Orange, Leaf Green, and Berry Purple through `OFJAccentTheme`; the app root owns the tint/environment injection. Harvest Orange uses the reviewed `#E9792B` accent with warm light `#F6F5F3`/`#FFFFFF` and dark `#20201F`/`#2A2A28` Log Food surfaces. `LogFoodSheet` uses compact identity, amount-preserving unit controls, calorie/macronutrient composition, always-visible editable micronutrients when present, factual saved mappings, meal selection, and a sticky Add action. It still logs through `NutritionStore.log(...)` with the linked Food Bank ID and serving-scaled macro/micronutrient values; no view coordinates HealthKit or Turso directly. Accent choice round-trips through JSON backup and the optional Turso settings mirror, with Blue as the backward-compatible fallback.
+
 **RadialMenuButton**: Option bubbles support direct `.onTapGesture` (as well as drag-to-select). A `Color.clear.contentShape(Rectangle()).ignoresSafeArea()` layer behind `GlassEffectContainer` dismisses the menu when tapping outside. The layer is only inserted into the ZStack when `isOpen == true`. Option label text has a subtle drop shadow for legibility over light/glass backgrounds.
 
 **Swipe mappings**:
@@ -481,7 +483,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 **Executable UI foundations**: `Views/Shared/OFJDesignSystem.swift` owns `OFJColor`, `OFJSpace`, `OFJRadius`, `OFJType`, `OFJMotion`, `OFJLayout`, calendar calorie state, and stable content phases. Seed values match the existing Liquid Glass UI; architecture-only migrations must be pixel-equivalent unless a separate reviewed design issue authorizes a visual change. Issue #45 authorizes only the Journal calendar/header treatment: selected month/year title, no outer calendar glass card, rounded selected-day rectangle, larger weekday labels, dashed future rings, calendar-only adaptive black/green/`#D86669` status colors, and a subtle selected-day calorie gradient.
 
-## Current State (Last Updated: 2026-07-30)
+## Current State (Last Updated: 2026-07-31)
 
 - **Branch: `app-store`** — CloudKit is the primary sync path, with optional push-only Turso mirror for user-owned SQL debugging
 - **Cloud release foundation** — Both release branches and deployment environments exist. Credentials pass App Store Connect read checks, and TestFlight signing assets pass integrity checks. `testflight-internal` is restricted to `testflight`; `app-store-production` is restricted to `app-store` and requires `kvn8888` approval. Both branches require pull requests, resolved conversations, and cloud CI; force pushes/deletion are blocked. `testflight` stays linear, while `app-store` uses merge commits for promotion so immutable TestFlight tags remain ancestors of production. Future GitHub releases are immutable, both deployment variables are enabled, and the next trusted TestFlight update will create the first schema-2 manifest.
@@ -507,7 +509,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
 - **NutritionDetailView macro cards**: circular progress rings (not linear ProgressView), showing value inside ring + percentage below
 - **FoodNutrientBreakdownView**: inverse of NutrientBreakdownView — food → all nutrients. NavigationLink from NutrientBreakdownView "By Food" rows
-- **LogFoodSheet editable micronutrients**: collapsible DisclosureGroup with editable text fields for each micronutrient, values applied at log time
+- **LogFoodSheet refresh**: selected app accent, deterministic amount-preserving unit controls, calorie/macro composition, daily-total preview, always-visible editable micronutrient table, factual saved-unit mappings, and sticky meal-aware Add action. Accent selection persists in app settings, backup, and the optional Turso mirror.
 - **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass
 - **Swipe gesture lag fix**: swipe actions consolidated on MealSectionView Button wrapper (removed from EntryRowView), SavedFoodRowView has `.contentShape(Rectangle())`, EntryRowView uses static DateFormatter
 - WeeklyCalendarStrip: horizontally scrollable week strip with momentum snapping; selected dates use a rounded rectangular material state, future dates use disabled dashed rings, and calendar progress uses a Journal-only adaptive black/green/`#D86669` palette. The strip has no outer glass card or duplicate month header; `DailyLogView` shows the selected month/year as its large title and derives a subtle background gradient from the selected day's calorie state.
