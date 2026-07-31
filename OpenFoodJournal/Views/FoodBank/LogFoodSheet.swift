@@ -14,6 +14,8 @@ struct LogFoodSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(UserGoals.self) private var goals
     @Environment(MealTimeSettings.self) private var mealTimeSettings
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.ofjAccentTheme) private var accentTheme
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
 
     // ── Input: the saved food to potentially log ──────────────────
@@ -39,18 +41,12 @@ struct LogFoodSheet: View {
     @State private var showAddMapping = false
     // Index of mapping being edited (nil = adding new)
     @State private var editingMappingIndex: Int?
-    // When true, the onChange(of: selectedUnit) handler skips auto-conversion
-    // (used by the "last used" button which sets quantity and unit together)
-    @State private var suppressUnitConversion = false
     // Editable micronutrient values — initialized from the food template, can be
     // adjusted by the user before logging. Scaling is applied at log time.
     @State private var editedMicros: [String: MicronutrientValue]
 
     // Centralised unit conversion + macro scaling logic (shared with EditEntryView)
     private let converter: ServingConverter
-
-    // Keep baseUnit accessible for onChange unit-switch logic
-    private let baseUnit: String
 
     init(
         food: SavedFood,
@@ -71,7 +67,6 @@ struct LogFoodSheet: View {
         _selectedUnit = State(initialValue: unit)
         _didApplyLastUsedServing = State(initialValue: suggestedQuantity != nil && initialUnit?.isEmpty == false)
         _editedMicros = State(initialValue: food.micronutrients)
-        self.baseUnit = templateUnit
         self.converter = ServingConverter(
             calories: food.calories,
             protein: food.protein,
@@ -92,65 +87,70 @@ struct LogFoodSheet: View {
     private var scaledProtein: Double { converter.scaledProtein(quantity: quantity, unit: selectedUnit) }
     private var scaledCarbs: Double { converter.scaledCarbs(quantity: quantity, unit: selectedUnit) }
     private var scaledFat: Double { converter.scaledFat(quantity: quantity, unit: selectedUnit) }
+    private var micronutrientScaleFactor: Double {
+        max((quantity / unitFactor) / converter.baseQuantity, 0.000_001)
+    }
+    private var scaledMicronutrients: [String: MicronutrientValue] {
+        converter.scaledMicronutrients(
+            editedMicros,
+            quantity: quantity,
+            unit: selectedUnit
+        )
+    }
+    private var canvasColor: Color {
+        OFJColor.logFoodCanvas(for: accentTheme, colorScheme: colorScheme)
+    }
+    private var cardColor: Color {
+        OFJColor.logFoodCard(for: accentTheme, colorScheme: colorScheme)
+    }
+    private var currentDayCalories: Double {
+        _ = nutritionStore.changeCount
+        return nutritionStore.fetchLog(for: logDate)?.totalCalories ?? 0
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 20) {
-                    // ── Food identity section ─────────────────────────
+                VStack(spacing: OFJSpace.s16) {
                     headerSection
+                    servingSection
+                    nutritionSection
 
-                    Divider()
-
-                    // ── Core macros grid ──────────────────────────────
-                    macroGrid
-
-                    // ── Micronutrients (if any) ──────────────────────
                     if !editedMicros.isEmpty {
                         micronutrientSection
                     }
 
-                    Divider()
-
-                    // ── Serving quantity adjustment ────────────────────
-                    servingSection
-
                     if food.kind != .composite {
-                        Divider()
-
-                        // ── Custom unit mappings ──────────────────────────
-                        // Lets the user define conversions like "1 cup = 244g" so
-                        // those units appear in the unit picker above.
                         servingMappingsSection
                     }
-
-                    Divider()
-
-                    // ── Meal type picker ──────────────────────────────
                     mealPicker
-
-                    // ── Log button ────────────────────────────────────
-                    logButton
                 }
-                .padding()
+                .padding(.horizontal, OFJSpace.s16)
+                .padding(.top, OFJSpace.s12)
+                .padding(.bottom, OFJSpace.s24)
             }
+            .background(canvasColor.ignoresSafeArea())
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle("Log Food")
+            .navigationTitle("Log food")
             .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                logButton
+                    .padding(.horizontal, OFJSpace.s16)
+                    .padding(.top, OFJSpace.s12)
+                    .padding(.bottom, OFJSpace.s8)
+                    .background(canvasColor.opacity(0.96))
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-                // Edit Food — opens EditFoodSheet as a nested sheet so the user can
-                // correct macros, name, or brand without leaving the log flow
-                ToolbarItem(placement: .navigationBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button {
                         showEditFood = true
                     } label: {
-                        Image(systemName: "pencil")
+                        Text("Edit")
                     }
                 }
-                // "Done" dismisses the decimal pad keyboard
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
                     Button("Done") {
@@ -188,111 +188,134 @@ struct LogFoodSheet: View {
                 applyLastUsedServingIfNeeded()
             }
         }
+        .tint(accentTheme.accentColor)
     }
 
     // MARK: - Header
 
-    /// Shows the food name, serving size, and how it was originally captured
     private var headerSection: some View {
-        VStack(spacing: 10) {
+        HStack(spacing: OFJSpace.s12) {
             LogFoodHeaderIcon(
                 food: food,
-                useGeneratedIconImages: useGeneratedIconImages
+                useGeneratedIconImages: useGeneratedIconImages,
+                surfaceColor: cardColor
             )
 
-            // Brand (if available)
-            if let brand = food.brand, !brand.isEmpty {
-                Text(brand)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+            VStack(alignment: .leading, spacing: OFJSpace.s3) {
+                if let brand = food.brand?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !brand.isEmpty {
+                    Text(brand)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
-            // Food name
-            Text(food.name)
-                .font(.title2)
-                .fontWeight(.bold)
-                .multilineTextAlignment(.center)
+                Text(food.name)
+                    .font(.headline)
+                    .lineLimit(2)
 
-            // Serving size if available
-            if let serving = food.servingSize {
-                Text(serving)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(identitySubtitle)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
             }
-
-            // Source badge (label scan, food photo, or manual)
-            HStack {
-                Image(systemName: sourceIcon)
-                Text(sourceLabel)
-            }
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(.quaternary, in: .capsule)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 
-    // MARK: - Macro Grid
-
-    /// Single row of macro rings showing value vs. daily goal
-    private var macroGrid: some View {
-        HStack(spacing: 0) {
-            MacroRingView(value: scaledCalories, goal: goals.dailyCalories, color: .orange, label: "Calories", unit: "kcal")
-                .frame(maxWidth: .infinity)
-            MacroRingView(value: scaledProtein, goal: goals.dailyProtein, color: .blue, label: "Protein", unit: "g")
-                .frame(maxWidth: .infinity)
-            MacroRingView(value: scaledCarbs, goal: goals.dailyCarbs, color: .green, label: "Carbs", unit: "g")
-                .frame(maxWidth: .infinity)
-            MacroRingView(value: scaledFat, goal: goals.dailyFat, color: .yellow, label: "Fat", unit: "g")
-                .frame(maxWidth: .infinity)
+    private var identitySubtitle: String {
+        var parts = [sourceLabel]
+        if let servingDescription {
+            parts.append(servingDescription)
         }
+        return parts.joined(separator: " · ")
+    }
+
+    private var servingDescription: String? {
+        guard let servingSize = food.servingSize, !servingSize.isEmpty else {
+            return nil
+        }
+        let quantity = food.servingQuantity ?? 1
+        let unit = food.servingUnit ?? "serving"
+        return "\(formattedQuantity(quantity)) \(LogFoodPresentation.unitLabel(unit, quantity: quantity)) = \(servingSize)"
+    }
+
+    // MARK: - Nutrition
+
+    private var nutritionSection: some View {
+        LogFoodNutritionCard(
+            calories: scaledCalories,
+            fat: scaledFat,
+            carbs: scaledCarbs,
+            protein: scaledProtein,
+            currentDayCalories: currentDayCalories,
+            dailyGoal: goals.dailyCalories,
+            accentColor: accentTheme.accentColor,
+            cardColor: cardColor
+        )
     }
 
     // MARK: - Micronutrients
 
-    /// Expandable section showing all dynamic micronutrients with editable fields.
-    /// Users can review and adjust micro values before committing the log.
     private var micronutrientSection: some View {
-        DisclosureGroup {
-            VStack(spacing: 10) {
-                let sorted = editedMicros.keys.sorted()
-                ForEach(sorted, id: \.self) { name in
-                    if let micro = editedMicros[name] {
-                        let scaledValue = micro.value * quantity / unitFactor / converter.baseQuantity
-                        let known = KnownMicronutrients.find(name)
+        VStack(alignment: .leading, spacing: OFJSpace.s8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Micronutrients")
+                    .font(.headline)
+                Spacer()
+                Text("% of daily value")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, OFJSpace.s4)
+
+            VStack(spacing: 0) {
+                let keys = LogFoodPresentation.orderedMicronutrientKeys(
+                    Array(editedMicros.keys)
+                )
+                ForEach(Array(keys.enumerated()), id: \.element) { index, key in
+                    if let baseValue = editedMicros[key],
+                       let scaledValue = scaledMicronutrients[key] {
+                        let known = KnownMicronutrients.find(key)
                         EditableMicroRow(
-                            name: known?.name ?? name,
-                            key: name,
-                            value: micro.value,
-                            scaledValue: scaledValue,
-                            unit: micro.unit,
+                            name: known?.name ?? key,
+                            value: scaledValue.value,
+                            unit: baseValue.unit,
                             dailyValue: known?.dailyValue,
+                            accentColor: accentTheme.accentColor,
                             onValueChanged: { newValue in
-                                editedMicros[name] = MicronutrientValue(value: newValue, unit: micro.unit)
+                                editedMicros[key] = MicronutrientValue(
+                                    value: newValue / micronutrientScaleFactor,
+                                    unit: baseValue.unit
+                                )
                             }
                         )
+
+                        if index < keys.count - 1 {
+                            Divider()
+                                .padding(.leading, OFJSpace.s16)
+                        }
                     }
                 }
             }
-            .padding(.top, 4)
-        } label: {
-            Label("Micronutrients (\(editedMicros.count))", systemImage: "list.bullet")
-                .font(.subheadline)
-                .fontWeight(.medium)
+            .logFoodCard(color: cardColor)
         }
     }
 
     // MARK: - Meal Picker
 
-    /// Segmented picker for choosing which meal to log the food under
     private var mealPicker: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Log as")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: OFJSpace.s8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Log as")
+                    .font(.headline)
+                Spacer()
+                Text("Suggested for \(Date.now.formatted(date: .omitted, time: .shortened))")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, OFJSpace.s4)
 
             Picker("Meal Type", selection: mealTypeBinding) {
                 ForEach(MealType.allCases) { meal in
@@ -305,44 +328,37 @@ struct LogFoodSheet: View {
 
     // MARK: - Log Button
 
-    /// The primary action button: creates a NutritionEntry from the saved food
-    /// and adds it to today's log via NutritionStore.
-    /// Macros are scaled proportionally by the quantity/unit the user selected.
     private var logButton: some View {
-        Button {
-            // Create the entry from the food template
-            let entry = food.toNutritionEntry(mealType: mealTypeForLog)
-            // Scale all macros by the ratio of (selected quantity / base serving size)
-            let factor = quantity / unitFactor / converter.baseQuantity
-            entry.calories *= factor
-            entry.protein *= factor
-            entry.carbs *= factor
-            entry.fat *= factor
-            // Apply edited micronutrients (user may have adjusted values),
-            // scaled by the same factor as macros
-            entry.micronutrients = [:]
-            for (key, micro) in editedMicros {
-                entry.micronutrients[key] = MicronutrientValue(
-                    value: micro.value * factor,
-                    unit: micro.unit
-                )
-            }
-            // Store what the user actually typed so EditEntryView can use it as
-            // the correct baseline.  Without this, opening the edit sheet shows the
-            // food's template quantity/unit (e.g. "1 serving") even though the macros
-            // were scaled for a different amount (e.g. "250 g").
-            entry.servingQuantity = quantity
-            entry.servingUnit = selectedUnit
-            // NutritionStore refreshes the linked SavedFood's usage via entry.savedFoodID.
-            nutritionStore.log(entry, to: logDate)
-            dismiss()
-        } label: {
-            Text("Add to Journal")
+        Button(action: logFood) {
+            Text(
+                "Add to \(mealTypeForLog.rawValue.capitalized) · "
+                    + "\(Int(scaledCalories.rounded())) kcal"
+            )
                 .font(.headline)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, OFJSpace.s6)
         }
         .buttonStyle(.borderedProminent)
+        .buttonBorderShape(.roundedRectangle(radius: OFJRadius.compactCard))
+        .controlSize(.extraLarge)
+        .tint(accentTheme.accentColor)
+        .disabled(quantity <= 0)
+        .accessibilityHint("Logs this amount to the selected meal")
+    }
+
+    private func logFood() {
+        let entry = food.toNutritionEntry(mealType: mealTypeForLog)
+        entry.calories = scaledCalories
+        entry.protein = scaledProtein
+        entry.carbs = scaledCarbs
+        entry.fat = scaledFat
+        entry.micronutrients = scaledMicronutrients
+        // Persist the user's display unit as the new baseline for future edits
+        // and repeat logs; NutritionStore retains the linked Food Bank ID.
+        entry.servingQuantity = quantity
+        entry.servingUnit = selectedUnit
+        nutritionStore.log(entry, to: logDate)
+        dismiss()
     }
 
     private var mealTypeBinding: Binding<MealType> {
@@ -366,76 +382,157 @@ struct LogFoodSheet: View {
 
     // MARK: - Serving Section
 
-    /// Lets the user type a quantity and select a unit.
-    /// The macro grid above live-updates as quantity and unit change.
-    /// Mirrors the serving editor in EditEntryView.
     private var servingSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Quantity")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: OFJSpace.s16) {
+            HStack(spacing: OFJSpace.s8) {
+                Text("Quantity")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
 
-            HStack(spacing: 12) {
-                // Quantity input — decimal keyboard, live-updates macros
-                TextField("Amount", text: $quantityText)
-                    .keyboardType(.decimalPad)
-                    .font(.title2.monospacedDigit())
-                    .fontWeight(.bold)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 90)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-                    .background(.quaternary, in: .rect(cornerRadius: 10))
-                    .onChange(of: quantityText) { _, newValue in
-                        // Accept only valid positive numbers; ignore empty or non-numeric input
-                        if let v = Double(newValue), v > 0 {
-                            quantity = v
-                        }
-                    }
+                Spacer(minLength: OFJSpace.s8)
 
-                // Unit picker — options come from the ServingSize enum or legacy mappings
-                if availableUnits.count > 1 {
-                    Picker("Unit", selection: $selectedUnit) {
-                        ForEach(availableUnits, id: \.self) { unit in
-                            Text(unit).tag(unit)
+                ScrollView(.horizontal) {
+                    HStack(spacing: OFJSpace.s6) {
+                        ForEach(
+                            LogFoodPresentation.orderedUnits(
+                                availableUnits,
+                                baseUnit: converter.baseUnit
+                            ),
+                            id: \.self
+                        ) { unit in
+                            unitButton(unit)
                         }
                     }
-                    .pickerStyle(.menu)
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    // Auto-convert quantity when the user switches units
-                    // e.g. "1 cup" → "240 g" so the macros stay equivalent
-                    .onChange(of: selectedUnit) { oldUnit, newUnit in
-                        if suppressUnitConversion {
-                            suppressUnitConversion = false
-                            return
-                        }
-                        let oldFactor = converter.factorFor(oldUnit)
-                        let newFactor = converter.factorFor(newUnit)
-                        guard oldFactor > 0, newFactor > 0 else { return }
-                        let converted = quantity * newFactor / oldFactor
-                        quantity = converted
-                        quantityText = converted.truncatingRemainder(dividingBy: 1) == 0
-                            ? String(format: "%.0f", converted)
-                            : String(format: "%.2f", converted)
-                    }
-                } else {
-                    // Only one unit available — show it as static text
-                    Text(selectedUnit)
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.secondary)
                 }
+                .scrollIndicators(.hidden)
             }
 
-            // Helper caption: what the food's canonical serving is
-            if let size = food.servingSize {
-                Text("1 serving = \(size)")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+            HStack(spacing: OFJSpace.s16) {
+                HStack(spacing: 0) {
+                    quantityAdjustmentButton(
+                        systemImage: "minus",
+                        accessibilityLabel: "Decrease quantity",
+                        action: decrementQuantity
+                    )
+
+                    TextField("Amount", text: $quantityText)
+                        .keyboardType(.decimalPad)
+                        .font(.title2.weight(.bold).monospacedDigit())
+                        .multilineTextAlignment(.center)
+                        .frame(minWidth: 62)
+                        .onChange(of: quantityText) { _, newValue in
+                            if let value = Double(newValue), value > 0 {
+                                quantity = value
+                            }
+                        }
+
+                    quantityAdjustmentButton(
+                        systemImage: "plus",
+                        accessibilityLabel: "Increase quantity",
+                        action: incrementQuantity
+                    )
+                }
+                .frame(minHeight: 54)
+                .overlay {
+                    RoundedRectangle(cornerRadius: OFJRadius.control)
+                        .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
+                }
+
+                VStack(alignment: .leading, spacing: OFJSpace.s3) {
+                    Text(LogFoodPresentation.unitLabel(selectedUnit, quantity: quantity))
+                        .font(.subheadline.weight(.medium))
+                    Text(quantityTotalText)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .monospacedDigit()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .padding(OFJSpace.s16)
+        .logFoodCard(color: cardColor)
+    }
+
+    private func unitButton(_ unit: String) -> some View {
+        let isSelected = selectedUnit == unit
+        return Button {
+            selectUnit(unit)
+        } label: {
+            Text(LogFoodPresentation.unitPickerLabel(unit))
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(isSelected ? Color.white : Color.secondary)
+                .padding(.horizontal, OFJSpace.s12)
+                .frame(minHeight: 36)
+                .background(
+                    isSelected ? accentTheme.accentColor : Color.secondary.opacity(0.09),
+                    in: .rect(cornerRadius: 10)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private func quantityAdjustmentButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.body.weight(.medium))
+                .frame(
+                    minWidth: OFJLayout.minimumHitTarget,
+                    minHeight: OFJLayout.minimumHitTarget
+                )
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private func selectUnit(_ newUnit: String) {
+        guard selectedUnit != newUnit else { return }
+        let converted = LogFoodPresentation.convertedQuantity(
+            quantity,
+            from: selectedUnit,
+            to: newUnit,
+            using: converter
+        )
+        selectedUnit = newUnit
+        quantity = converted
+        quantityText = formattedQuantity(converted)
+    }
+
+    private func incrementQuantity() {
+        let step = LogFoodPresentation.quantityStep(for: selectedUnit)
+        quantity = LogFoodPresentation.roundedQuantity(quantity + step)
+        quantityText = formattedQuantity(quantity)
+    }
+
+    private func decrementQuantity() {
+        let step = LogFoodPresentation.quantityStep(for: selectedUnit)
+        quantity = LogFoodPresentation.roundedQuantity(max(step, quantity - step))
+        quantityText = formattedQuantity(quantity)
+    }
+
+    private var quantityTotalText: String {
+        if let grams = LogFoodPresentation.convertedAmount(
+            quantity,
+            from: selectedUnit,
+            to: "g",
+            using: converter
+        ) {
+            return "\(formattedQuantity(grams)) g total"
+        }
+
+        let baseAmount = LogFoodPresentation.convertedQuantity(
+            quantity,
+            from: selectedUnit,
+            to: converter.baseUnit,
+            using: converter
+        )
+        return "\(formattedQuantity(baseAmount)) "
+            + "\(LogFoodPresentation.unitLabel(converter.baseUnit, quantity: baseAmount)) total"
     }
 
     /// Repeated logs should open exactly where the user left off. If mappings
@@ -452,7 +549,6 @@ struct LogFoodSheet: View {
         quantity = last.quantity
         quantityText = formattedQuantity(last.quantity)
         if selectedUnit != last.unit {
-            suppressUnitConversion = true
             selectedUnit = last.unit
         }
     }
@@ -465,58 +561,113 @@ struct LogFoodSheet: View {
 
     // MARK: - Serving Mappings
 
-    /// Shows the food's custom unit conversion mappings and lets the user add new ones.
-    /// New mappings (e.g. "1 cup = 244g") are saved to SwiftData,
-    /// and immediately appear in the unit picker above.
     private var servingMappingsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: OFJSpace.s8) {
             HStack {
-                Text("Unit Mappings")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.secondary)
+                Text("Units for this food")
+                    .font(.headline)
                 Spacer()
-                // Opens the AddServingMappingSheet for a new from→to conversion
                 Button {
                     editingMappingIndex = nil
                     showAddMapping = true
                 } label: {
-                    Label("Add", systemImage: "plus.circle")
-                        .font(.subheadline)
+                    Text("Add a unit")
+                        .font(.subheadline.weight(.medium))
                 }
             }
+            .padding(.horizontal, OFJSpace.s4)
 
-            if food.servingMappings.isEmpty {
-                // Hint text when no mappings exist yet
-                Text("Define custom unit conversions for this food (e.g. 1 cup = 244g). These will appear as unit options in the picker above.")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                // Show each existing mapping — tap to edit, swipe to delete
-                ForEach(Array(food.servingMappings.enumerated()), id: \.offset) { index, mapping in
-                    Button {
-                        editingMappingIndex = index
-                        showAddMapping = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(mapping.from.displayString)
-                                .fontWeight(.medium)
-                            Image(systemName: "arrow.right")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            Text(mapping.to.displayString)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
+            VStack(spacing: 0) {
+                if unitRows.isEmpty {
+                    Text("Add a conversion to use cups, grams, or another unit.")
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(OFJSpace.s16)
+                } else {
+                    ForEach(Array(unitRows.enumerated()), id: \.element.id) { rowIndex, row in
+                        if let mappingIndex = row.mappingIndex {
+                            Button {
+                                editingMappingIndex = mappingIndex
+                                showAddMapping = true
+                            } label: {
+                                unitMappingRow(row, showsChevron: true)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            unitMappingRow(row, showsChevron: false)
+                        }
+
+                        if rowIndex < unitRows.count - 1 {
+                            Divider()
+                                .padding(.leading, OFJSpace.s16)
+                        }
                     }
                 }
             }
+            .logFoodCard(color: cardColor)
         }
+    }
+
+    private func unitMappingRow(
+        _ row: LogFoodUnitRow,
+        showsChevron: Bool
+    ) -> some View {
+        HStack(spacing: OFJSpace.s12) {
+            Text(row.from)
+                .font(.subheadline.weight(.medium))
+            Text("=")
+                .font(.subheadline)
+                .foregroundStyle(.tertiary)
+            Text(row.to)
+                .font(.subheadline)
+            Spacer()
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+        .foregroundStyle(.primary)
+        .padding(.horizontal, OFJSpace.s16)
+        .frame(minHeight: 56)
+        .contentShape(Rectangle())
+    }
+
+    private var unitRows: [LogFoodUnitRow] {
+        var rows: [LogFoodUnitRow] = []
+
+        if let servingSize = food.servingSize, !servingSize.isEmpty {
+            let baseQuantity = food.servingQuantity ?? 1
+            let baseUnit = food.servingUnit ?? "serving"
+            rows.append(
+                LogFoodUnitRow(
+                    id: "base-\(baseQuantity)-\(baseUnit)-\(servingSize)",
+                    from: "\(formattedQuantity(baseQuantity)) "
+                        + LogFoodPresentation.unitLabel(baseUnit, quantity: baseQuantity),
+                    to: servingSize,
+                    mappingIndex: nil
+                )
+            )
+        }
+
+        for (index, mapping) in food.servingMappings.enumerated() {
+            let row = LogFoodUnitRow(
+                id: "mapping-\(index)-\(mapping.from.displayString)-\(mapping.to.displayString)",
+                from: mapping.from.displayString,
+                to: mapping.to.displayString,
+                mappingIndex: index
+            )
+            let duplicate = rows.contains {
+                $0.from.caseInsensitiveCompare(row.from) == .orderedSame
+                    && $0.to.caseInsensitiveCompare(row.to) == .orderedSame
+            }
+            if !duplicate {
+                rows.append(row)
+            }
+        }
+
+        return rows
     }
 
     /// Appends a new serving mapping to the food and propagates to all linked entries.
@@ -530,20 +681,6 @@ struct LogFoodSheet: View {
     }
 
     // MARK: - Helpers
-
-    /// SF Symbol for the food's original capture method
-    private var sourceIcon: String {
-        if food.kind == .composite {
-            return "square.stack.3d.up"
-        }
-
-        return switch food.originalScanMode {
-        case .label: "barcode.viewfinder"
-        case .foodPhoto: "fork.knife"
-        case .barcode: "barcode"
-        case .manual: "pencil.circle"
-        }
-    }
 
     /// Human-readable label for the food's origin
     private var sourceLabel: String {
@@ -560,12 +697,312 @@ struct LogFoodSheet: View {
     }
 }
 
+struct LogFoodUnitRow: Identifiable, Hashable {
+    let id: String
+    let from: String
+    let to: String
+    let mappingIndex: Int?
+}
+
+/// Pure presentation rules for the Log Food surface. Keeping unit ordering,
+/// pluralization, conversion, and progress math outside SwiftUI makes the
+/// visual layer deterministic and independently testable.
+enum LogFoodPresentation {
+    private static let preferredMicronutrientOrder = [
+        "saturated_fat",
+        "sodium",
+        "calcium",
+        "vitamin_a",
+        "iron",
+        "potassium",
+        "fiber",
+        "cholesterol",
+        "added_sugars",
+    ]
+
+    static func orderedUnits(_ units: [String], baseUnit: String) -> [String] {
+        let preferred = [
+            baseUnit,
+            "serving",
+            "cup",
+            "g",
+            "mL",
+            "tbsp",
+            "tsp",
+            "oz",
+            "kg",
+            "lb",
+        ]
+        let unique = Array(Set(units))
+        return unique.sorted { lhs, rhs in
+            let leftIndex = preferred.firstIndex(of: lhs) ?? Int.max
+            let rightIndex = preferred.firstIndex(of: rhs) ?? Int.max
+            if leftIndex != rightIndex {
+                return leftIndex < rightIndex
+            }
+            return lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+        }
+    }
+
+    static func unitPickerLabel(_ unit: String) -> String {
+        switch unit.lowercased() {
+        case "g": "grams"
+        case "ml": "mL"
+        case "oz": "ounces"
+        case "kg": "kilograms"
+        case "lb": "pounds"
+        case "serving": "servings"
+        case "cup": "cups"
+        default: unit
+        }
+    }
+
+    static func unitLabel(_ unit: String, quantity: Double) -> String {
+        guard abs(quantity - 1) > 0.000_1 else {
+            return switch unit.lowercased() {
+            case "g": "g"
+            case "ml": "mL"
+            case "oz": "oz"
+            case "kg": "kg"
+            case "lb": "lb"
+            default: unit
+            }
+        }
+        return unitPickerLabel(unit)
+    }
+
+    static func quantityStep(for unit: String) -> Double {
+        switch unit.lowercased() {
+        case "cup": 0.25
+        case "tbsp", "tsp", "serving", "slice", "piece", "item": 1
+        case "kg", "lb": 0.1
+        default: 1
+        }
+    }
+
+    static func roundedQuantity(_ value: Double) -> Double {
+        (value * 100).rounded() / 100
+    }
+
+    static func convertedQuantity(
+        _ quantity: Double,
+        from sourceUnit: String,
+        to targetUnit: String,
+        using converter: ServingConverter
+    ) -> Double {
+        let sourceFactor = converter.factorFor(sourceUnit)
+        let targetFactor = converter.factorFor(targetUnit)
+        guard sourceFactor > 0, targetFactor > 0 else { return quantity }
+        return roundedQuantity(quantity / sourceFactor * targetFactor)
+    }
+
+    static func convertedAmount(
+        _ quantity: Double,
+        from sourceUnit: String,
+        to targetUnit: String,
+        using converter: ServingConverter
+    ) -> Double? {
+        guard converter.availableUnits.contains(targetUnit) else { return nil }
+        return convertedQuantity(
+            quantity,
+            from: sourceUnit,
+            to: targetUnit,
+            using: converter
+        )
+    }
+
+    static func calorieShare(
+        grams: Double,
+        caloriesPerGram: Double,
+        totalCalories: Double
+    ) -> Double {
+        guard totalCalories > 0 else { return 0 }
+        return max(0, min((grams * caloriesPerGram) / totalCalories, 1))
+    }
+
+    static func orderedMicronutrientKeys(_ keys: [String]) -> [String] {
+        keys.sorted { lhs, rhs in
+            let leftID = KnownMicronutrients.find(lhs)?.id ?? lhs
+            let rightID = KnownMicronutrients.find(rhs)?.id ?? rhs
+            let leftIndex = preferredMicronutrientOrder.firstIndex(of: leftID) ?? Int.max
+            let rightIndex = preferredMicronutrientOrder.firstIndex(of: rightID) ?? Int.max
+            if leftIndex != rightIndex {
+                return leftIndex < rightIndex
+            }
+            let leftName = KnownMicronutrients.find(lhs)?.name ?? lhs
+            let rightName = KnownMicronutrients.find(rhs)?.name ?? rhs
+            return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
+        }
+    }
+}
+
+private struct LogFoodCardModifier: ViewModifier {
+    let color: Color
+
+    func body(content: Content) -> some View {
+        content
+            .background(color, in: .rect(cornerRadius: OFJRadius.card))
+            .overlay {
+                RoundedRectangle(cornerRadius: OFJRadius.card)
+                    .stroke(Color.secondary.opacity(0.10), lineWidth: 1)
+            }
+    }
+}
+
+private extension View {
+    func logFoodCard(color: Color) -> some View {
+        modifier(LogFoodCardModifier(color: color))
+    }
+}
+
+private struct LogFoodNutritionCard: View {
+    let calories: Double
+    let fat: Double
+    let carbs: Double
+    let protein: Double
+    let currentDayCalories: Double
+    let dailyGoal: Double
+    let accentColor: Color
+    let cardColor: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: OFJSpace.s16) {
+            HStack(alignment: .firstTextBaseline, spacing: OFJSpace.s6) {
+                Text(calories.formatted(.number.precision(.fractionLength(0))))
+                    .font(.system(size: 42, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                Text("kcal")
+                    .font(.headline)
+                    .foregroundStyle(.tertiary)
+            }
+
+            VStack(spacing: OFJSpace.s14) {
+                macroRow(
+                    name: "Fat",
+                    value: fat,
+                    caloriesPerGram: 9,
+                    color: accentColor
+                )
+                macroRow(
+                    name: "Carbs",
+                    value: carbs,
+                    caloriesPerGram: 4,
+                    color: accentColor.opacity(0.70)
+                )
+                macroRow(
+                    name: "Protein",
+                    value: protein,
+                    caloriesPerGram: 4,
+                    color: Color.secondary.opacity(0.38)
+                )
+            }
+
+            Divider()
+
+            VStack(spacing: OFJSpace.s9) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text("Today after this")
+                        .font(.subheadline.weight(.medium))
+                    Spacer()
+                    Text(daySummary)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                dayProgress
+            }
+        }
+        .padding(OFJSpace.s16)
+        .logFoodCard(color: cardColor)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func macroRow(
+        name: String,
+        value: Double,
+        caloriesPerGram: Double,
+        color: Color
+    ) -> some View {
+        let share = LogFoodPresentation.calorieShare(
+            grams: value,
+            caloriesPerGram: caloriesPerGram,
+            totalCalories: calories
+        )
+        return VStack(spacing: OFJSpace.s6) {
+            HStack(spacing: OFJSpace.s8) {
+                RoundedRectangle(cornerRadius: 3)
+                    .fill(color)
+                    .frame(width: 8, height: 8)
+                    .accessibilityHidden(true)
+                Text(name)
+                    .font(.subheadline.weight(.medium))
+                Spacer()
+                Text("\(formattedMacro(value)) g")
+                    .font(.subheadline.weight(.semibold).monospacedDigit())
+                Text("\(Int((share * 100).rounded()))% of its calories")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            ProgressView(value: share)
+                .tint(color)
+                .accessibilityLabel(name)
+                .accessibilityValue(
+                    "\(formattedMacro(value)) grams, \(Int((share * 100).rounded())) percent of calories"
+                )
+        }
+    }
+
+    private var daySummary: String {
+        guard dailyGoal > 0 else {
+            return "\(Int((currentDayCalories + calories).rounded())) kcal"
+        }
+        let after = currentDayCalories + calories
+        let percentage = Int((after / dailyGoal * 100).rounded())
+        return "\(Int(after.rounded())) / \(Int(dailyGoal.rounded())) · \(percentage)%"
+    }
+
+    private var dayProgress: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let safeGoal = max(dailyGoal, 1)
+            let currentFraction = min(max(currentDayCalories / safeGoal, 0), 1)
+            let afterFraction = min(max((currentDayCalories + calories) / safeGoal, 0), 1)
+            let addedFraction = max(afterFraction - currentFraction, 0)
+
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.10))
+                Capsule()
+                    .fill(Color.secondary.opacity(0.24))
+                    .frame(width: width * currentFraction)
+                Capsule()
+                    .fill(accentColor)
+                    .frame(width: width * addedFraction)
+                    .offset(x: width * currentFraction)
+            }
+        }
+        .frame(height: 8)
+        .accessibilityElement()
+        .accessibilityLabel("Daily calorie total after logging")
+        .accessibilityValue(daySummary)
+    }
+
+    private func formattedMacro(_ value: Double) -> String {
+        value.formatted(
+            .number.precision(
+                .fractionLength(value.rounded() == value ? 0 : 1)
+            )
+        )
+    }
+}
+
 private struct LogFoodHeaderIcon: View {
     let food: SavedFood
     let useGeneratedIconImages: Bool
+    let surfaceColor: Color
 
-    @ScaledMetric(relativeTo: .title2) private var imageSize: CGFloat = 76
-    @ScaledMetric(relativeTo: .title2) private var emojiSize: CGFloat = 54
+    @ScaledMetric(relativeTo: .headline) private var imageSize: CGFloat = 62
+    @ScaledMetric(relativeTo: .headline) private var emojiSize: CGFloat = 34
 
     var body: some View {
         if prefersGeneratedImage, let image = generatedImage {
@@ -573,19 +1010,27 @@ private struct LogFoodHeaderIcon: View {
                 .resizable()
                 .scaledToFill()
                 .frame(width: imageSize, height: imageSize)
-                .clipShape(Circle())
+                .clipShape(.rect(cornerRadius: OFJRadius.compactCard))
                 .accessibilityHidden(true)
         } else if let emoji = food.normalizedEmoji {
             Text(emoji)
                 .font(.system(size: emojiSize))
                 .frame(width: imageSize, height: imageSize)
+                .background(surfaceColor, in: .rect(cornerRadius: OFJRadius.compactCard))
                 .accessibilityHidden(true)
         } else if let image = generatedImage {
             Image(uiImage: image)
                 .resizable()
                 .scaledToFill()
                 .frame(width: imageSize, height: imageSize)
-                .clipShape(Circle())
+                .clipShape(.rect(cornerRadius: OFJRadius.compactCard))
+                .accessibilityHidden(true)
+        } else {
+            Image(systemName: "fork.knife")
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: imageSize, height: imageSize)
+                .background(surfaceColor, in: .rect(cornerRadius: OFJRadius.compactCard))
                 .accessibilityHidden(true)
         }
     }
@@ -731,75 +1176,14 @@ struct AddServingMappingSheet: View {
     }
 }
 
-// MARK: - Micronutrient Progress Row
+// MARK: - Editable Micro Row
 
-/// A single micronutrient row with a progress bar showing % of daily value.
-/// Shows "None" for the daily value when no FDA reference exists.
-private struct MicronutrientProgressRow: View {
+private struct EditableMicroRow: View {
     let name: String
     let value: Double
     let unit: String
-    let dailyValue: Double?  // nil = no known daily value
-
-    private var progress: Double {
-        guard let dv = dailyValue, dv > 0 else { return 0 }
-        return min(value / dv, 1.0)
-    }
-
-    private var percentText: String {
-        guard let dv = dailyValue, dv > 0 else { return "None" }
-        return "\(Int((value / dv) * 100))%"
-    }
-
-    var body: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text(name)
-                    .font(.subheadline)
-                Spacer()
-                Text("\(value, specifier: "%.1f") \(unit)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-            HStack(spacing: 8) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(.quaternary)
-                            .frame(height: 6)
-                        if dailyValue != nil && dailyValue! > 0 {
-                            Capsule()
-                                .fill(value > (dailyValue ?? 0) ? Color.orange : Color.accentColor)
-                                .frame(width: geo.size.width * progress, height: 6)
-                                .animation(.easeInOut, value: progress)
-                        }
-                    }
-                }
-                .frame(height: 6)
-
-                Text(percentText)
-                    .font(.caption2)
-                    .foregroundStyle(dailyValue == nil ? .tertiary : .secondary)
-                    .monospacedDigit()
-                    .frame(width: 40, alignment: .trailing)
-            }
-        }
-    }
-}
-
-// MARK: - Editable Micro Row
-
-/// An editable micronutrient row: shows the nutrient name, a text field for the
-/// base value (per-serving), the scaled value for reference, and a DV% progress bar.
-/// Tapping the value opens the decimal keyboard for inline editing.
-private struct EditableMicroRow: View {
-    let name: String
-    let key: String
-    let value: Double          // Base (per-serving) value from editedMicros
-    let scaledValue: Double    // Value after quantity+unit scaling (shown as reference)
-    let unit: String
     let dailyValue: Double?
+    let accentColor: Color
     let onValueChanged: (Double) -> Void
 
     @State private var text: String = ""
@@ -807,27 +1191,32 @@ private struct EditableMicroRow: View {
 
     private var progress: Double {
         guard let dv = dailyValue, dv > 0 else { return 0 }
-        return min(scaledValue / dv, 1.0)
+        return min(value / dv, 1.0)
     }
 
     private var percentText: String {
         guard let dv = dailyValue, dv > 0 else { return "—" }
-        return "\(Int((scaledValue / dv) * 100))%"
+        return "\(Int((value / dv) * 100))%"
+    }
+
+    private var highlightsProgress: Bool {
+        guard dailyValue != nil else { return false }
+        return progress >= 0.20
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            HStack {
+        VStack(spacing: OFJSpace.s8) {
+            HStack(spacing: OFJSpace.s8) {
                 Text(name)
                     .font(.subheadline)
                 Spacer()
-                // Editable value field — edits the base (per-serving) amount
+
                 HStack(spacing: 2) {
                     TextField("0", text: $text)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
-                        .font(.subheadline.monospacedDigit())
-                        .frame(width: 60)
+                        .font(.subheadline.weight(.medium).monospacedDigit())
+                        .frame(minWidth: 48, idealWidth: 58, maxWidth: 68)
                         .focused($isFocused)
                         .onChange(of: text) { _, newVal in
                             if let d = Double(newVal), d >= 0 {
@@ -836,41 +1225,61 @@ private struct EditableMicroRow: View {
                         }
                         .onChange(of: isFocused) { _, focused in
                             if !focused {
-                                // Re-format on blur so display stays clean
-                                text = String(format: "%.1f", value)
+                                text = formattedValue
                             }
                         }
+                        .accessibilityLabel(name)
+                        .accessibilityValue("\(formattedValue) \(unit)")
+                        .accessibilityHint("Double tap to edit this amount")
                     Text(unit)
-                        .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .font(.subheadline)
                 }
-            }
-            // Progress bar vs daily value
-            HStack(spacing: 8) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(.quaternary)
-                            .frame(height: 6)
-                        if dailyValue != nil && dailyValue! > 0 {
-                            Capsule()
-                                .fill(scaledValue > (dailyValue ?? 0) ? Color.orange : Color.accentColor)
-                                .frame(width: geo.size.width * progress, height: 6)
-                                .animation(.easeInOut, value: progress)
-                        }
-                    }
-                }
-                .frame(height: 6)
 
                 Text(percentText)
-                    .font(.caption2)
-                    .foregroundStyle(dailyValue == nil ? .tertiary : .secondary)
+                    .font(.caption)
+                    .foregroundStyle(
+                        highlightsProgress
+                            ? accentColor
+                            : Color.secondary.opacity(0.55)
+                    )
                     .monospacedDigit()
-                    .frame(width: 40, alignment: .trailing)
+                    .frame(width: 34, alignment: .trailing)
             }
+
+            GeometryReader { proxy in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.secondary.opacity(0.10))
+                    if dailyValue != nil {
+                        Capsule()
+                            .fill(
+                                highlightsProgress
+                                    ? accentColor
+                                    : Color.secondary.opacity(0.24)
+                            )
+                            .frame(width: proxy.size.width * progress)
+                            .animation(.easeInOut, value: progress)
+                    }
+                }
+            }
+            .frame(height: 5)
         }
+        .padding(.horizontal, OFJSpace.s16)
+        .padding(.vertical, OFJSpace.s12)
         .onAppear {
-            text = String(format: "%.1f", value)
+            text = formattedValue
         }
+        .onChange(of: value) {
+            guard !isFocused else { return }
+            text = formattedValue
+        }
+    }
+
+    private var formattedValue: String {
+        value.formatted(
+            .number.precision(
+                .fractionLength(value.rounded() == value ? 0 : 1)
+            )
+        )
     }
 }

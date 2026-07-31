@@ -154,6 +154,15 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - Take Photo uses `AssistantCameraPicker` only as a one-image UIKit camera bridge; the result must pass through the same downscaled JPEG and `ChatDraftAttachment` pipeline as library images.
 - Camera capture is full-screen, cancels without mutating the draft, and remains disabled on devices without a camera or when the shared four-image staging limit is full.
 
+### Appearance and Log Food
+
+- `OFJAccentTheme` owns the user-selectable Blue, Harvest Orange, Leaf Green, and Berry Purple accents. Apply it once at the app root with `.tint(...)` and the `ofjAccentTheme` environment value; do not scatter `@AppStorage` reads through feature views.
+- Harvest Orange is the reviewed warm theme: accent `#E9792B`, light canvas/card `#F6F5F3`/`#FFFFFF`, and dark canvas/card `#20201F`/`#2A2A28`. Other accents retain system grouped surfaces.
+- `LogFoodSheet` follows a light utility hierarchy: compact identity header, quantity and unit controls, calorie/macronutrient card, always-visible micronutrient table when data exists, factual saved-unit mappings, meal selector, and one sticky primary log action.
+- Keep Log Food content surfaces tonal rather than glass. Native navigation and system controls may retain Liquid Glass. Do not invent food classifications, container state, conversion provenance, or nutrition explanations that are not backed by stored data.
+- Quantity/unit changes must preserve the represented food amount through `ServingConverter`; logging must keep the existing `NutritionStore.log(...)` mutation boundary, linked Food Bank ID, serving values, scaled macros, and scaled micronutrients.
+- Accent selection is user data for backup/mirror purposes, while missing or future values must decode to Blue for backward compatibility.
+
 ### Sheet Management (Enum-Driven)
 **Always use a single enum for all sheets within a page:**
 ```swift
@@ -380,6 +389,7 @@ Before merging any new view:
 - [ ] Empty states use `ContentUnavailableView`
 - [ ] Progress indicators use the status color thresholds
 - [ ] Architecture-only work preserves current colors, density, typography, layout, and glass treatment except for explicitly reviewed design issues such as #45's calendar/header treatment
+- [ ] Log Food changes preserve serving conversion, Food Bank linkage, micronutrient scaling, and the `NutritionStore.log(...)` mutation boundary
 
 ## UI Roadmap
 

@@ -54,6 +54,7 @@ struct OpenFoodJournalTests {
 
         #expect(joined.contains("cached_input_token_count INTEGER"))
         #expect(joined.contains("provider TEXT"))
+        #expect(joined.contains("accent_theme TEXT"))
         #expect(!joined.contains("ADD COLUMN IF NOT EXISTS"))
     }
 
@@ -245,6 +246,7 @@ struct OpenFoodJournalTests {
 
         #expect(record.useProModel)
         #expect(!record.offContributeEnabled)
+        #expect(record.accentTheme == OFJAccentTheme.defaultTheme.rawValue)
         #expect(record.breakfastStartMinutes == MealScheduleDefaults.breakfastStartMinutes)
         #expect(record.lunchStartMinutes == MealScheduleDefaults.lunchStartMinutes)
         #expect(record.dinnerStartMinutes == MealScheduleDefaults.dinnerStartMinutes)
@@ -257,6 +259,28 @@ struct OpenFoodJournalTests {
         #expect(record.assistantResearchProvider == AssistantResearchProvider.modelProvider.rawValue)
         #expect(record.tavilySearchDepth == TavilySearchDepth.fast.rawValue)
         #expect(record.parallelSearchMode == ParallelSearchMode.basic.rawValue)
+    }
+
+    @MainActor
+    @Test func appSettingsRecordRoundTripsAccentTheme() throws {
+        let original = AppSettingsRecord(
+            accentTheme: OFJAccentTheme.harvestOrange.rawValue,
+            useProModel: false,
+            offContributeEnabled: false
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: data)
+
+        #expect(decoded.accentTheme == OFJAccentTheme.harvestOrange.rawValue)
+    }
+
+    @MainActor
+    @Test func appSettingsRecordFallsBackFromUnknownAccentTheme() throws {
+        let data = Data(#"{"accentTheme":"future-theme"}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: data)
+
+        #expect(decoded.accentTheme == OFJAccentTheme.defaultTheme.rawValue)
     }
 
     @Test func chatToolRecordPreservesGeminiReplayMetadata() throws {

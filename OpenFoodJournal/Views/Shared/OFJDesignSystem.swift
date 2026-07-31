@@ -2,6 +2,48 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
+
+/// User-selectable app accents. The persisted value is intentionally small and
+/// provider-independent so it can travel in backups without coupling UI state
+/// to SwiftData or CloudKit model migrations.
+enum OFJAccentTheme: String, CaseIterable, Identifiable, Codable, Sendable {
+    case systemBlue
+    case harvestOrange
+    case leafGreen
+    case berryPurple
+
+    static let storageKey = "appearance.accentTheme"
+    static let defaultTheme = OFJAccentTheme.systemBlue
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .systemBlue: "Blue"
+        case .harvestOrange: "Harvest Orange"
+        case .leafGreen: "Leaf Green"
+        case .berryPurple: "Berry Purple"
+        }
+    }
+
+    var accentColor: Color {
+        switch self {
+        case .systemBlue: .blue
+        case .harvestOrange: OFJColor.harvestOrangeAccentRGB.color
+        case .leafGreen: .green
+        case .berryPurple: .purple
+        }
+    }
+
+    static func resolved(from rawValue: String) -> OFJAccentTheme {
+        OFJAccentTheme(rawValue: rawValue) ?? defaultTheme
+    }
+}
+
+extension EnvironmentValues {
+    @Entry var ofjAccentTheme: OFJAccentTheme = OFJAccentTheme.defaultTheme
+}
 
 /// Canonical color roles for app chrome and nutrition data.
 ///
@@ -83,6 +125,37 @@ enum OFJColor {
     }
 
     static let calendarOverGoalRGB = SRGB8(red: 0xD8, green: 0x66, blue: 0x69)
+    static let harvestOrangeAccentRGB = SRGB8(red: 0xE9, green: 0x79, blue: 0x2B)
+    static let harvestLightCanvasRGB = SRGB8(red: 0xF6, green: 0xF5, blue: 0xF3)
+    static let harvestLightCardRGB = SRGB8(red: 0xFF, green: 0xFF, blue: 0xFF)
+    static let harvestDarkCanvasRGB = SRGB8(red: 0x20, green: 0x20, blue: 0x1F)
+    static let harvestDarkCardRGB = SRGB8(red: 0x2A, green: 0x2A, blue: 0x28)
+
+    /// Harvest Orange carries its warm tonal surfaces into Log Food. Other
+    /// accents keep the platform grouped surfaces while still tinting controls.
+    static func logFoodCanvas(
+        for theme: OFJAccentTheme,
+        colorScheme: ColorScheme
+    ) -> Color {
+        guard theme == .harvestOrange else {
+            return Color(uiColor: .systemGroupedBackground)
+        }
+        return colorScheme == .dark
+            ? harvestDarkCanvasRGB.color
+            : harvestLightCanvasRGB.color
+    }
+
+    static func logFoodCard(
+        for theme: OFJAccentTheme,
+        colorScheme: ColorScheme
+    ) -> Color {
+        guard theme == .harvestOrange else {
+            return Color(uiColor: .secondarySystemGroupedBackground)
+        }
+        return colorScheme == .dark
+            ? harvestDarkCardRGB.color
+            : harvestLightCardRGB.color
+    }
 
     static func journalCalorieState(for ratio: Double) -> JournalCalorieState {
         switch ratio {

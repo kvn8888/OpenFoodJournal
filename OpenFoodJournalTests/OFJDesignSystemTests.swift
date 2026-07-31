@@ -107,6 +107,41 @@ struct OFJDesignSystemTests {
         )
     }
 
+    @Test("appearance themes preserve blue as default and resolve unknown backups safely")
+    func accentThemeContract() {
+        #expect(
+            OFJAccentTheme.allCases
+                == [.systemBlue, .harvestOrange, .leafGreen, .berryPurple]
+        )
+        #expect(OFJAccentTheme.defaultTheme == .systemBlue)
+        #expect(OFJAccentTheme.resolved(from: "harvestOrange") == .harvestOrange)
+        #expect(OFJAccentTheme.resolved(from: "future-theme") == .systemBlue)
+    }
+
+    @Test("Harvest Orange uses the owner-approved accent and tonal surface values")
+    func harvestOrangePalette() {
+        #expect(
+            OFJColor.harvestOrangeAccentRGB
+                == OFJColor.SRGB8(red: 0xE9, green: 0x79, blue: 0x2B)
+        )
+        #expect(
+            OFJColor.harvestLightCanvasRGB
+                == OFJColor.SRGB8(red: 0xF6, green: 0xF5, blue: 0xF3)
+        )
+        #expect(
+            OFJColor.harvestLightCardRGB
+                == OFJColor.SRGB8(red: 0xFF, green: 0xFF, blue: 0xFF)
+        )
+        #expect(
+            OFJColor.harvestDarkCanvasRGB
+                == OFJColor.SRGB8(red: 0x20, green: 0x20, blue: 0x1F)
+        )
+        #expect(
+            OFJColor.harvestDarkCardRGB
+                == OFJColor.SRGB8(red: 0x2A, green: 0x2A, blue: 0x28)
+        )
+    }
+
     @Test("calendar day states preserve future blocking and bounded progress")
     func calendarDayStates() {
         let future = DayCellState.future

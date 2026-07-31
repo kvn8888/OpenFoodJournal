@@ -17,6 +17,8 @@ struct SettingsView: View {
     @Query private var savedFoods: [SavedFood]
     @Query private var preferences: [Preferences]
 
+    @AppStorage(OFJAccentTheme.storageKey) private var accentThemeRawValue: String =
+        OFJAccentTheme.defaultTheme.rawValue
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage(AIProviderSettings.providerKey) private var aiProviderRawValue: String = AIProviderSettings.defaultProvider.rawValue
     @AppStorage(AIProviderSettings.assistantProviderKey) private var assistantProviderRawValue: String = ""
@@ -81,25 +83,45 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-                // MARK: Goals
-                Section("Goals") {
-                    NavigationLink("Daily Macro Goals") {
-                        GoalsEditorView()
-                    }
-                    HStack {
-                        Text("Calories")
-                        Spacer()
-                        Text("\(Int(goals.dailyCalories)) kcal")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Protein / Carbs / Fat")
-                        Spacer()
-                        Text("\(Int(goals.dailyProtein))g · \(Int(goals.dailyCarbs))g · \(Int(goals.dailyFat))g")
-                            .foregroundStyle(.secondary)
-                            .font(.subheadline)
+            // MARK: Appearance
+            Section {
+                Picker("Accent Color", selection: $accentThemeRawValue) {
+                    ForEach(OFJAccentTheme.allCases) { theme in
+                        Label {
+                            Text(theme.displayName)
+                        } icon: {
+                            Image(systemName: "circle.fill")
+                                .foregroundStyle(theme.accentColor)
+                        }
+                        .tag(theme.rawValue)
                     }
                 }
+                .pickerStyle(.navigationLink)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("The accent updates app controls immediately. Harvest Orange also uses its warm light and dark surfaces in Log Food.")
+            }
+
+            // MARK: Goals
+            Section("Goals") {
+                NavigationLink("Daily Macro Goals") {
+                    GoalsEditorView()
+                }
+                HStack {
+                    Text("Calories")
+                    Spacer()
+                    Text("\(Int(goals.dailyCalories)) kcal")
+                        .foregroundStyle(.secondary)
+                }
+                HStack {
+                    Text("Protein / Carbs / Fat")
+                    Spacer()
+                    Text("\(Int(goals.dailyProtein))g · \(Int(goals.dailyCarbs))g · \(Int(goals.dailyFat))g")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+            }
 
                 // MARK: Meal Schedule
                 Section {
@@ -1245,6 +1267,7 @@ struct SettingsView: View {
             let data = try nutritionStore.exportBackup(
                 goals: goals,
                 appSettings: AppSettingsRecord(
+                    accentTheme: accentThemeRawValue,
                     aiProvider: aiProviderRawValue,
                     assistantProvider: assistantProviderRawValue,
                     assistantResearchProvider: assistantResearchProviderRawValue,
@@ -1302,6 +1325,9 @@ struct SettingsView: View {
 
         do {
             backupImportSummary = try nutritionStore.importBackup(backup, goals: goals)
+            accentThemeRawValue = OFJAccentTheme.resolved(
+                from: backup.appSettings.accentTheme
+            ).rawValue
             aiProviderRawValue = backup.appSettings.aiProvider
             assistantProviderRawValue = backup.appSettings.assistantProvider
             assistantResearchProviderRawValue = backup.appSettings.assistantResearchProvider
