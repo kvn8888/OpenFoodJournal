@@ -4168,7 +4168,12 @@ final class ChatService {
         }
         let scale = maxDimension / largest
         let target = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: target)
+        let format = UIGraphicsImageRendererFormat.default()
+        // Model limits are pixel-based. A renderer that inherits the device's
+        // 2x/3x display scale would silently turn a 1200px target back into a
+        // 2400/3600px upload.
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
         let resized = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: target))
         }

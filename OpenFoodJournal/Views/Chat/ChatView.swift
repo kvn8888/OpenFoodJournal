@@ -8,9 +8,12 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ChatView: View {
+    private static let maximumImageAttachments = 4
+
     @Environment(ChatService.self) private var chatService
     @Environment(\.modelContext) private var modelContext
 
@@ -26,6 +29,7 @@ struct ChatView: View {
     // Attachment staging
     @State private var pendingAttachments: [ChatDraftAttachment] = []
     @State private var showPhotoPicker = false
+    @State private var showCameraPicker = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var showFileImporter = false
 
@@ -99,11 +103,18 @@ struct ChatView: View {
             .photosPicker(
                 isPresented: $showPhotoPicker,
                 selection: $photoPickerItems,
-                maxSelectionCount: 4,
+                maxSelectionCount: max(1, remainingImageAttachmentSlots),
                 matching: .images
             )
             .onChange(of: photoPickerItems) {
                 loadPickedPhotos()
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                AssistantCameraPicker(
+                    onCapture: attachCapturedPhoto,
+                    onCancel: { showCameraPicker = false }
+                )
+                .ignoresSafeArea()
             }
             .fileImporter(
                 isPresented: $showFileImporter,
@@ -504,10 +515,21 @@ struct ChatView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Menu {
                     Button {
+                        showCameraPicker = true
+                    } label: {
+                        Label("Take Photo", systemImage: "camera.fill")
+                    }
+                    .disabled(
+                        remainingImageAttachmentSlots == 0
+                            || !UIImagePickerController.isSourceTypeAvailable(.camera)
+                    )
+
+                    Button {
                         showPhotoPicker = true
                     } label: {
                         Label("Photo Library", systemImage: "photo.on.rectangle")
                     }
+                    .disabled(remainingImageAttachmentSlots == 0)
                     Button {
                         showFileImporter = true
                     } label: {
@@ -666,6 +688,14 @@ struct ChatView: View {
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty)
     }
 
+    private var remainingImageAttachmentSlots: Int {
+        max(
+            0,
+            Self.maximumImageAttachments
+                - pendingAttachments.lazy.filter(\.isImage).count
+        )
+    }
+
     // MARK: - Attachment Loading
 
     private func loadPickedPhotos() {
@@ -674,6 +704,7 @@ struct ChatView: View {
         photoPickerItems = []
         Task {
             for item in items {
+                guard remainingImageAttachmentSlots > 0 else { break }
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let jpeg = ChatService.downscaledJPEG(from: data)
                 else { continue }
@@ -684,6 +715,20 @@ struct ChatView: View {
                 ))
             }
         }
+    }
+
+    private func attachCapturedPhoto(_ image: UIImage) {
+        defer { showCameraPicker = false }
+        guard remainingImageAttachmentSlots > 0,
+              let sourceData = image.jpegData(compressionQuality: 0.9),
+              let jpeg = ChatService.downscaledJPEG(from: sourceData)
+        else { return }
+
+        pendingAttachments.append(ChatDraftAttachment(
+            data: jpeg,
+            mimeType: "image/jpeg",
+            filename: "camera-photo.jpg"
+        ))
     }
 
     private func importPDF(_ result: Result<URL, Error>) {

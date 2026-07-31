@@ -19,8 +19,7 @@ struct ScanCaptureView: View {
 
     @AppStorage("scan.useProModel") private var useProModel: Bool = false
 
-    @State private var mode: ScanMode = .label
-    @State private var hasSelectedMode = false
+    @State private var mode: ScanMode = .foodPhoto
     @State private var cameraPermissionDenied = false
     @State private var showPhotoPicker = false
     @State private var photoSelections: [PhotosPickerItem] = []
@@ -52,11 +51,7 @@ struct ScanCaptureView: View {
                 }
             }
 
-            if !hasSelectedMode {
-                // Mode selection screen — two large cards over the camera preview
-                modeSelectionOverlay
-                    .transition(.opacity)
-            } else if !capturedPhotos.isEmpty && !isCapturingAdditionalPhoto {
+            if !capturedPhotos.isEmpty && !isCapturingAdditionalPhoto {
                 // After capturing/selecting photos, show confirmation with prompt field
                 promptOverlay
                     .transition(.opacity)
@@ -147,223 +142,28 @@ struct ScanCaptureView: View {
         }
     }
 
-    // MARK: - Mode Selection Overlay
-
-    /// Full-screen overlay with two large cards for choosing scan mode.
-    /// Shown before the camera UI. Selecting a card sets the mode and transitions to camera.
-    private var modeSelectionOverlay: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                // Top bar — close button only
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .semibold))
-                            .frame(width: 40, height: 40)
-                    }
-                    .buttonStyle(.glass)
-                    Spacer()
-                }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-
-                Spacer()
-
-                VStack(spacing: 16) {
-                    Text("What would you like to scan?")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-
-                    // Scan Label card
-                    Button {
-                        mode = .label
-                        withAnimation { hasSelectedMode = true }
-                    } label: {
-                        ScanModeCard(
-                            icon: "doc.viewfinder",
-                            title: "Scan Label",
-                            description: "Point at a nutrition facts label for accurate readings",
-                            color: .green,
-                            iconColor: .white
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    // Scan Food card
-                    Button {
-                        mode = .foodPhoto
-                        withAnimation { hasSelectedMode = true }
-                    } label: {
-                        ScanModeCard(
-                            icon: "fork.knife.circle",
-                            title: "Scan Food",
-                            description: "Take a photo of your food for an AI-powered estimate",
-                            color: .blue,
-                            iconColor: .white
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    // Scan Barcode card — uses camera to scan a barcode,
-                    // then looks up nutrition on Open Food Facts
-                    Button {
-                        mode = .barcode
-                        withAnimation { hasSelectedMode = true }
-                    } label: {
-                        ScanModeCard(
-                            icon: "barcode.viewfinder",
-                            title: "Scan Barcode",
-                            description: "Scan a product barcode to look up nutrition from Open Food Facts",
-                            color: .orange,
-                            iconColor: .white
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    if let lastScan = scanService.lastSubmittedScan {
-                        Button {
-                            scanService.redoLastScanInBackground()
-                            dismiss()
-                        } label: {
-                            ScanModeCard(
-                                icon: "arrow.clockwise",
-                                title: "Redo Last Scan",
-                                description: redoScanDescription(lastScan),
-                                color: .indigo,
-                                iconColor: .white
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(scanService.isScanning)
-                    }
-                }
-                .padding(.horizontal, 24)
-
-                Spacer()
-            }
-        }
-    }
-
     // MARK: - Camera Overlay
 
-    /// The live camera UI: mode toggle, torch, capture button, gallery
+    /// The live camera is also the mode-selection screen. This keeps all three
+    /// capture paths one tap away without duplicating a separate chooser.
     private var cameraOverlay: some View {
-        VStack {
-            // Top bar
-            HStack {
-                Button {
-                    returnFromCamera()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-
-                Spacer()
-
-                // Mode toggle — reflects the user's selection from the cards
-                GlassEffectContainer(spacing: 0) {
-                    Picker("Scan mode", selection: $mode) {
-                        Text("Label").tag(ScanMode.label)
-                        Text("Photo").tag(ScanMode.foodPhoto)
-                        Text("Barcode").tag(ScanMode.barcode)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 250)
-                    .onChange(of: mode) { _, _ in
-                        resetCapturedPhotos()
-                    }
-                }
-
-                Spacer()
-
-                // Torch button
-                Button {
-                    camera.toggleTorch()
-                } label: {
-                    Image(systemName: camera.torchOn ? "bolt.fill" : "bolt.slash.fill")
-                        .font(.system(size: 17, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                }
-                .buttonStyle(.glass)
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            zoomSelector
-                .padding(.top, 10)
-
-            Spacer()
-
-            // Mode hint
-            Text(cameraHintText)
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.85))
-                .padding(.horizontal, 24)
-                .padding(.vertical, 8)
-                .glassEffect(in: .capsule)
-                .padding(.bottom, 24)
-                .animation(.easeInOut, value: mode)
-
-            // Bottom bar: gallery (left), shutter (center), spacer (right for balance)
-            HStack {
-                // Photo library button — bottom left near shutter
-                Button {
-                    showPhotoPicker = true
-                } label: {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 48, height: 48)
-                }
-                .buttonStyle(.glass)
-
-                Spacer()
-
-                // Capture button — center
-                CaptureButton(isScanning: scanService.isScanning) {
-                    Task { await capture() }
-                }
-
-                Spacer()
-
-                // Invisible spacer to balance the gallery button
-                Color.clear
-                    .frame(width: 48, height: 48)
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 48)
-        }
-    }
-
-    private var zoomSelector: some View {
-        HStack(spacing: 8) {
-            ForEach(CameraZoomLevel.allCases) { level in
-                let isAvailable = camera.availableZoomLevels.contains(level)
-                Button {
-                    camera.setZoom(level)
-                } label: {
-                    Text(level.label)
-                        .font(.caption.weight(.semibold))
-                        .monospacedDigit()
-                        .foregroundStyle(camera.zoomLevel == level ? .black : .white)
-                        .frame(width: 48, height: 36)
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .disabled(!isAvailable)
-                .opacity(isAvailable ? 1 : 0.35)
-                .glassEffect(
-                    camera.zoomLevel == level
-                        ? .regular.tint(.white.opacity(0.85))
-                        : .regular.tint(.black.opacity(0.25)),
-                    in: .capsule
-                )
-                .accessibilityLabel(level.accessibilityLabel)
-            }
+        ScanCameraControls(
+            mode: $mode,
+            zoomLevel: camera.zoomLevel,
+            availableZoomLevels: camera.availableZoomLevels,
+            torchOn: camera.torchOn,
+            torchAvailable: camera.isTorchAvailable,
+            canRetry: scanService.lastSubmittedScan != nil,
+            isBusy: scanService.isScanning,
+            onExit: { dismiss() },
+            onRetry: retryLastScan,
+            onZoom: camera.setZoom,
+            onTorch: camera.toggleTorch,
+            onCapture: { Task { await capture() } },
+            onLibrary: { showPhotoPicker = true }
+        )
+        .onChange(of: mode) {
+            resetCapturedPhotos()
         }
     }
 
@@ -530,18 +330,6 @@ struct ScanCaptureView: View {
         }
     }
 
-    // MARK: - Mode Hint Text
-
-    /// Context-sensitive camera instruction text
-    private var modeHintText: String {
-        switch mode {
-        case .label: return "Point at a nutrition facts label"
-        case .foodPhoto: return "Point at your food for an estimate"
-        case .barcode: return "Point at a product barcode"
-        case .manual: return ""
-        }
-    }
-
     // MARK: - Capture
 
     /// Takes a photo and transitions to the prompt step
@@ -571,20 +359,8 @@ struct ScanCaptureView: View {
         return max(1, ScanService.maxImagesPerScan - capturedPhotos.count)
     }
 
-    private var cameraHintText: String {
-        if isCapturingAdditionalPhoto {
-            return "Capture another angle (\(capturedPhotos.count) of \(ScanService.maxImagesPerScan))"
-        }
-        return modeHintText
-    }
-
     private var analyzeButtonTitle: String {
         capturedPhotos.count > 1 ? "Analyze \(capturedPhotos.count) Photos" : "Analyze"
-    }
-
-    private func redoScanDescription(_ request: ScanRedoRequest) -> String {
-        let photoLabel = request.photoCount == 1 ? "photo" : "photos"
-        return "Re-analyze \(request.photoCount) previous \(photoLabel)"
     }
 
     private func addCapturedPhoto(_ image: UIImage) {
@@ -612,15 +388,10 @@ struct ScanCaptureView: View {
         promptText = ""
     }
 
-    private func returnFromCamera() {
-        withAnimation {
-            if isCapturingAdditionalPhoto && !capturedPhotos.isEmpty {
-                isCapturingAdditionalPhoto = false
-            } else {
-                resetCapturedPhotos()
-                hasSelectedMode = false
-            }
-        }
+    private func retryLastScan() {
+        guard scanService.lastSubmittedScan != nil else { return }
+        scanService.redoLastScanInBackground()
+        dismiss()
     }
 
     // MARK: - Barcode Detection
@@ -702,77 +473,6 @@ enum CameraZoomLevel: Double, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Capture Button
-
-private struct CaptureButton: View {
-    let isScanning: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .stroke(.white, lineWidth: 3)
-                    .frame(width: 76, height: 76)
-
-                if isScanning {
-                    ProgressView()
-                        .tint(.white)
-                        .scaleEffect(1.2)
-                } else {
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 62, height: 62)
-                }
-            }
-        }
-        .disabled(isScanning)
-        .buttonStyle(.plain)
-        .accessibilityLabel(isScanning ? "Processing…" : "Capture photo")
-    }
-}
-
-// MARK: - Scan Mode Card
-
-/// Large selection card for the mode picker screen.
-/// Shows an icon, title, and description with a tinted glass background.
-private struct ScanModeCard: View {
-    let icon: String
-    let title: String
-    let description: String
-    let color: Color
-    var iconColor: Color? = nil
-
-    var body: some View {
-        HStack(spacing: 16) {
-            Image(systemName: icon)
-                .font(.system(size: 32))
-                .foregroundStyle(iconColor ?? color)
-                .frame(width: 56, height: 56)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(title)
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Text(description)
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.7))
-                    .multilineTextAlignment(.leading)
-            }
-
-            Spacer(minLength: 0)
-
-            Image(systemName: "chevron.right")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.5))
-        }
-        .padding(20)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .glassEffect(.clear.tint(color.opacity(0.25)), in: .rect(cornerRadius: 16))
-    }
-}
-
 // MARK: - Camera Permission View
 
 private struct CameraPermissionView: View {
@@ -812,6 +512,7 @@ final class CameraController: NSObject, ObservableObject {
     @Published var permissionDenied = false
     @Published var zoomLevel: CameraZoomLevel = .one
     @Published var availableZoomLevels: [CameraZoomLevel] = [.one]
+    @Published private(set) var isTorchAvailable = false
 
     let session = AVCaptureSession()
     private var photoOutput = AVCapturePhotoOutput()
@@ -902,6 +603,7 @@ final class CameraController: NSObject, ObservableObject {
         session.addInput(input)
         currentVideoInput = input
         activeDevice = device
+        isTorchAvailable = device.hasTorch
         session.commitConfiguration()
 
         applyZoom(level, to: device)
