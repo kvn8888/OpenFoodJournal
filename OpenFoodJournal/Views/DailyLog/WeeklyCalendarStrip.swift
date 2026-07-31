@@ -104,6 +104,10 @@ struct WeeklyCalendarStrip: View {
     /// The currently selected date — bound to the parent's state.
     @Binding var selectedDate: Date
 
+    /// Optional deterministic progress values for previews and snapshot tests.
+    /// Production callers omit this and continue reading from NutritionStore.
+    private let calorieProgressByDate: [Date: Double]?
+
     /// NutritionStore is used to look up whether past days have logged entries.
     @Environment(NutritionStore.self) private var nutritionStore
 
@@ -112,6 +116,14 @@ struct WeeklyCalendarStrip: View {
 
     /// Calendar used for all date math
     private let calendar = Calendar.current
+
+    init(
+        selectedDate: Binding<Date>,
+        calorieProgressByDate: [Date: Double]? = nil
+    ) {
+        _selectedDate = selectedDate
+        self.calorieProgressByDate = calorieProgressByDate
+    }
 
     /// Number of weeks of history to make scrollable
     private let weeksOfHistory = 52
@@ -170,12 +182,17 @@ struct WeeklyCalendarStrip: View {
                     proxy.scrollTo(target.id, anchor: .center)
                 }
             }
-            .onChange(of: selectedDate) { _, newDate in
-                // When selectedDate changes (e.g. "Today" button), scroll to that week
-                if let target = weekIDForDate(newDate) {
-                    withAnimation(OFJMotion.standardSpring) {
-                        proxy.scrollTo(target.id, anchor: .center)
-                    }
+            .onChange(of: selectedDate) { oldDate, newDate in
+                // When selectedDate changes (e.g. "Today" button), scroll to that week.
+                // Only open an animated transaction when the week actually changed —
+                // otherwise every same-week tap re-animates the whole strip one update
+                // after the tap's own animation, retargeting transitions mid-flight.
+                guard let target = weekIDForDate(newDate),
+                      weekIDForDate(oldDate) != target else {
+                    return
+                }
+                withAnimation(OFJMotion.standardSpring) {
+                    proxy.scrollTo(target.id, anchor: .center)
                 }
             }
         }
@@ -222,7 +239,9 @@ struct WeeklyCalendarStrip: View {
 
         // Calculate calorie progress for this day
         let progress: Double
-        if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
+        if let calorieProgressByDate {
+            progress = calorieProgressByDate[startOfDate] ?? 0
+        } else if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
             let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
             progress = totalCalories / goals.dailyCalories
         } else {
@@ -313,9 +332,13 @@ private struct CalendarDayButtonStyle: ButtonStyle {
             .contentShape(
                 .rect(cornerRadius: OFJRadius.compactCard)
             )
+            // Card and label share one timeline that matches the selection
+            // animation in CalendarDayButton, so the highlight and the day's
+            // colors can't land on different clocks.
+            .animation(OFJMotion.standardSpring, value: showRectangle)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            // Press feedback stays quick and is scoped to the scale alone.
             .animation(OFJMotion.quickSpring, value: configuration.isPressed)
-            .animation(OFJMotion.quickSpring, value: isHighlighted)
     }
 }
 
@@ -376,11 +399,20 @@ private struct DayCellView: View {
                         .rotationEffect(.degrees(-90))
                 }
 
-                // The date number text
+                // The date number text.
+                //
+                // Font weight is not an interpolatable property. Animating this
+                // Text makes SwiftUI cross-fade a bold raster against a regular
+                // one, so both glyph sets sit on screen at partial opacity for
+                // the whole duration — the deselecting day looks like it snaps
+                // to bold and then back to thin. Strip the transaction so the
+                // weight (and its paired color) change in a single clean frame
+                // while the card and ring animate around it.
                 Text(dayNumber)
                     .font(OFJType.calendarDay)
-                    .fontWeight(state.isSelected ? .bold : .semibold)
+                    .fontWeight(state.isSelected ? .bold : .regular)
                     .foregroundStyle(dateTextColor)
+                    .transaction { $0.animation = nil }
             }
             .frame(
                 width: OFJLayout.calendarDayRingSize,
@@ -411,13 +443,41 @@ private struct DayCellView: View {
 // MARK: - Preview
 
 /// A simple wrapper view that provides the required environment objects for previewing.
+@MainActor
 private struct CalendarStripPreview: View {
     @State private var date = Date.now
+    private let container: ModelContainer
+    private let nutritionStore: NutritionStore
+
+    private var calorieProgressByDate: [Date: Double] {
+        guard let weekStart = Calendar.current.dateInterval(
+            of: .weekOfYear,
+            for: date
+        )?.start else {
+            return [:]
+        }
+
+        let progress = [0.38, 0.64, 0.81, 0.97, 1.08, 0.9, 0.0]
+        return Dictionary(uniqueKeysWithValues: progress.enumerated().compactMap { offset, value in
+            Calendar.current.date(byAdding: .day, value: offset, to: weekStart)
+                .map { (Calendar.current.startOfDay(for: $0), value) }
+        })
+    }
+
+    init() {
+        let container = ModelContainer.calendarPreview
+        self.container = container
+        self.nutritionStore = NutritionStore(modelContext: container.mainContext)
+    }
 
     var body: some View {
-        WeeklyCalendarStrip(selectedDate: $date)
+        WeeklyCalendarStrip(
+            selectedDate: $date,
+            calorieProgressByDate: calorieProgressByDate
+        )
             .padding()
-            .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
+            .modelContainer(container)
+            .environment(nutritionStore)
             .environment(UserGoals())
     }
 }
@@ -452,7 +512,6 @@ private struct CalendarStateMatrixPreview: View {
 
 #Preview("Calendar Strip") {
     CalendarStripPreview()
-        .modelContainer(.preview)
 }
 
 #Preview("Calendar States · Light") {

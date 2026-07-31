@@ -7,6 +7,18 @@ import SwiftData
 // MARK: - Preview Model Container
 
 extension ModelContainer {
+    /// Minimal store for calendar previews that only need read-only date lookup.
+    /// Keeping the schema and contents small avoids an Xcode 27 beta SwiftData
+    /// save crash when Live Previews run on a physical device.
+    @MainActor
+    static var calendarPreview: ModelContainer {
+        let config = ModelConfiguration(isStoredInMemoryOnly: true)
+        return try! ModelContainer(
+            for: NutritionEntry.self, DailyLog.self,
+            configurations: config
+        )
+    }
+
     @MainActor
     static var preview: ModelContainer {
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
@@ -38,7 +50,12 @@ extension ModelContainer {
 // MARK: - NutritionEntry Mock Data
 
 extension NutritionEntry {
-    static let samples: [NutritionEntry] = [
+    /// Builds fresh SwiftData objects for every preview container.
+    ///
+    /// A model instance can only belong to one context. Keeping these as a
+    /// static stored array caused repeated Live Preview refreshes to insert the
+    /// same objects into new in-memory containers and crash on physical devices.
+    static var samples: [NutritionEntry] { [
         NutritionEntry(
             name: "Greek Yogurt",
             mealType: .breakfast,
@@ -114,15 +131,15 @@ extension NutritionEntry {
             carbs: 24,
             fat: 22
         ),
-    ]
+    ] }
 
-    static let preview: NutritionEntry = samples[0]
+    static var preview: NutritionEntry { samples[0] }
 }
 
 // MARK: - SavedFood Mock Data
 
 extension SavedFood {
-    static let samples: [SavedFood] = [
+    static var samples: [SavedFood] { [
         SavedFood(
             name: "Greek Yogurt (Fage 0%)",
             calories: 100,
@@ -152,9 +169,9 @@ extension SavedFood {
             servingsPerContainer: 1,
             originalScanMode: .label
         ),
-    ]
+    ] }
 
-    static let preview: SavedFood = samples[0]
+    static var preview: SavedFood { samples[0] }
 }
 
 // MARK: - DailyLog Mock Data
