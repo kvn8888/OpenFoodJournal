@@ -169,14 +169,17 @@ struct CompleteContainerSheet: View {
                     .foregroundStyle(.secondary)
                 Text("\(Int(consumed))g")
                     .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .ofjNumericTextTransition(value: consumed)
                 Text("(\(servings, specifier: "%.1f") servings)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: servings)
 
                 if let remaining = calculation.remainingFoodWeight {
                     Text("\(formatWeight(remaining))g remaining")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: remaining)
                 }
             }
 
@@ -314,6 +317,7 @@ private struct ResultMacroCell: View {
                 .font(.title2)
                 .fontWeight(.bold)
                 .monospacedDigit()
+                .ofjNumericTextTransition(value: value)
             Text(unit)
                 .font(.caption2)
                 .foregroundStyle(.secondary)

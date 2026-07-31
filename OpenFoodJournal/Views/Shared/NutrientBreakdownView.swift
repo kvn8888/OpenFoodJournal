@@ -106,6 +106,7 @@ struct NutrientBreakdownView: View {
                                 Text(formatValue(total) + " " + kind.unit)
                                     .font(.title2)
                                     .fontWeight(.bold)
+                                    .ofjNumericTextTransition(value: total)
                                 Text("consumed")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
@@ -117,6 +118,9 @@ struct NutrientBreakdownView: View {
                                         .font(.title2)
                                         .fontWeight(.bold)
                                         .foregroundStyle(fractionColor(total / effectiveDailyValue))
+                                        .ofjNumericTextTransition(
+                                            value: total / effectiveDailyValue
+                                        )
                                     Text("of daily value")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -176,6 +180,7 @@ struct NutrientBreakdownView: View {
                 Text("\(contributions.count)")
                     .font(.title)
                     .fontWeight(.bold)
+                    .ofjNumericTextTransition(value: contributions.count)
                 Text(contributions.count == 1 ? "food" : "foods")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -311,11 +316,13 @@ private struct ContributionRow: View {
                     .font(.subheadline)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: item.value)
 
                 Text("(\(Int(fraction * 100))%)")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: fraction)
             }
 
             // Progress bar showing contribution to daily value

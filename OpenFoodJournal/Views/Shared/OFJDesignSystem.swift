@@ -258,6 +258,41 @@ enum OFJMotion {
     static let standardFade = Animation.easeInOut(duration: standardDuration)
 }
 
+/// Applies the app-wide transition for numeric readouts whose value changes in
+/// place. Passing the underlying number (instead of only the rendered string)
+/// lets SwiftUI choose the correct counting direction. Reduce Motion keeps the
+/// value update immediate without the rolling glyph animation.
+private struct OFJNumericTextTransitionModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    let value: Double
+
+    func body(content: Content) -> some View {
+        content
+            .contentTransition(
+                reduceMotion ? .identity : .numericText(value: value)
+            )
+            .animation(
+                reduceMotion ? nil : OFJMotion.standardFade,
+                value: value
+            )
+    }
+}
+
+extension View {
+    func ofjNumericTextTransition<Value: BinaryInteger>(
+        value: Value
+    ) -> some View {
+        modifier(OFJNumericTextTransitionModifier(value: Double(value)))
+    }
+
+    func ofjNumericTextTransition<Value: BinaryFloatingPoint>(
+        value: Value
+    ) -> some View {
+        modifier(OFJNumericTextTransitionModifier(value: Double(value)))
+    }
+}
+
 /// Shared geometry for list-backed screens and tappable controls.
 enum OFJLayout {
     static let minimumHitTarget: CGFloat = 44

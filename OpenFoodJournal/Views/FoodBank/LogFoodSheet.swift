@@ -33,6 +33,7 @@ struct LogFoodSheet: View {
     @State private var quantity: Double
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
     @State private var quantityText: String
+    @FocusState private var quantityIsFocused: Bool
     // The unit the user has selected for this log (may differ from the food's stored unit)
     @State private var selectedUnit: String
     // Controls the nested Edit Food sheet
@@ -420,6 +421,18 @@ struct LogFoodSheet: View {
                         .font(.title2.weight(.bold).monospacedDigit())
                         .multilineTextAlignment(.center)
                         .frame(minWidth: 62)
+                        .focused($quantityIsFocused)
+                        .foregroundStyle(
+                            quantityIsFocused ? Color.primary : Color.clear
+                        )
+                        .overlay {
+                            if !quantityIsFocused {
+                                Text(quantityText)
+                                    .font(.title2.weight(.bold).monospacedDigit())
+                                    .ofjNumericTextTransition(value: quantity)
+                                    .allowsHitTesting(false)
+                            }
+                        }
                         .onChange(of: quantityText) { _, newValue in
                             if let value = Double(newValue), value > 0 {
                                 quantity = value
@@ -445,6 +458,7 @@ struct LogFoodSheet: View {
                         .font(.caption)
                         .foregroundStyle(.tertiary)
                         .monospacedDigit()
+                        .ofjNumericTextTransition(value: quantity)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -504,14 +518,18 @@ struct LogFoodSheet: View {
     }
 
     private func incrementQuantity() {
-        let step = LogFoodPresentation.quantityStep(for: selectedUnit)
-        quantity = LogFoodPresentation.roundedQuantity(quantity + step)
+        quantity = LogFoodPresentation.incrementedQuantity(
+            quantity,
+            unit: selectedUnit
+        )
         quantityText = formattedQuantity(quantity)
     }
 
     private func decrementQuantity() {
-        let step = LogFoodPresentation.quantityStep(for: selectedUnit)
-        quantity = LogFoodPresentation.roundedQuantity(max(step, quantity - step))
+        quantity = LogFoodPresentation.decrementedQuantity(
+            quantity,
+            unit: selectedUnit
+        )
         quantityText = formattedQuantity(quantity)
     }
 
@@ -784,6 +802,14 @@ enum LogFoodPresentation {
         (value * 100).rounded() / 100
     }
 
+    static func incrementedQuantity(_ quantity: Double, unit: String) -> Double {
+        roundedQuantity(quantity + quantityStep(for: unit))
+    }
+
+    static func decrementedQuantity(_ quantity: Double, unit: String) -> Double {
+        roundedQuantity(max(0, quantity - quantityStep(for: unit)))
+    }
+
     static func convertedQuantity(
         _ quantity: Double,
         from sourceUnit: String,
@@ -871,6 +897,7 @@ private struct LogFoodNutritionCard: View {
                 Text(calories.formatted(.number.precision(.fractionLength(0))))
                     .font(.system(size: 42, weight: .bold, design: .rounded))
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: calories)
                 Text("kcal")
                     .font(.headline)
                     .foregroundStyle(.tertiary)
@@ -908,6 +935,7 @@ private struct LogFoodNutritionCard: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                        .ofjNumericTextTransition(value: currentDayCalories + calories)
                 }
                 dayProgress
             }
@@ -939,9 +967,11 @@ private struct LogFoodNutritionCard: View {
                 Spacer()
                 Text("\(formattedMacro(value)) g")
                     .font(.subheadline.weight(.semibold).monospacedDigit())
+                    .ofjNumericTextTransition(value: value)
                 Text("\(Int((share * 100).rounded()))% of its calories")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
+                    .ofjNumericTextTransition(value: share)
             }
             ProgressView(value: share)
                 .tint(color)
@@ -1244,6 +1274,7 @@ private struct EditableMicroRow: View {
                     )
                     .monospacedDigit()
                     .frame(width: 34, alignment: .trailing)
+                    .ofjNumericTextTransition(value: value)
             }
 
             GeometryReader { proxy in

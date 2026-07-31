@@ -217,6 +217,7 @@ struct HistoryView: View {
                 .font(.title3)
                 .fontWeight(.bold)
                 .foregroundStyle(color)
+                .ofjNumericTextTransition(value: current)
 
             Text("\(unit)/day avg")
                 .font(.caption2)
@@ -227,6 +228,7 @@ struct HistoryView: View {
                     .font(.caption2)
                     .fontWeight(.medium)
                     .foregroundStyle(abs(delta) < 10 ? Color.secondary : (delta > 0 ? Color.orange : Color.green))
+                    .ofjNumericTextTransition(value: delta)
             }
         }
         .frame(maxWidth: .infinity)
@@ -247,6 +249,7 @@ struct HistoryView: View {
                     Text("\(Int(log.totalCalories)) kcal")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: log.totalCalories)
                 }
             }
             .padding(.horizontal)
@@ -285,6 +288,9 @@ struct HistoryView: View {
                                         Text("\(Int(entries.reduce(0) { $0 + $1.calories })) kcal")
                                             .font(.footnote)
                                             .foregroundStyle(.tertiary)
+                                            .ofjNumericTextTransition(
+                                                value: entries.reduce(0) { $0 + $1.calories }
+                                            )
                                     }
                                     .padding(.horizontal)
                                     .padding(.vertical, 6)

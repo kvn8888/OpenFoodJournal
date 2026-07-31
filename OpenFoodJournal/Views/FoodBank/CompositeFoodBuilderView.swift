@@ -397,6 +397,7 @@ private struct CompositeIngredientRow: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: totals.calories)
                 Text("cal")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -420,6 +421,7 @@ private struct CompositeIngredientRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .ofjNumericTextTransition(value: ingredient.selectedQuantity)
 
                 HStack(spacing: 6) {
                     MacroChip(value: totals.protein, color: .blue, label: "P")
@@ -455,6 +457,7 @@ private struct CompositeMacroCard: View {
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: value)
                 Text(unit)
                     .font(.caption)
                     .foregroundStyle(.secondary)

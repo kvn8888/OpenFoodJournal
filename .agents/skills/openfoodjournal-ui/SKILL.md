@@ -74,7 +74,7 @@ These roles apply only to `WeeklyCalendarStrip` and the selected-day Journal bac
 | Calendar day | `.title3.weight(.semibold)` | semibold/bold when selected | ~20 |
 | Numeric alignment | `.monospacedDigit()` | — | inherited |
 
-**Convention:** All numeric displays use `.system(design: .rounded)`. Precise alignment uses `.monospacedDigit()`.
+**Convention:** All numeric displays use `.system(design: .rounded)`. Precise alignment uses `.monospacedDigit()`. When a numeric readout changes in place, apply `.ofjNumericTextTransition(value:)` with the underlying number so increases and decreases animate in the correct direction and Reduce Motion is respected. Do not apply the rolling transition to user-editable text fields while the user is typing.
 
 ## Glassmorphism (iOS 26+)
 
@@ -272,12 +272,13 @@ ContentUnavailableView {
 | Micro-interaction | `.spring(duration: 0.2)` | Option highlight |
 | Disclosure toggle | `.spring(duration: 0.3)` | Section expand |
 | Progress rings | `.easeInOut` | Value transitions |
+| Numeric readouts | `.ofjNumericTextTransition(value:)` | Direction-aware value changes |
 | View transitions | `.opacity.combined(with: .move(edge: .top))` | Expanding sections |
 | Glass morphing | `.glassEffectTransition(.matchedGeometry)` | RadialMenu items |
 | Haptic feedback | `.sensoryFeedback(.impact(flexibility: .soft))` | Menu open/close |
 | Sheet chain delay | `asyncAfter(deadline: .now() + 0.15)` | Before next sheet |
 
-**Convention:** Use `withAnimation(.spring(...))` for user-initiated actions. Use `.animation(.easeInOut, value:)` for data-driven transitions.
+**Convention:** Use `withAnimation(.spring(...))` for user-initiated actions. Use `.animation(.easeInOut, value:)` for data-driven transitions. Numeric text must use the shared `.ofjNumericTextTransition(value:)` modifier rather than duplicating `.contentTransition(.numericText(...))`; the shared modifier supplies the animation transaction and disables rolling glyphs for Reduce Motion.
 
 ## Form/Input Patterns
 

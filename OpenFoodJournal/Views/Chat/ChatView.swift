@@ -269,6 +269,7 @@ struct ChatView: View {
                         Text(elapsedLabel(elapsed))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .ofjNumericTextTransition(value: elapsed)
                     }
                     Spacer()
                     Button {
@@ -600,6 +601,7 @@ struct ChatView: View {
                 Text("Next request")
                 Spacer()
                 Text("~\(compactTokenCount(usage.displayedTokens)) / \(compactTokenCount(usage.selectedLimit))")
+                    .ofjNumericTextTransition(value: usage.displayedTokens)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -613,12 +615,16 @@ struct ChatView: View {
             Text("Reserved: \(compactTokenCount(usage.reservedOutputTokens)) output + \(compactTokenCount(usage.reservedToolTokens)) tools")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
+                .ofjNumericTextTransition(
+                    value: usage.reservedOutputTokens + usage.reservedToolTokens
+                )
 
             if let reported = usage.reportedInputTokens {
                 let cached = usage.reportedCachedInputTokens ?? 0
                 Text("Last provider report: \(compactTokenCount(reported)) input · \(compactTokenCount(cached)) cached")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .ofjNumericTextTransition(value: reported + cached)
             }
 
             if usage.isEstimateFrozen {
