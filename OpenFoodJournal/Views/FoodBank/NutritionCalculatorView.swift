@@ -406,6 +406,9 @@ struct NutritionCalculatorBuildView: View {
                                 ) {
                                     Text("\(CalculatorFormat.number(selection.quantity))x")
                                         .monospacedDigit()
+                                        .ofjNumericTextTransition(
+                                            value: selection.quantity
+                                        )
                                 }
                             }
                             .padding(.vertical, 2)
@@ -1072,6 +1075,7 @@ private struct CalculatorIngredientRow: View {
                 Text("\(ingredient.portions.count) portion\(ingredient.portions.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: ingredient.portions.count)
             }
             Spacer()
             Image(systemName: "chevron.right")
@@ -1096,6 +1100,7 @@ private struct CalculatorPortionRow: View {
                 Text("\(CalculatorFormat.number(portion.calories)) cal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: portion.calories)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -1123,6 +1128,7 @@ private struct CalculatorMacroCard: View {
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: value)
                 Text(unit)
                     .font(.caption)
                     .foregroundStyle(.secondary)

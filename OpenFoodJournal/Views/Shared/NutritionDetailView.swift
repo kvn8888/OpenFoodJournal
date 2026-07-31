@@ -235,6 +235,7 @@ struct NutritionDetailView: View {
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundStyle(color)
+                            .ofjNumericTextTransition(value: value)
                         Text(macro.unit)
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
@@ -251,6 +252,7 @@ struct NutritionDetailView: View {
                     Text("\(Int(fraction * 100))%")
                         .font(.caption2)
                         .foregroundStyle(fraction >= 1.0 ? color : .secondary)
+                        .ofjNumericTextTransition(value: fraction)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -335,6 +337,7 @@ struct NutritionDetailView: View {
                                 .font(.subheadline)
                                 .monospacedDigit()
                                 .foregroundStyle(.secondary)
+                                .ofjNumericTextTransition(value: value.value)
                         }
                     }
                 }
@@ -385,6 +388,7 @@ private struct NutrientProgressRow: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: consumed?.value ?? 0)
             }
 
             // Bottom: progress bar

@@ -45,6 +45,7 @@ struct MacroRingView: View {
                     Text(value, format: .number.precision(.fractionLength(0)))
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(isOver ? .orange : .primary)
+                        .ofjNumericTextTransition(value: value)
                     Text(unit)
                         .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(.secondary)

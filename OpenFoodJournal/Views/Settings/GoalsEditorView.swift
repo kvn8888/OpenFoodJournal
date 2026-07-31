@@ -29,6 +29,7 @@ struct GoalsEditorView: View {
                     Spacer()
                     Text("\(Int(totalFromMacros)) kcal")
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: totalFromMacros)
                 }
             } footer: {
                 Text("Protein & carbs = 4 kcal/g · Fat = 9 kcal/g (Atwater system). Use this as a sanity check against your calorie goal. These are general factors — individual needs vary. Consult a healthcare professional for personalized guidance.")

@@ -302,6 +302,7 @@ private struct StatPill: View {
                 Text(value, format: .number.precision(.fractionLength(value < 10 ? 1 : 0)))
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundStyle(color)
+                    .ofjNumericTextTransition(value: value)
                 Text(unit)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

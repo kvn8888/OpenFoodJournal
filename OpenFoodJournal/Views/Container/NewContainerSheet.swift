@@ -307,6 +307,7 @@ struct NewContainerSheet: View {
                 Text("Last end weight: \(formatWeight(selectedFoodLastEndWeight))g")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: selectedFoodLastEndWeight)
             }
         }
         .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -339,6 +340,7 @@ struct NewContainerSheet: View {
                     Text("\(formatWeight(foodWeight))g")
                         .font(.system(size: 24, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                        .ofjNumericTextTransition(value: foodWeight)
                 }
                 .padding()
                 .glassEffect(in: .rect(cornerRadius: 20))

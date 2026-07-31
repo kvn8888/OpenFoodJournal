@@ -71,6 +71,22 @@ struct LogFoodPresentationTests {
         #expect(LogFoodPresentation.quantityStep(for: "kg") == 0.1)
     }
 
+    @Test("quantity buttons increment and decrement through zero")
+    func quantityAdjustments() {
+        #expect(
+            LogFoodPresentation.incrementedQuantity(1, unit: "serving") == 2
+        )
+        #expect(
+            LogFoodPresentation.decrementedQuantity(1, unit: "serving") == 0
+        )
+        #expect(
+            LogFoodPresentation.decrementedQuantity(1, unit: "cup") == 0.75
+        )
+        #expect(
+            LogFoodPresentation.decrementedQuantity(0, unit: "serving") == 0
+        )
+    }
+
     @Test("macro calorie shares use Atwater factors and stay bounded")
     func macroCalorieShares() {
         #expect(

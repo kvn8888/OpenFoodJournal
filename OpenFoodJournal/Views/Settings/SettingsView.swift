@@ -113,6 +113,7 @@ struct SettingsView: View {
                     Spacer()
                     Text("\(Int(goals.dailyCalories)) kcal")
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: goals.dailyCalories)
                 }
                 HStack {
                     Text("Protein / Carbs / Fat")
@@ -120,6 +121,11 @@ struct SettingsView: View {
                     Text("\(Int(goals.dailyProtein))g · \(Int(goals.dailyCarbs))g · \(Int(goals.dailyFat))g")
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
+                        .ofjNumericTextTransition(
+                            value: goals.dailyProtein
+                                + goals.dailyCarbs
+                                + goals.dailyFat
+                        )
                 }
             }
 
@@ -491,19 +497,53 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(costText(geminiTotalEstimatedCostUSD))
                             .monospacedDigit()
+                            .ofjNumericTextTransition(
+                                value: geminiTotalEstimatedCostUSD
+                            )
                     } label: {
                         Label("Estimated Token Cost", systemImage: "dollarsign.circle")
                     }
 
-                    LabeledContent("Requests", value: geminiRequestSummaryText)
-                    LabeledContent("Tokens", value: geminiTokenSummaryText)
+                    LabeledContent {
+                        Text(geminiRequestSummaryText)
+                            .monospacedDigit()
+                            .ofjNumericTextTransition(value: geminiTotalRequests)
+                    } label: {
+                        Text("Requests")
+                    }
+                    LabeledContent {
+                        Text(geminiTokenSummaryText)
+                            .monospacedDigit()
+                            .ofjNumericTextTransition(
+                                value: geminiTotalInputTokens
+                                    + geminiTotalOutputTokens
+                            )
+                    } label: {
+                        Text("Tokens")
+                    }
 
                     if geminiTotalThinkingTokens > 0 {
-                        LabeledContent("Thinking Tokens", value: geminiTotalThinkingTokens.formatted())
+                        LabeledContent {
+                            Text(geminiTotalThinkingTokens.formatted())
+                                .monospacedDigit()
+                                .ofjNumericTextTransition(
+                                    value: geminiTotalThinkingTokens
+                                )
+                        } label: {
+                            Text("Thinking Tokens")
+                        }
                     }
 
                     if geminiGroundedSearchPrompts > 0 {
-                        LabeledContent("AI Search Grounding", value: "\(geminiGroundedSearchPrompts.formatted()) prompts")
+                        LabeledContent {
+                            Text("\(geminiGroundedSearchPrompts.formatted()) prompts")
+                                .monospacedDigit()
+                                .ofjNumericTextTransition(
+                                    value: geminiGroundedSearchPrompts
+                                )
+                        } label: {
+                            Text("AI Search Grounding")
+                        }
                     }
 
                     if geminiTotalRequests > 0 {

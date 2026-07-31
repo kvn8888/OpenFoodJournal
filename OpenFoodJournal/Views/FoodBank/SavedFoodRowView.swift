@@ -38,6 +38,7 @@ struct SavedFoodRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                        .ofjNumericTextTransition(value: food.calories)
                 } else if let emoji = food.normalizedEmoji {
                     Text(emoji)
                         .font(.title3)
@@ -46,6 +47,7 @@ struct SavedFoodRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                        .ofjNumericTextTransition(value: food.calories)
                 } else if food.kind == .calculator {
                     Image(systemName: "slider.horizontal.3")
                         .font(.headline)
@@ -53,11 +55,15 @@ struct SavedFoodRowView: View {
                     Text("\(food.calculatorIngredients.count)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(
+                            value: food.calculatorIngredients.count
+                        )
                 } else {
                     Text("\(Int(food.calories))")
                         .font(.headline)
                         .fontWeight(.semibold)
                         .monospacedDigit()
+                        .ofjNumericTextTransition(value: food.calories)
                     Text("cal")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -108,6 +114,9 @@ struct SavedFoodRowView: View {
                 Text("\(food.calculatorIngredients.count) item\(food.calculatorIngredients.count == 1 ? "" : "s")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(
+                        value: food.calculatorIngredients.count
+                    )
             } else {
                 HStack(spacing: 6) {
                     MacroChip(value: food.protein, color: .blue, label: "P")

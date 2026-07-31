@@ -81,6 +81,7 @@ struct MealSectionView: View {
                         .font(.subheadline)
                         .foregroundStyle(.primary)
                         .textCase(nil)
+                        .ofjNumericTextTransition(value: totalCalories)
                 }
             }
         }

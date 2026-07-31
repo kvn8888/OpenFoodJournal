@@ -92,9 +92,11 @@ struct MacroSummaryBar: View {
             HStack(alignment: .firstTextBaseline, spacing: OFJSpace.s4) {
                 Text(calories, format: .number.precision(.fractionLength(0)))
                     .font(OFJType.nutritionDisplay)
+                    .ofjNumericTextTransition(value: calories)
                 Text("/ \(Int(goals.dailyCalories)) kcal")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: goals.dailyCalories)
                 Spacer()
             }
 

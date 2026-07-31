@@ -37,6 +37,7 @@ struct FoodNutrientBreakdownView: View {
                     Text("\(entries.count) \(entries.count == 1 ? "serving" : "servings") logged")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: entries.count)
                     Text(periodLabel)
                         .font(.caption)
                         .foregroundStyle(.tertiary)
@@ -99,6 +100,7 @@ struct FoodNutrientBreakdownView: View {
                         .font(.title3)
                         .fontWeight(.bold)
                         .foregroundStyle(color)
+                        .ofjNumericTextTransition(value: value)
                     Text(unit)
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
@@ -114,6 +116,7 @@ struct FoodNutrientBreakdownView: View {
                 Text("\(Int(fraction * 100))%")
                     .font(.caption2)
                     .foregroundStyle(fraction >= 1.0 ? color : .secondary)
+                    .ofjNumericTextTransition(value: fraction)
             }
         }
     }
@@ -131,6 +134,7 @@ struct FoodNutrientBreakdownView: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: row.value)
             }
 
             // Progress bar vs daily value

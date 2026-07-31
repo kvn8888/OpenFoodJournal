@@ -458,6 +458,7 @@ struct OnboardingView: View {
                 Text("\(Int(value.wrappedValue)) \(unit)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: value.wrappedValue)
             }
             Slider(value: value, in: range, step: step)
                 .tint(Color.accentColor)

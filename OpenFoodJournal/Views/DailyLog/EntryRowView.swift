@@ -40,6 +40,7 @@ struct EntryRowView: View {
                     Text("\(Int(entry.calories)) kcal")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: entry.calories)
 
                     Text("·")
                         .font(.caption)
@@ -82,6 +83,7 @@ struct MacroChip: View {
         Text("\(label) \(Int(value))g")
             .font(OFJType.macroChip)
             .foregroundStyle(color)
+            .ofjNumericTextTransition(value: value)
             .padding(.horizontal, OFJSpace.s6)
             .padding(.vertical, OFJSpace.s3)
             .background(color.opacity(0.12), in: Capsule())
@@ -101,6 +103,7 @@ private struct ConfidenceBadge: View {
             if scanMode == .foodPhoto {
                 Text("~\(percent)%")
                     .font(OFJType.confidenceText)
+                    .ofjNumericTextTransition(value: percent)
             }
         }
         .foregroundStyle(color)
