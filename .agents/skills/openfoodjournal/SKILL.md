@@ -27,12 +27,14 @@ This is the single source of truth for any LLM agent working on this project. Re
 
 ```
 MacrosApp (creates ModelContainer w/ CloudKit + @Observable services)
-  └─ ContentView (5-tab TabView)
+  └─ ContentView (4-tab TabView)
        ├─ Journal tab → DailyLogView (WeeklyCalendarStrip, macro summary, meal sections, RadialMenuButton)
        ├─ Food Bank tab → FoodBankView (searchable, sortable active saved food list, swipe-to-archive/edit, "+" menu: AI Search/Composite/Nutrition Calculator/Search OFF/Manual/Archive)
        ├─ History tab → HistoryView (CalendarGridView with progress rings, MacroChartView, macro cards → NutritionDetailView)
-       ├─ Assistant tab → ChatView (streaming AI chat over nutrition data, persistent CloudKit-synced threads)
-       └─ Settings tab → SettingsView (goals, health, data export)
+       └─ Assistant tab → ChatView (streaming AI chat over nutrition data, persistent CloudKit-synced threads)
+
+Journal's top-right Settings toolbar control pushes `SettingsView` on the Journal
+`NavigationStack`. Settings is intentionally not a persistent root tab.
 ```
 
 **Radial FAB**: DailyLogView uses `RadialMenuButton` — a "+" icon at bottom center that fans out Scan / Manual / Containers / Food Bank in an upper semicircle (210°–330°). Supports tap-to-toggle and drag-to-action. Containers are accessed from here instead of a separate tab.
@@ -477,13 +479,15 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 **CursorEndModifier**: Applied once at the app root with `.cursorAtEnd()`. It keeps `UITextField` cursors at the end on focus and installs a non-canceling window tap recognizer that dismisses the keyboard when tapping outside text inputs. Keep this centralized instead of adding competing per-view whitespace tap gestures.
 
-## Current State (Last Updated: 2026-07-26)
+**Executable UI foundations**: `Views/Shared/OFJDesignSystem.swift` owns `OFJColor`, `OFJSpace`, `OFJRadius`, `OFJType`, `OFJMotion`, `OFJLayout`, and stable content phases. Seed values match the existing Liquid Glass UI; architecture-only migrations must be pixel-equivalent unless a separate reviewed design issue authorizes a visual change.
+
+## Current State (Last Updated: 2026-07-30)
 
 - **Branch: `app-store`** — CloudKit is the primary sync path, with optional push-only Turso mirror for user-owned SQL debugging
 - **Cloud release foundation** — Both release branches and deployment environments exist. Credentials pass App Store Connect read checks, and TestFlight signing assets pass integrity checks. `testflight-internal` is restricted to `testflight`; `app-store-production` is restricted to `app-store` and requires `kvn8888` approval. Both branches require pull requests, resolved conversations, and cloud CI; force pushes/deletion are blocked. `testflight` stays linear, while `app-store` uses merge commits for promotion so immutable TestFlight tags remain ancestors of production. Future GitHub releases are immutable, both deployment variables are enabled, and the next trusted TestFlight update will create the first schema-2 manifest.
 - **Internal TestFlight: version 1.4 build 10** — uploaded 2026-07-25, App Store Connect processing state `VALID`, internal state `IN_BETA_TESTING`; includes centralized HealthKit synchronization and pending-entry reconciliation
 - App structure complete: all models, services, and views implemented
-- 5-tab layout: Journal, Food Bank, History, Assistant, Settings (Containers accessed via RadialMenuButton)
+- 4-tab layout: Journal, Food Bank, History, Assistant. Settings is pushed from the Journal's top-right toolbar; Containers remain accessible via RadialMenuButton.
 - **Assistant tab (agent foundations 2026-07-20)**: persistent CloudKit-synced agentic chat with independent Gemini/OpenRouter/Azure provider selection, independent model-native/Tavily/Parallel web-research selection, Azure Sol/Terra deployments, 50k/200k/maximum token budgets, portable compaction, durable versioned sources, cancellation/recovery, and retry-safe approved writes. Read tools (journal, Food Bank, goals, Apple Health energy, calculators, `web_search`, secure `fetch_url`, and `read_conversation_source`) run silently with activity/source chips; write tools show durable Allow/Deny permission cards. Supports image/PDF attachments, regenerate, provider-reported usage, context meter/warnings, and the always-visible "not medical advice" footer.
 - App and full unit/UI test targets compile with `xcodebuild ... build-for-testing` against `generic/platform=iOS`; generic unsigned Release and signed App Store archives also succeed. The installed simulator runtime works with an isolated `/private/tmp` device set, but this Mac's default CoreSimulator store is symlinked to an external volume that CoreSimulatorService cannot write, so XCTest execution needs that host configuration repaired or a safe signed device destination.
 - SwiftData + CloudKit Private Database for data persistence and sync

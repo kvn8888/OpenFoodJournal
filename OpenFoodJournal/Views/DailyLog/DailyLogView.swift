@@ -4,6 +4,10 @@
 import SwiftUI
 import SwiftData
 
+enum JournalRoute: CaseIterable, Hashable {
+    case settings
+}
+
 struct DailyLogView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
@@ -34,7 +38,7 @@ struct DailyLogView: View {
                     WeeklyCalendarStrip(selectedDate: $selectedDate)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                        .listRowInsets(OFJLayout.calendarListRowInsets)
 
                     // Macro summary card — tap to view full nutrition details
                     MacroSummaryBar(log: log, goals: goals)
@@ -44,7 +48,7 @@ struct DailyLogView: View {
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowInsets(OFJLayout.standardListRowInsets)
 
                     // Meal sections — MealSectionView returns a Section{} so each
                     // meal type becomes a sticky List section with its header
@@ -64,7 +68,7 @@ struct DailyLogView: View {
                         }
                     } else {
                         EmptyLogView()
-                            .padding(.top, 40)
+                            .padding(.top, OFJLayout.emptyStateTopPadding)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -73,7 +77,7 @@ struct DailyLogView: View {
 
                     // Spacer so the last entry is never hidden behind the radial FAB
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: OFJLayout.journalBottomClearance)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -86,28 +90,28 @@ struct DailyLogView: View {
                         id: "foodbank",
                         label: "Food Bank",
                         icon: "refrigerator",
-                        color: .purple,
+                        color: OFJColor.foodBankAction,
                         action: { presentedSheet = .foodBank }
                     ),
                     RadialMenuItem(
                         id: "containers",
                         label: "Containers",
                         icon: "scalemass",
-                        color: .orange,
+                        color: OFJColor.containerAction,
                         action: { presentedSheet = .containers }
                     ),
                     RadialMenuItem(
                         id: "manual",
                         label: "Manual",
                         icon: "pencil",
-                        color: .green,
+                        color: OFJColor.manualAction,
                         action: { presentedSheet = .manualEntry }
                     ),
                     RadialMenuItem(
                         id: "scan",
                         label: "Scan",
                         icon: "camera.fill",
-                        color: .blue,
+                        color: OFJColor.scanAction,
                         action: {
                             scanDate = selectedDate
                             presentedSheet = .scan
@@ -117,6 +121,21 @@ struct DailyLogView: View {
             }
             .navigationTitle("Journal")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink(value: JournalRoute.settings) {
+                        Label("Settings", systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("journal.settings")
+                }
+            }
+            .navigationDestination(for: JournalRoute.self) { route in
+                switch route {
+                case .settings:
+                    SettingsView()
+                }
+            }
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -298,13 +317,13 @@ private struct ScanProgressOverlay: View {
     let expectsThinkingTrace: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: OFJSpace.s14) {
+            HStack(spacing: OFJSpace.s12) {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: OFJSpace.s2) {
                     Text("Analyzing...")
                         .font(.headline)
                         .foregroundStyle(.white)
@@ -315,7 +334,7 @@ private struct ScanProgressOverlay: View {
             }
 
             if expectsThinkingTrace || !thinkingTrace.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: OFJSpace.s8) {
                     Label("Analyzing", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.9))
@@ -338,13 +357,13 @@ private struct ScanProgressOverlay: View {
                         }
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, OFJSpace.s2)
             }
         }
         .frame(maxWidth: 320, alignment: .leading)
-        .padding(24)
-        .glassEffect(in: .rect(cornerRadius: 20))
-        .padding(.horizontal, 24)
+        .padding(OFJSpace.s24)
+        .glassEffect(in: .rect(cornerRadius: OFJRadius.card))
+        .padding(.horizontal, OFJSpace.s24)
     }
 }
 
@@ -352,7 +371,7 @@ private struct ScanProgressOverlay: View {
 
 private struct EmptyLogView: View {
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: OFJSpace.s16) {
             Image(systemName: "fork.knife.circle")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
@@ -363,7 +382,7 @@ private struct EmptyLogView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, OFJSpace.s40)
         }
     }
 }

@@ -46,14 +46,7 @@ enum DayCellState {
         case .future:          return .clear
         }
 
-        switch pct {
-        case ..<0.50:          return .red
-        case 0.50..<0.80:     return .yellow
-        case 0.80..<0.95:     return Color.green.opacity(0.6)
-        case 0.95..<1.05:     return .green
-        case 1.05..<1.20:     return .orange
-        default:              return .purple
-        }
+        return OFJColor.progress(for: pct)
     }
 
     /// The fraction (0.0–1.0) of the ring that should be filled.
@@ -141,7 +134,7 @@ struct WeeklyCalendarStrip: View {
             // ── Horizontally scrollable weeks ──
             weekScroller
         }
-        .glassEffect(in: .rect(cornerRadius: 16))
+        .glassEffect(in: .rect(cornerRadius: OFJRadius.compactCard))
     }
 
     // MARK: - Header
@@ -160,19 +153,19 @@ struct WeeklyCalendarStrip: View {
             // Today button — only visible when not on today's date
             if !calendar.isDateInToday(selectedDate) {
                 Button {
-                    withAnimation(.spring(duration: 0.3)) {
+                    withAnimation(OFJMotion.standardSpring) {
                         selectedDate = .now
                     }
                 } label: {
                     Text("Today")
                         .font(.caption)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(OFJColor.navigationAction)
                 }
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, OFJSpace.s12)
+        .padding(.vertical, OFJSpace.s8)
     }
 
     // MARK: - Week Scroller
@@ -204,13 +197,13 @@ struct WeeklyCalendarStrip: View {
             .onChange(of: selectedDate) { _, newDate in
                 // When selectedDate changes (e.g. "Today" button), scroll to that week
                 if let target = weekIDForDate(newDate) {
-                    withAnimation(.spring(duration: 0.3)) {
+                    withAnimation(OFJMotion.standardSpring) {
                         proxy.scrollTo(target.id, anchor: .center)
                     }
                 }
             }
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, OFJSpace.s8)
     }
 
     // MARK: - Week Row
@@ -226,14 +219,14 @@ struct WeeklyCalendarStrip: View {
                 .frame(maxWidth: .infinity)
                 .onTapGesture {
                     if date <= Date.now || calendar.isDateInToday(date) {
-                        withAnimation(.spring(duration: 0.3)) {
+                        withAnimation(OFJMotion.standardSpring) {
                             selectedDate = date
                         }
                     }
                 }
             }
         }
-        .padding(.horizontal, 4)
+        .padding(.horizontal, OFJSpace.s4)
     }
 
     // MARK: - Helpers
@@ -303,7 +296,7 @@ private struct DayCellView: View {
     private let circleSize: CGFloat = 34
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: OFJSpace.s4) {
             // Day abbreviation (e.g. "Mon")
             Text(dayAbbreviation)
                 .font(.caption2)
@@ -333,7 +326,7 @@ private struct DayCellView: View {
                 if isSelected {
                     Circle()
                         .fill(.regularMaterial)
-                        .padding(2)
+                        .padding(OFJSpace.s2)
                 }
 
                 // The date number text
@@ -344,7 +337,7 @@ private struct DayCellView: View {
             }
             .frame(width: circleSize, height: circleSize)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, OFJSpace.s4)
     }
 
     // MARK: - State-Driven Styling

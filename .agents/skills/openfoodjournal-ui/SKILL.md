@@ -7,6 +7,8 @@ description: UI/UX design system and component patterns for OpenFoodJournal. Use
 
 Living reference for every visual and interaction pattern in the app. Consult before creating or modifying any SwiftUI view. Update whenever a new pattern is established or an existing one changes.
 
+`OpenFoodJournal/Views/Shared/OFJDesignSystem.swift` is the executable source of truth for shared values. This document explains intent and usage; when the two differ, update the document and code together. Architecture-only work must preserve the current visuals unless a separate reviewed design issue explicitly authorizes a redesign.
+
 ## Quick Reference
 
 | Token | Value | Where Used |
@@ -107,9 +109,11 @@ See the `swiftui-liquid-glass` skill for the complete Liquid Glass API reference
 | Journal | `DailyLogView` | `book.pages` |
 | Food Bank | `FoodBankView` | `refrigerator` |
 | History | `HistoryView` | `chart.xyaxis.line` |
-| Settings | `SettingsView` | `gearshape` |
+| Assistant | `ChatView` | `sparkles` |
 
 Each tab wraps its content in `NavigationStack`.
+
+Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `NavigationLink` and pushes `SettingsView` on the Journal's existing stack. `SettingsView` must not create a nested `NavigationStack`; previews or other standalone hosts wrap it when needed.
 
 ### Sheet Management (Enum-Driven)
 **Always use a single enum for all sheets within a page:**
@@ -147,6 +151,7 @@ Every sheet must include:
 ### Shared Components (Views/Shared/)
 | Component | Purpose | Size/Shape |
 |-----------|---------|------------|
+| `OFJDesignSystem` | Executable color, spacing, radius, type, motion, layout, and content-phase foundations | Pixel-equivalent shared tokens |
 | `MacroRingView` | Circular progress for one macro | 56×56 pt, circle |
 | `MacroSummaryBar` | 3-column macro cards + calorie headline | Full width, glass card |
 | `RadialMenuButton` | Floating "+" FAB with radial menu | Circular, bottom-aligned |
@@ -324,6 +329,7 @@ var dailyCalories: Double = 2000
 
 Before merging any new view:
 - [ ] Uses glass effects (not `.background(.ultraThinMaterial)`)
+- [ ] Uses executable `OFJ*` foundations instead of repeating an existing shared value
 - [ ] Card corners use 20 pt radius
 - [ ] Colors match macro color table above
 - [ ] Sheets use enum-driven presentation
@@ -334,6 +340,7 @@ Before merging any new view:
 - [ ] Tappable elements have 44+ pt hit targets
 - [ ] Empty states use `ContentUnavailableView`
 - [ ] Progress indicators use the status color thresholds
+- [ ] Architecture-only work preserves current colors, density, typography, layout, and glass treatment
 
 ## UI Roadmap
 
