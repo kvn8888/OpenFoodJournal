@@ -27,9 +27,25 @@ struct DailyLogView: View {
         return nutritionStore.fetchLog(for: selectedDate)
     }
 
+    private var selectedCalorieRatio: Double {
+        guard goals.dailyCalories > 0 else { return 0 }
+        let calories = log?.safeEntries.reduce(0.0) { $0 + $1.calories } ?? 0
+        return calories / goals.dailyCalories
+    }
+
+    private var selectedCalorieState: OFJColor.JournalCalorieState {
+        OFJColor.journalCalorieState(for: selectedCalorieRatio)
+    }
+
+    private var selectedMonthAndYear: String {
+        selectedDate.formatted(.dateTime.month(.wide).year())
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
+                JournalCalorieBackground(state: selectedCalorieState)
+
                 // Replaced ScrollView+LazyVStack with List so that .swipeActions on
                 // EntryRowView and MealSectionView actually fire — swipeActions is a
                 // List-only modifier in SwiftUI and is silently ignored in a LazyVStack.
@@ -119,9 +135,16 @@ struct DailyLogView: View {
                     ),
                 ])
             }
-            .navigationTitle("Journal")
+            .navigationTitle(selectedMonthAndYear)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                if !Calendar.current.isDateInToday(selectedDate) {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("Today", action: selectToday)
+                            .accessibilityIdentifier("journal.today")
+                    }
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     NavigationLink(value: JournalRoute.settings) {
                         Label("Settings", systemImage: "gearshape")
@@ -193,8 +216,33 @@ struct DailyLogView: View {
         }
     }
 
+    private func selectToday() {
+        withAnimation(OFJMotion.standardSpring) {
+            selectedDate = .now
+        }
+    }
+
     private func deleteEntry(_ entry: NutritionEntry) {
         nutritionStore.delete(entry)
+    }
+}
+
+private struct JournalCalorieBackground: View {
+    let state: OFJColor.JournalCalorieState
+
+    var body: some View {
+        ZStack {
+            Color(uiColor: .systemBackground)
+
+            RadialGradient(
+                colors: state.backgroundGradientColors,
+                center: .top,
+                startRadius: 16,
+                endRadius: 640
+            )
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
     }
 }
 

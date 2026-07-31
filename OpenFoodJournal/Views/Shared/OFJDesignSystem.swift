@@ -8,6 +8,20 @@ import SwiftUI
 /// These values intentionally match the existing UI. Centralizing them is an
 /// architectural guardrail, not authorization to recolor current screens.
 enum OFJColor {
+    struct SRGB8: Equatable, Sendable {
+        let red: UInt8
+        let green: UInt8
+        let blue: UInt8
+
+        var color: Color {
+            Color(
+                red: Double(red) / 255,
+                green: Double(green) / 255,
+                blue: Double(blue) / 255
+            )
+        }
+    }
+
     static let calories = Color.orange
     static let protein = Color.blue
     static let carbohydrates = Color.green
@@ -21,6 +35,63 @@ enum OFJColor {
     static let labelConfidence = Color.teal
     static let estimateConfidence = Color.orange
     static let navigationAction = Color.blue
+
+    /// Journal-only calorie state for the approved calendar treatment.
+    /// Other progress visuals retain the existing six-band palette.
+    enum JournalCalorieState: String, CaseIterable, Hashable {
+        case belowGoal
+        case approachingGoal
+        case goalMet
+        case overGoal
+
+        var ringColor: Color {
+            switch self {
+            case .belowGoal:
+                // Black in light mode and white in dark mode for legibility.
+                Color.primary
+            case .approachingGoal:
+                Color.green.opacity(0.6)
+            case .goalMet:
+                Color.green
+            case .overGoal:
+                OFJColor.calendarOverGoalRGB.color
+            }
+        }
+
+        var backgroundGradientColors: [Color] {
+            switch self {
+            case .belowGoal, .approachingGoal:
+                [
+                    Color.yellow.opacity(0.13),
+                    Color.orange.opacity(0.08),
+                    Color.clear,
+                ]
+            case .goalMet:
+                [
+                    Color.green.opacity(0.14),
+                    Color.green.opacity(0.05),
+                    Color.clear,
+                ]
+            case .overGoal:
+                [
+                    Color.orange.opacity(0.15),
+                    OFJColor.calendarOverGoalRGB.color.opacity(0.06),
+                    Color.clear,
+                ]
+            }
+        }
+    }
+
+    static let calendarOverGoalRGB = SRGB8(red: 0xD8, green: 0x66, blue: 0x69)
+
+    static func journalCalorieState(for ratio: Double) -> JournalCalorieState {
+        switch ratio {
+        case ..<0.80: .belowGoal
+        case 0.80..<0.95: .approachingGoal
+        case 0.95..<1.05: .goalMet
+        default: .overGoal
+        }
+    }
 
     enum ProgressBand: CaseIterable {
         case under
@@ -92,6 +163,8 @@ enum OFJType {
     static let rowTitle = Font.body.weight(.medium)
     static let rowSubtitle = Font.caption
     static let formLabel = Font.subheadline
+    static let calendarWeekday = Font.caption.weight(.semibold)
+    static let calendarDay = Font.title3.weight(.semibold)
     static let macroChip = Font.system(size: 10, weight: .semibold, design: .rounded)
     static let confidenceIcon = Font.system(size: 9)
     static let confidenceText = Font.system(size: 9, weight: .medium)
@@ -115,6 +188,9 @@ enum OFJLayout {
     static let minimumHitTarget: CGFloat = 44
     static let listHorizontalInset = OFJSpace.s16
     static let listVerticalInset = OFJSpace.s8
+    static let calendarDayControlHeight: CGFloat = 72
+    static let calendarDayRingSize: CGFloat = 40
+    static let calendarRingLineWidth: CGFloat = 3
     static let journalBottomClearance: CGFloat = 100
     static let emptyStateTopPadding = OFJSpace.s40
 

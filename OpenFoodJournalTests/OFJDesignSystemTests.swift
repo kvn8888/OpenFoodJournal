@@ -58,7 +58,53 @@ struct OFJDesignSystemTests {
         #expect(calendar.trailing == 16)
 
         #expect(OFJLayout.minimumHitTarget >= 44)
+        #expect(OFJLayout.calendarDayControlHeight >= OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.calendarDayRingSize < OFJLayout.calendarDayControlHeight)
+        #expect(OFJLayout.calendarRingLineWidth > 0)
         #expect(OFJLayout.journalBottomClearance == 100)
+    }
+
+    @Test(
+        "Journal calorie state uses black below goal, existing greens near goal, and red above goal",
+        arguments: [
+            (0.00, OFJColor.JournalCalorieState.belowGoal),
+            (0.79, .belowGoal),
+            (0.80, .approachingGoal),
+            (0.94, .approachingGoal),
+            (0.95, .goalMet),
+            (1.04, .goalMet),
+            (1.05, .overGoal),
+            (1.50, .overGoal),
+        ]
+    )
+    func journalCalorieStates(
+        ratio: Double,
+        expected: OFJColor.JournalCalorieState
+    ) {
+        #expect(OFJColor.journalCalorieState(for: ratio) == expected)
+    }
+
+    @Test("Journal over-goal red is the approved D86669 value")
+    func journalOverGoalColor() {
+        #expect(
+            OFJColor.calendarOverGoalRGB
+                == OFJColor.SRGB8(red: 0xD8, green: 0x66, blue: 0x69)
+        )
+    }
+
+    @Test("calendar day states preserve future blocking and bounded progress")
+    func calendarDayStates() {
+        let future = DayCellState.future
+        #expect(future.isFuture)
+        #expect(!future.isSelected)
+        #expect(future.progress == nil)
+        #expect(future.progressFraction == 0)
+
+        let selected = DayCellState.selected(progress: 1.25)
+        #expect(selected.isSelected)
+        #expect(!selected.isFuture)
+        #expect(selected.progress == 1.25)
+        #expect(selected.progressFraction == 1)
     }
 
     @Test(
