@@ -226,9 +226,10 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 **EditEntryView**: Has full serving-mappings section (same as LogFoodSheet). Uses shared `AddServingMappingSheet` (defined in LogFoodSheet.swift, internal not private). `addMapping()` calls `nutritionStore.saveEntry(entry)`.
 
-## Current State (Last Updated: 2026-04-02)
+## Current State (Last Updated: 2026-07-31)
 
-- **Branch: `app-store`** — CloudKit migration complete, all Turso sync code removed
+- **Branch: `app-store`** — CloudKit migration complete
+- **Turso is live**, not removed. `TursoMirrorService` is constructed in `OpenFoodJournalApp.init` and is a push-only, generation-pruned mirror. It is hard-disabled in Debug builds (`isEnabled` returns `false`); do not re-enable it for developer builds.
 - Debug builds install as `OFJ Dev` (`k3vnc.OpenFoodJournal.dev`) alongside the TestFlight app, with a separate local sandbox
 - App structure complete: all models, services, and views implemented
 - 4-tab layout: Journal, Food Bank, History, Settings (Containers accessed via RadialMenuButton)

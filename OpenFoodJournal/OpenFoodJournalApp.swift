@@ -21,6 +21,21 @@ struct MacrosApp: App {
     @AppStorage(OFJAccentTheme.storageKey) private var accentThemeRawValue =
         OFJAccentTheme.defaultTheme.rawValue
 
+    /// CloudKit container for this build configuration.
+    ///
+    /// Debug and Release name *different containers*, not the same container in
+    /// different CloudKit environments. Environment routing is decided by code
+    /// signing and is invisible in source; this is explicit and cannot drift.
+    /// Must stay in sync with the `com.apple.developer.icloud-container-identifiers`
+    /// entry in the matching entitlements file.
+    private static var cloudKitContainerIdentifier: String {
+        #if DEBUG
+        return "iCloud.k3vnc.OpenFoodJournal.dev"
+        #else
+        return "iCloud.k3vnc.OpenFoodJournal"
+        #endif
+    }
+
     init() {
         let environment = ProcessInfo.processInfo.environment
         let isUITest = environment["OFJ_UI_TEST_MODE"] == "1"
@@ -45,9 +60,12 @@ struct MacrosApp: App {
             // Tests use in-memory store without CloudKit
             config = ModelConfiguration(isStoredInMemoryOnly: true)
         } else {
-            // Production: sync via CloudKit private database
+            // Sync via CloudKit private database. Debug builds ship a separate
+            // entitlements file naming a different container, so a developer
+            // build can never read or write the production dataset. This is
+            // declared here rather than inferred from the signing environment.
             config = ModelConfiguration(
-                cloudKitDatabase: .private("iCloud.k3vnc.OpenFoodJournal")
+                cloudKitDatabase: .private(Self.cloudKitContainerIdentifier)
             )
         }
         let container: ModelContainer
@@ -57,7 +75,22 @@ struct MacrosApp: App {
                 configurations: config
             )
         } catch {
+            #if DEBUG
+            // A developer build whose CloudKit container is not provisioned yet
+            // must not hard-crash at launch — that reads as a code bug. Fall
+            // back to an in-memory store so the UI is still inspectable.
+            print("[OFJ Dev] CloudKit ModelContainer unavailable, using in-memory store: \(error)")
+            do {
+                container = try ModelContainer(
+                    for: NutritionEntry.self, DailyLog.self, SavedFood.self, TrackedContainer.self, Preferences.self, GeminiScanLog.self, GeminiCostAccumulator.self, ChatThread.self, ChatMessage.self, ChatAttachment.self, ChatContextCheckpoint.self, ChatSourceArtifact.self, ChatAgentRun.self, ChatWriteExecutionRecord.self, ChatDiagnosticSpan.self, ChatUsageDailyAggregate.self,
+                    configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+                )
+            } catch {
+                fatalError("Failed to create in-memory ModelContainer: \(error)")
+            }
+            #else
             fatalError("Failed to create ModelContainer: \(error)")
+            #endif
         }
         modelContainer = container
         let modelCatalog = RuntimeModelCatalog()

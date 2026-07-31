@@ -266,6 +266,7 @@ enum TursoSchema {
             .init(name: "turso_enabled", type: "INTEGER"),
             .init(name: "turso_include_diagnostics", type: "INTEGER"),
             .init(name: "app_version", type: "TEXT"),
+            .init(name: "app_bundle_id", type: "TEXT"),
             .init(name: "app_build", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
@@ -474,7 +475,16 @@ final class TursoMirrorService {
     }
 
     var isEnabled: Bool {
-        defaults.bool(forKey: Self.enabledKey)
+        #if DEBUG
+        // Developer builds never mirror. The mirror is generation-pruned, so a
+        // developer build pushing its own (separate, possibly empty) dataset
+        // could delete rows the production app still relies on. Keychain
+        // scoping already makes production credentials unreachable from a
+        // Debug build, but that is incidental; this is the actual guarantee.
+        return false
+        #else
+        return defaults.bool(forKey: Self.enabledKey)
+        #endif
     }
 
     var includeDiagnostics: Bool {
@@ -1246,6 +1256,10 @@ final class TursoMirrorService {
             "turso_enabled": .bool(isEnabled),
             "turso_include_diagnostics": .bool(includeDiagnostics),
             "app_version": .text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"),
+            // CURRENT_PROJECT_VERSION is only stamped with a real number by CI,
+            // so app_build alone cannot identify which app produced a row.
+            // Record the bundle identifier so every row is self-identifying.
+            "app_bundle_id": .text(Bundle.main.bundleIdentifier ?? "unknown"),
             "app_build": .text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"),
             "mirror_generation": .text(generation)
         ]))
