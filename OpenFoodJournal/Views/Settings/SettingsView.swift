@@ -80,8 +80,7 @@ struct SettingsView: View {
     @State private var showHealthKitRepairConfirmation = false
 
     var body: some View {
-        NavigationStack {
-            Form {
+        Form {
                 // MARK: Goals
                 Section("Goals") {
                     NavigationLink("Daily Macro Goals") {
@@ -643,19 +642,18 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings")
-            .onAppear {
-                if assistantProviderRawValue.isEmpty {
-                    assistantProviderRawValue = AssistantProvider.stored().rawValue
-                }
-                hasAPIKey = KeychainService.hasGeminiAPIKey
-                hasOpenRouterAPIKey = KeychainService.hasOpenRouterAPIKey
-                hasAzureOpenAIAPIKey = KeychainService.hasAzureOpenAIAPIKey
-                hasTavilyAPIKey = KeychainService.hasTavilyAPIKey
-                hasParallelAPIKey = KeychainService.hasParallelAPIKey
-                _ = GeminiCostAccumulator.current(in: modelContext)
-                try? modelContext.save()
+        .navigationTitle("Settings")
+        .onAppear {
+            if assistantProviderRawValue.isEmpty {
+                assistantProviderRawValue = AssistantProvider.stored().rawValue
             }
+            hasAPIKey = KeychainService.hasGeminiAPIKey
+            hasOpenRouterAPIKey = KeychainService.hasOpenRouterAPIKey
+            hasAzureOpenAIAPIKey = KeychainService.hasAzureOpenAIAPIKey
+            hasTavilyAPIKey = KeychainService.hasTavilyAPIKey
+            hasParallelAPIKey = KeychainService.hasParallelAPIKey
+            _ = GeminiCostAccumulator.current(in: modelContext)
+            try? modelContext.save()
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()
@@ -1346,10 +1344,12 @@ struct SettingsView: View {
 
 #Preview {
     let container = ModelContainer.preview
-    SettingsView()
-        .modelContainer(container)
-        .environment(NutritionStore(modelContext: container.mainContext))
-        .environment(HealthKitService())
-        .environment(UserGoals())
-        .environment(MealTimeSettings())
+    NavigationStack {
+        SettingsView()
+    }
+    .modelContainer(container)
+    .environment(NutritionStore(modelContext: container.mainContext))
+    .environment(HealthKitService())
+    .environment(UserGoals())
+    .environment(MealTimeSettings())
 }

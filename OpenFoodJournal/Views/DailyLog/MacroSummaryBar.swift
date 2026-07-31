@@ -33,10 +33,10 @@ enum MacroNutrientID: String, CaseIterable {
 
     var color: Color {
         switch self {
-        case .protein:  .blue
-        case .carbs:    .green
-        case .fat:      .yellow
-        case .calories: .orange
+        case .protein: OFJColor.protein
+        case .carbs: OFJColor.carbohydrates
+        case .fat: OFJColor.fat
+        case .calories: OFJColor.calories
         }
     }
 }
@@ -87,11 +87,11 @@ struct MacroSummaryBar: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: OFJSpace.s12) {
             // Calorie headline
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: OFJSpace.s4) {
                 Text(calories, format: .number.precision(.fractionLength(0)))
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(OFJType.nutritionDisplay)
                 Text("/ \(Int(goals.dailyCalories)) kcal")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -99,23 +99,23 @@ struct MacroSummaryBar: View {
             }
 
             // Ring row: all 5 configurable slots
-            GlassEffectContainer(spacing: 12) {
+            GlassEffectContainer(spacing: OFJSpace.s12) {
                 // Spacer(minLength: 8) between each ring instead of fixed spacing
                 // so they distribute evenly across whatever width is available —
                 // works on iPhone SE, Pro Max, and everything in between.
                 HStack(alignment: .top, spacing: 0) {
                     ForEach(0..<5, id: \.self) { slotIdx in
                         if slotIdx > 0 {
-                            Spacer(minLength: 8)
+                            Spacer(minLength: OFJSpace.s8)
                         }
                         slotView(slotID: slotIDs[slotIdx], slotIndex: slotIdx + 1)
                     }
                 }
-                .padding(.horizontal, 4)
+                .padding(.horizontal, OFJSpace.s4)
             }
         }
-        .padding()
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 20))
+        .padding(OFJSpace.s16)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: OFJRadius.card))
         .contextMenu {
             Button {
                 showEditSheet = true
@@ -175,7 +175,7 @@ struct MacroSummaryBar: View {
             Button {
                 editingSlot = slotIndex
             } label: {
-                VStack(spacing: 4) {
+                VStack(spacing: OFJSpace.s4) {
                     ZStack {
                         Circle()
                             .stroke(Color.secondary.opacity(0.2), lineWidth: 5)

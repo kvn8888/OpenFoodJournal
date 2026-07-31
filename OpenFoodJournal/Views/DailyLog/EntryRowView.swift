@@ -21,9 +21,9 @@ struct EntryRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: OFJSpace.s12) {
             // Macro mini-summary
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: OFJSpace.s2) {
                 // Show brand above food name if available
                 if let brand = entry.brand, !brand.isEmpty {
                     Text(brand)
@@ -33,11 +33,10 @@ struct EntryRowView: View {
                 }
 
                 Text(entry.name)
-                    .font(.body)
-                    .fontWeight(.medium)
+                    .font(OFJType.rowTitle)
                     .lineLimit(1)
 
-                HStack(spacing: 6) {
+                HStack(spacing: OFJSpace.s6) {
                     Text("\(Int(entry.calories)) kcal")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -59,13 +58,13 @@ struct EntryRowView: View {
             Spacer()
 
             // Macro chips
-            HStack(spacing: 6) {
-                MacroChip(value: entry.protein, color: .blue, label: "P")
-                MacroChip(value: entry.carbs, color: .green, label: "C")
-                MacroChip(value: entry.fat, color: .yellow, label: "F")
+            HStack(spacing: OFJSpace.s6) {
+                MacroChip(value: entry.protein, color: OFJColor.protein, label: "P")
+                MacroChip(value: entry.carbs, color: OFJColor.carbohydrates, label: "C")
+                MacroChip(value: entry.fat, color: OFJColor.fat, label: "F")
             }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, OFJSpace.s4)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.name), \(Int(entry.calories)) kilocalories, protein \(Int(entry.protein))g, carbs \(Int(entry.carbs))g, fat \(Int(entry.fat))g")
@@ -81,10 +80,10 @@ struct MacroChip: View {
 
     var body: some View {
         Text("\(label) \(Int(value))g")
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
+            .font(OFJType.macroChip)
             .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
+            .padding(.horizontal, OFJSpace.s6)
+            .padding(.vertical, OFJSpace.s3)
             .background(color.opacity(0.12), in: Capsule())
     }
 }
@@ -94,19 +93,21 @@ private struct ConfidenceBadge: View {
     let percent: Int
 
     var body: some View {
-        HStack(spacing: 2) {
+        let color = scanMode == .label ? OFJColor.labelConfidence : OFJColor.estimateConfidence
+
+        HStack(spacing: OFJSpace.s2) {
             Image(systemName: scanMode == .label ? "barcode.viewfinder" : "camera.viewfinder")
-                .font(.system(size: 9))
+                .font(OFJType.confidenceIcon)
             if scanMode == .foodPhoto {
                 Text("~\(percent)%")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(OFJType.confidenceText)
             }
         }
-        .foregroundStyle(scanMode == .label ? Color.teal : Color.orange)
-        .padding(.horizontal, 5)
-        .padding(.vertical, 2)
+        .foregroundStyle(color)
+        .padding(.horizontal, OFJSpace.s5)
+        .padding(.vertical, OFJSpace.s2)
         .background(
-            (scanMode == .label ? Color.teal : Color.orange).opacity(0.12),
+            color.opacity(0.12),
             in: Capsule()
         )
     }
