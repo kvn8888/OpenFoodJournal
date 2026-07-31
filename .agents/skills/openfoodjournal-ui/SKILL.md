@@ -138,6 +138,22 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - Future days are disabled, dimmed, and retain an empty dashed progress-ring track.
 - Ring and background states come from `OFJColor.JournalCalorieState`; do not duplicate threshold or hex logic in the view.
 
+### Scan Camera
+
+- The live camera is the mode-selection surface; do not add a separate full-screen mode chooser.
+- Show exactly three labeled rectangular controls in this order: Scan Food, Barcode, Food Label.
+- Keep 0.5x/1x/2x zoom as small pills immediately above the mode row.
+- Place circular torch and photo-library controls to the left and right of the centered shutter.
+- The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
+- Camera controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
+- `ScanCameraModeDescriptor.supported` is the executable order/label contract; `OFJLayout` owns camera control geometry.
+
+### Assistant Attachments
+
+- The Assistant composer attachment menu keeps distinct actions for Take Photo, Photo Library, and Attach PDF.
+- Take Photo uses `AssistantCameraPicker` only as a one-image UIKit camera bridge; the result must pass through the same downscaled JPEG and `ChatDraftAttachment` pipeline as library images.
+- Camera capture is full-screen, cancels without mutating the draft, and remains disabled on devices without a camera or when the shared four-image staging limit is full.
+
 ### Sheet Management (Enum-Driven)
 **Always use a single enum for all sheets within a page:**
 ```swift

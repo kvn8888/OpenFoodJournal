@@ -165,6 +165,8 @@ enum OFJType {
     static let formLabel = Font.subheadline
     static let calendarWeekday = Font.caption.weight(.semibold)
     static let calendarDay = Font.title3.weight(.semibold)
+    static let cameraMode = Font.caption.weight(.semibold)
+    static let cameraZoom = Font.caption2.weight(.bold)
     static let macroChip = Font.system(size: 10, weight: .semibold, design: .rounded)
     static let confidenceIcon = Font.system(size: 9)
     static let confidenceText = Font.system(size: 9, weight: .medium)
@@ -191,6 +193,11 @@ enum OFJLayout {
     static let calendarDayControlHeight: CGFloat = 72
     static let calendarDayRingSize: CGFloat = 40
     static let calendarRingLineWidth: CGFloat = 3
+    static let cameraTopControlSize: CGFloat = 50
+    static let cameraUtilityControlSize: CGFloat = 52
+    static let cameraModeControlHeight: CGFloat = 72
+    static let cameraZoomVisualHeight: CGFloat = 30
+    static let cameraShutterSize: CGFloat = 78
     static let journalBottomClearance: CGFloat = 100
     static let emptyStateTopPadding = OFJSpace.s40
 

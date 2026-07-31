@@ -61,7 +61,22 @@ struct OFJDesignSystemTests {
         #expect(OFJLayout.calendarDayControlHeight >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.calendarDayRingSize < OFJLayout.calendarDayControlHeight)
         #expect(OFJLayout.calendarRingLineWidth > 0)
+        #expect(OFJLayout.cameraTopControlSize >= OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraUtilityControlSize >= OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraModeControlHeight >= OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraZoomVisualHeight < OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraShutterSize > OFJLayout.cameraUtilityControlSize)
         #expect(OFJLayout.journalBottomClearance == 100)
+    }
+
+    @Test("camera exposes exactly the three supported capture modes in visual order")
+    func cameraModeContract() {
+        let descriptors = ScanCameraModeDescriptor.supported
+
+        #expect(descriptors.map(\.mode) == [.foodPhoto, .barcode, .label])
+        #expect(descriptors.map(\.title) == ["Scan Food", "Barcode", "Food Label"])
+        #expect(descriptors.allSatisfy { !$0.symbol.isEmpty })
+        #expect(!descriptors.map(\.mode).contains(.manual))
     }
 
     @Test(

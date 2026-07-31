@@ -3,6 +3,7 @@
 import Foundation
 import SwiftData
 import Testing
+import UIKit
 @testable import OpenFoodJournal
 
 @MainActor
@@ -172,6 +173,32 @@ struct ChatFeatureTests {
         #expect(sources.allSatisfy { $0.kind == .userAttachment })
         let block = try #require(harness.service.contextBlocks(for: thread, afterMessageID: nil).first)
         #expect(Set(block.sourceIDs) == Set(sources.map(\.id)))
+    }
+
+    @Test func cameraCapturedPhotoUsesTheSharedDownscaledJPEGPipeline() throws {
+        let sourceFormat = UIGraphicsImageRendererFormat.default()
+        sourceFormat.scale = 1
+        let sourceImage = UIGraphicsImageRenderer(
+            size: CGSize(width: 2_000, height: 1_000),
+            format: sourceFormat
+        ).image { context in
+            UIColor.systemGreen.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 2_000, height: 1_000))
+        }
+        let sourceData = try #require(sourceImage.pngData())
+
+        let jpeg = try #require(
+            ChatService.downscaledJPEG(
+                from: sourceData,
+                maxDimension: 1_200,
+                quality: 0.8
+            )
+        )
+        let decoded = try #require(UIImage(data: jpeg))
+
+        #expect(decoded.size.width == 1_200)
+        #expect(decoded.size.height == 600)
+        #expect(jpeg.starts(with: [0xFF, 0xD8]))
     }
 
     @Test func plainConversationPairsRemainCompleteContextBlocksWithExactBoundaries() throws {
