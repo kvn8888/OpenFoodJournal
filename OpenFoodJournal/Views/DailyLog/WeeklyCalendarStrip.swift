@@ -182,12 +182,17 @@ struct WeeklyCalendarStrip: View {
                     proxy.scrollTo(target.id, anchor: .center)
                 }
             }
-            .onChange(of: selectedDate) { _, newDate in
-                // When selectedDate changes (e.g. "Today" button), scroll to that week
-                if let target = weekIDForDate(newDate) {
-                    withAnimation(OFJMotion.standardSpring) {
-                        proxy.scrollTo(target.id, anchor: .center)
-                    }
+            .onChange(of: selectedDate) { oldDate, newDate in
+                // When selectedDate changes (e.g. "Today" button), scroll to that week.
+                // Only open an animated transaction when the week actually changed —
+                // otherwise every same-week tap re-animates the whole strip one update
+                // after the tap's own animation, retargeting transitions mid-flight.
+                guard let target = weekIDForDate(newDate),
+                      weekIDForDate(oldDate) != target else {
+                    return
+                }
+                withAnimation(OFJMotion.standardSpring) {
+                    proxy.scrollTo(target.id, anchor: .center)
                 }
             }
         }
@@ -327,9 +332,13 @@ private struct CalendarDayButtonStyle: ButtonStyle {
             .contentShape(
                 .rect(cornerRadius: OFJRadius.compactCard)
             )
+            // Card and label share one timeline that matches the selection
+            // animation in CalendarDayButton, so the highlight and the day's
+            // colors can't land on different clocks.
+            .animation(OFJMotion.standardSpring, value: showRectangle)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            // Press feedback stays quick and is scoped to the scale alone.
             .animation(OFJMotion.quickSpring, value: configuration.isPressed)
-            .animation(OFJMotion.quickSpring, value: isHighlighted)
     }
 }
 
@@ -390,11 +399,20 @@ private struct DayCellView: View {
                         .rotationEffect(.degrees(-90))
                 }
 
-                // The date number text
+                // The date number text.
+                //
+                // Font weight is not an interpolatable property. Animating this
+                // Text makes SwiftUI cross-fade a bold raster against a regular
+                // one, so both glyph sets sit on screen at partial opacity for
+                // the whole duration — the deselecting day looks like it snaps
+                // to bold and then back to thin. Strip the transaction so the
+                // weight (and its paired color) change in a single clean frame
+                // while the card and ring animate around it.
                 Text(dayNumber)
                     .font(OFJType.calendarDay)
                     .fontWeight(state.isSelected ? .bold : .regular)
                     .foregroundStyle(dateTextColor)
+                    .transaction { $0.animation = nil }
             }
             .frame(
                 width: OFJLayout.calendarDayRingSize,
