@@ -10,12 +10,12 @@
 //   • scrollTargetLayout + scrollTargetBehavior(.viewAligned) for the snap
 //   • Each day shows a progress ring based on calorie intake vs. goal
 //   • Tapping a day selects it and updates the parent's selectedDate
-//   • "Today" button to jump back to the current week
+//   • The Journal toolbar owns the "Today" jump and selected month/year title
 //
 // Day cell states drive visual appearance:
-//   1. Selected (active day) — bold text, filled background, progress ring
+//   1. Selected (active day) — rounded rectangle, bold text, progress ring
 //   2. Past (default)        — secondary text, progress ring shows intake
-//   3. Future                — dimmed text, no progress ring
+//   3. Future                — dimmed text, empty dashed progress ring
 
 import SwiftUI
 import SwiftData
@@ -30,32 +30,46 @@ enum DayCellState {
     case past(progress: Double)      // A past day with logged data
     case future                      // A day in the future (no data yet)
 
-    /// The progress-based ring color for past and selected days.
-    /// Thresholds:
-    ///   < 50%  → red (significantly under)
-    ///   50–80% → yellow (under target)
-    ///   80–95% → light green (getting close)
-    ///   95–105% → green (goal matched ±5%)
-    ///   105–120% → orange (slightly over)
-    ///   > 120% → purple (significantly over)
-    var ringColor: Color {
-        let pct: Double
-        switch self {
-        case .selected(let p): pct = p
-        case .past(let p):     pct = p
-        case .future:          return .clear
-        }
+    var isSelected: Bool {
+        if case .selected = self { return true }
+        return false
+    }
 
-        return OFJColor.progress(for: pct)
+    var isFuture: Bool {
+        if case .future = self { return true }
+        return false
+    }
+
+    var progress: Double? {
+        switch self {
+        case .selected(let progress), .past(let progress):
+            progress
+        case .future:
+            nil
+        }
+    }
+
+    /// Calendar-only palette: adaptive black below 80%, existing greens near
+    /// and at goal, and #D86669 above goal.
+    var ringColor: Color {
+        guard let progress else { return .clear }
+        return OFJColor.journalCalorieState(for: progress).ringColor
     }
 
     /// The fraction (0.0–1.0) of the ring that should be filled.
     /// Capped at 1.0 so the ring never overflows visually.
     var progressFraction: Double {
+        min(max(progress ?? 0, 0), 1)
+    }
+
+    var accessibilityValue: String {
         switch self {
-        case .selected(let p): return min(p, 1.0)
-        case .past(let p):     return min(p, 1.0)
-        case .future:          return 0
+        case .selected(let progress):
+            "Selected, \(Int((progress * 100).rounded())) percent of calorie goal"
+        case .past(let progress):
+            "\(Int((progress * 100).rounded())) percent of calorie goal"
+        case .future:
+            "Future date, unavailable"
         }
     }
 }
@@ -127,45 +141,7 @@ struct WeeklyCalendarStrip: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            // ── Header: month/year label + Today button ──
-            calendarHeader
-
-            // ── Horizontally scrollable weeks ──
-            weekScroller
-        }
-        .glassEffect(in: .rect(cornerRadius: OFJRadius.compactCard))
-    }
-
-    // MARK: - Header
-
-    /// Shows the month/year for the selected date, plus a "Today" button
-    /// when the user has scrolled away from the current day.
-    private var calendarHeader: some View {
-        HStack {
-            Text(selectedDate.formatted(.dateTime.month(.wide).year()))
-                .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundStyle(.primary)
-
-            Spacer()
-
-            // Today button — only visible when not on today's date
-            if !calendar.isDateInToday(selectedDate) {
-                Button {
-                    withAnimation(OFJMotion.standardSpring) {
-                        selectedDate = .now
-                    }
-                } label: {
-                    Text("Today")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(OFJColor.navigationAction)
-                }
-            }
-        }
-        .padding(.horizontal, OFJSpace.s12)
-        .padding(.vertical, OFJSpace.s8)
+        weekScroller
     }
 
     // MARK: - Week Scroller
@@ -203,7 +179,7 @@ struct WeeklyCalendarStrip: View {
                 }
             }
         }
-        .padding(.bottom, OFJSpace.s8)
+        .padding(.vertical, OFJSpace.s4)
     }
 
     // MARK: - Week Row
@@ -212,18 +188,12 @@ struct WeeklyCalendarStrip: View {
     private func weekRow(for week: WeekID) -> some View {
         HStack(spacing: 0) {
             ForEach(week.dates, id: \.self) { date in
-                DayCellView(
+                CalendarDayButton(
                     date: date,
-                    state: cellState(for: date)
+                    state: cellState(for: date),
+                    selectedDate: $selectedDate
                 )
                 .frame(maxWidth: .infinity)
-                .onTapGesture {
-                    if date <= Date.now || calendar.isDateInToday(date) {
-                        withAnimation(OFJMotion.standardSpring) {
-                            selectedDate = date
-                        }
-                    }
-                }
             }
         }
         .padding(.horizontal, OFJSpace.s4)
@@ -268,7 +238,88 @@ struct WeeklyCalendarStrip: View {
     }
 }
 
-// MARK: - DayCellView
+// MARK: - Calendar Day Control
+
+/// Owns pointer/press feedback and selection semantics so every date behaves
+/// like a real accessible control instead of a tap gesture attached to text.
+private struct CalendarDayButton: View {
+    let date: Date
+    let state: DayCellState
+    @Binding var selectedDate: Date
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button {
+            guard !state.isFuture else { return }
+            withAnimation(OFJMotion.standardSpring) {
+                selectedDate = date
+            }
+        } label: {
+            DayCellView(date: date, state: state)
+        }
+        .buttonStyle(
+            CalendarDayButtonStyle(
+                isHighlighted: !state.isFuture && (state.isSelected || isHovering)
+            )
+        )
+        .disabled(state.isFuture)
+        .onHover { isHovering = $0 }
+        .accessibilityLabel(
+            date.formatted(.dateTime.weekday(.wide).month(.wide).day().year())
+        )
+        .accessibilityValue(state.accessibilityValue)
+        .accessibilityHint(
+            state.isFuture
+                ? "Future dates cannot be selected"
+                : "Shows this day in the journal"
+        )
+        .accessibilityAddTraits(state.isSelected ? .isSelected : [])
+    }
+}
+
+private struct CalendarDayButtonStyle: ButtonStyle {
+    let isHighlighted: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        let showRectangle = isHighlighted || configuration.isPressed
+
+        configuration.label
+            .frame(
+                maxWidth: .infinity,
+                minHeight: OFJLayout.calendarDayControlHeight
+            )
+            .background {
+                RoundedRectangle(
+                    cornerRadius: OFJRadius.compactCard,
+                    style: .continuous
+                )
+                .fill(.regularMaterial)
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: OFJRadius.compactCard,
+                        style: .continuous
+                    )
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                }
+                .shadow(
+                    color: Color.black.opacity(showRectangle ? 0.09 : 0),
+                    radius: 8,
+                    y: 3
+                )
+                .opacity(showRectangle ? 1 : 0)
+                .padding(.horizontal, OFJSpace.s2)
+            }
+            .contentShape(
+                .rect(cornerRadius: OFJRadius.compactCard)
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(OFJMotion.quickSpring, value: configuration.isPressed)
+            .animation(OFJMotion.quickSpring, value: isHighlighted)
+    }
+}
+
+// MARK: - Day Cell
 
 /// A single day cell showing a day abbreviation and a date number inside
 /// a progress ring. Used in the week strip rows.
@@ -278,7 +329,7 @@ private struct DayCellView: View {
 
     /// 3-letter day abbreviation (e.g. "Mon", "Tue")
     private var dayAbbreviation: String {
-        date.formatted(.dateTime.weekday(.abbreviated))
+        date.formatted(.dateTime.weekday(.abbreviated)).uppercased()
     }
 
     /// Day-of-month number (e.g. "13", "7")
@@ -286,75 +337,73 @@ private struct DayCellView: View {
         date.formatted(.dateTime.day())
     }
 
-    /// Whether this is the selected day (affects text weight and background)
-    private var isSelected: Bool {
-        if case .selected = state { return true }
-        return false
-    }
-
-    /// Ring/circle size
-    private let circleSize: CGFloat = 34
-
     var body: some View {
         VStack(spacing: OFJSpace.s4) {
             // Day abbreviation (e.g. "Mon")
             Text(dayAbbreviation)
-                .font(.caption2)
-                .fontWeight(.medium)
+                .font(OFJType.calendarWeekday)
                 .foregroundStyle(dayTextColor)
 
             // Date number inside a progress ring
             ZStack {
-                // Background track (hidden for future days)
-                if case .future = state {
-                    // No ring for future days
+                if state.isFuture {
+                    Circle()
+                        .stroke(
+                            Color.secondary.opacity(0.28),
+                            style: StrokeStyle(
+                                lineWidth: OFJLayout.calendarRingLineWidth,
+                                lineCap: .round,
+                                dash: [2.5, 4]
+                            )
+                        )
                 } else {
                     Circle()
-                        .stroke(.secondary.opacity(0.15), lineWidth: 2.5)
-                }
+                        .stroke(
+                            Color.secondary.opacity(0.15),
+                            lineWidth: OFJLayout.calendarRingLineWidth
+                        )
 
-                // Progress ring — fills clockwise from top
-                Circle()
-                    .trim(from: 0, to: state.progressFraction)
-                    .stroke(
-                        state.ringColor,
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
-                    )
-                    .rotationEffect(.degrees(-90))
-
-                // Filled background for selected day
-                if isSelected {
+                    // Progress ring — fills clockwise from top.
                     Circle()
-                        .fill(.regularMaterial)
-                        .padding(OFJSpace.s2)
+                        .trim(from: 0, to: state.progressFraction)
+                        .stroke(
+                            state.ringColor,
+                            style: StrokeStyle(
+                                lineWidth: OFJLayout.calendarRingLineWidth,
+                                lineCap: .round
+                            )
+                        )
+                        .rotationEffect(.degrees(-90))
                 }
 
                 // The date number text
                 Text(dayNumber)
-                    .font(.subheadline)
-                    .fontWeight(isSelected ? .bold : .semibold)
+                    .font(OFJType.calendarDay)
+                    .fontWeight(state.isSelected ? .bold : .semibold)
                     .foregroundStyle(dateTextColor)
             }
-            .frame(width: circleSize, height: circleSize)
+            .frame(
+                width: OFJLayout.calendarDayRingSize,
+                height: OFJLayout.calendarDayRingSize
+            )
         }
-        .padding(.vertical, OFJSpace.s4)
     }
 
     // MARK: - State-Driven Styling
 
     private var dayTextColor: Color {
         switch state {
-        case .selected:     return .primary
-        case .past:         return .secondary
-        case .future:       return .secondary.opacity(0.4)
+        case .selected: .primary
+        case .past: .secondary
+        case .future: .secondary.opacity(0.42)
         }
     }
 
     private var dateTextColor: Color {
         switch state {
-        case .selected:     return .primary
-        case .past:         return .secondary
-        case .future:       return .secondary.opacity(0.4)
+        case .selected: .primary
+        case .past: .secondary
+        case .future: .secondary.opacity(0.42)
         }
     }
 }
@@ -373,7 +422,50 @@ private struct CalendarStripPreview: View {
     }
 }
 
-#Preview {
+private struct CalendarStateMatrixPreview: View {
+    @State private var selectedDate = Date.now
+
+    private var samples: [(Date, DayCellState)] {
+        let calendar = Calendar.current
+        return [
+            (selectedDate, .selected(progress: 0.72)),
+            (calendar.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate, .past(progress: 0.99)),
+            (calendar.date(byAdding: .day, value: -2, to: selectedDate) ?? selectedDate, .past(progress: 1.12)),
+            (calendar.date(byAdding: .day, value: 1, to: selectedDate) ?? selectedDate, .future),
+        ]
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(Array(samples.enumerated()), id: \.offset) { _, sample in
+                CalendarDayButton(
+                    date: sample.0,
+                    state: sample.1,
+                    selectedDate: $selectedDate
+                )
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(OFJSpace.s16)
+    }
+}
+
+#Preview("Calendar Strip") {
     CalendarStripPreview()
         .modelContainer(.preview)
+}
+
+#Preview("Calendar States · Light") {
+    CalendarStateMatrixPreview()
+        .preferredColorScheme(.light)
+}
+
+#Preview("Calendar States · Dark") {
+    CalendarStateMatrixPreview()
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Calendar States · Accessibility Type") {
+    CalendarStateMatrixPreview()
+        .environment(\.dynamicTypeSize, .accessibility3)
 }

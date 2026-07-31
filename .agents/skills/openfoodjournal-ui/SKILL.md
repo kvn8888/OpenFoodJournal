@@ -7,7 +7,7 @@ description: UI/UX design system and component patterns for OpenFoodJournal. Use
 
 Living reference for every visual and interaction pattern in the app. Consult before creating or modifying any SwiftUI view. Update whenever a new pattern is established or an existing one changes.
 
-`OpenFoodJournal/Views/Shared/OFJDesignSystem.swift` is the executable source of truth for shared values. This document explains intent and usage; when the two differ, update the document and code together. Architecture-only work must preserve the current visuals unless a separate reviewed design issue explicitly authorizes a redesign.
+`OpenFoodJournal/Views/Shared/OFJDesignSystem.swift` is the executable source of truth for shared values. This document explains intent and usage; when the two differ, update the document and code together. Architecture-only work must preserve the current visuals unless a separate reviewed design issue explicitly authorizes a redesign. Issue #45 authorizes one exception: the Journal calendar/header treatment documented below.
 
 ## Quick Reference
 
@@ -40,6 +40,17 @@ Living reference for every visual and interaction pattern in the app. Consult be
 | Way over | `.purple` | >120% of goal |
 | Under | `.red` | <50% of goal |
 
+### Journal Calendar Calorie Colors
+
+These roles apply only to `WeeklyCalendarStrip` and the selected-day Journal background. They do not recolor History or other progress components.
+
+| Status | Ring | Threshold | Journal background |
+|--------|------|-----------|--------------------|
+| Below goal | `Color.primary` (black in light mode, white in dark mode) | <80% | Subtle yellow/orange |
+| Approaching | Existing light green | 80–95% | Subtle yellow/orange |
+| Goal met | Existing green | 95–105% | Subtle green |
+| Over goal | `#D86669` | ≥105% | Subtle orange/pastel |
+
 ### Opacity Conventions
 | Element | Opacity |
 |---------|---------|
@@ -59,6 +70,8 @@ Living reference for every visual and interaction pattern in the app. Consult be
 | Row title | `.body` | `.fontWeight(.medium)` | ~17 |
 | Row subtitle | `.caption` | default | ~12 |
 | Form label | `.subheadline` | default | ~15 |
+| Calendar weekday | `.caption.weight(.semibold)` | semibold | ~12 |
+| Calendar day | `.title3.weight(.semibold)` | semibold/bold when selected | ~20 |
 | Numeric alignment | `.monospacedDigit()` | — | inherited |
 
 **Convention:** All numeric displays use `.system(design: .rounded)`. Precise alignment uses `.monospacedDigit()`.
@@ -97,6 +110,7 @@ GlassEffectContainer(spacing: 20) {
 3. Use `.interactive()` only on tappable/focusable elements
 4. Use `.glassEffectID(_:in:)` + `@Namespace` for morphing transitions
 5. Prefer `.glassEffect()` over `.background(.ultraThinMaterial)` for new UI
+6. `WeeklyCalendarStrip` deliberately has no outer glass card; its selected-day rectangle is the only local material surface
 
 See the `swiftui-liquid-glass` skill for the complete Liquid Glass API reference.
 
@@ -114,6 +128,15 @@ See the `swiftui-liquid-glass` skill for the complete Liquid Glass API reference
 Each tab wraps its content in `NavigationStack`.
 
 Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `NavigationLink` and pushes `SettingsView` on the Journal's existing stack. `SettingsView` must not create a nested `NavigationStack`; previews or other standalone hosts wrap it when needed.
+
+### Journal Calendar/Header
+
+- The large navigation title is the selected month and year, not the static word “Journal.”
+- The Today action moves into the navigation toolbar whenever the selected date is not today.
+- `WeeklyCalendarStrip` remains a horizontally paged Sun–Sat week scroller, but does not draw an outer glass box or a duplicate month header.
+- Every selectable day is a real `Button` with a 44+ pt target. The selected/pressed/hovered day uses a rounded rectangular material highlight.
+- Future days are disabled, dimmed, and retain an empty dashed progress-ring track.
+- Ring and background states come from `OFJColor.JournalCalorieState`; do not duplicate threshold or hex logic in the view.
 
 ### Sheet Management (Enum-Driven)
 **Always use a single enum for all sheets within a page:**
@@ -151,7 +174,7 @@ Every sheet must include:
 ### Shared Components (Views/Shared/)
 | Component | Purpose | Size/Shape |
 |-----------|---------|------------|
-| `OFJDesignSystem` | Executable color, spacing, radius, type, motion, layout, and content-phase foundations | Pixel-equivalent shared tokens |
+| `OFJDesignSystem` | Executable color, spacing, radius, type, motion, layout, calendar calorie state, and content-phase foundations | Shared semantic tokens |
 | `MacroRingView` | Circular progress for one macro | 56×56 pt, circle |
 | `MacroSummaryBar` | 3-column macro cards + calorie headline | Full width, glass card |
 | `RadialMenuButton` | Floating "+" FAB with radial menu | Circular, bottom-aligned |
@@ -340,7 +363,7 @@ Before merging any new view:
 - [ ] Tappable elements have 44+ pt hit targets
 - [ ] Empty states use `ContentUnavailableView`
 - [ ] Progress indicators use the status color thresholds
-- [ ] Architecture-only work preserves current colors, density, typography, layout, and glass treatment
+- [ ] Architecture-only work preserves current colors, density, typography, layout, and glass treatment except for explicitly reviewed design issues such as #45's calendar/header treatment
 
 ## UI Roadmap
 
