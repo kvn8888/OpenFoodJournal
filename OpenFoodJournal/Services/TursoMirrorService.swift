@@ -8,6 +8,7 @@ import SwiftData
 
 enum TursoMirrorError: LocalizedError, Sendable {
     case missingCredentials
+    case disabledInDeveloperBuild
     case invalidDatabaseURL
     case invalidResponse
     case httpStatus(Int, String)
@@ -17,6 +18,8 @@ enum TursoMirrorError: LocalizedError, Sendable {
         switch self {
         case .missingCredentials:
             "Turso database URL and auth token are required."
+        case .disabledInDeveloperBuild:
+            "Turso is disabled in developer builds."
         case .invalidDatabaseURL:
             "Enter a valid libsql:// or https:// Turso database URL."
         case .invalidResponse:
@@ -886,6 +889,15 @@ final class TursoMirrorService {
     }
 
     private func loadCredentials() throws -> (url: URL, token: String) {
+        #if DEBUG
+        // Every network path — mirrorAll, scheduleMirror, testConnection,
+        // runMigrations, the diagnostic flush/export, and clearRemoteDiagnostics
+        // — resolves credentials here. Failing at this one point disables all of
+        // them, including any path added later. Guarding only `isEnabled` left
+        // testConnection, runMigrations and clearRemoteDiagnostics reachable,
+        // and clearRemoteDiagnostics issues DELETE statements.
+        throw TursoMirrorError.disabledInDeveloperBuild
+        #else
         let credentials = credentialProvider()
         guard let urlString = credentials.databaseURL,
               let normalized = Self.normalizedHTTPURLString(urlString),
@@ -895,6 +907,7 @@ final class TursoMirrorService {
             throw TursoMirrorError.missingCredentials
         }
         return (url, token)
+        #endif
     }
 
     // MARK: - SQL-over-HTTP
