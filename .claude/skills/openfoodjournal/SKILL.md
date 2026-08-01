@@ -13,12 +13,12 @@ This is the single source of truth for any LLM agent working on this project. Re
 |-----|-------|
 | Platform | iOS 26.2+ (iPhone) |
 | UI Framework | SwiftUI + Liquid Glass (no `#available` gating needed) |
-| Data Layer | SwiftData (`@Model`) + CloudKit Private Database (`iCloud.k3vnc.OpenFoodJournal`) |
+| Data Layer | SwiftData (`@Model`) + CloudKit Private Database. Release: `iCloud.k3vnc.OpenFoodJournal`; Debug: `iCloud.k3vnc.OpenFoodJournal.dev` (separate containers, not the same container in two environments) |
 | State Pattern | `@Observable` + `@Environment` injection (no singletons) |
 | Bundle IDs | Release: `k3vnc.OpenFoodJournal`; Debug: `k3vnc.OpenFoodJournal.dev` (`OFJ Dev` on device) |
 | Build System | Xcode (xcodebuild), no SPM dependencies |
-| Build Verify Command | `xcodebuild -project OpenFoodJournal.xcodeproj -scheme OpenFoodJournal -destination generic/platform=iOS build` |
-| Build Notes | No iOS simulators installed. Use `generic/platform=iOS` for compile-only verification. Physical device (iPhone 18,3) available when connected. Device support symbols at `/Volumes/DevDisk/Developer/Xcode/iOS DeviceSupport/`. |
+| Build Verify Command | **Never build locally.** `gh workflow run cloud-ci.yml --ref <branch>` — ask the user first. See [.claude/rules/ios-builds.md](../../rules/ios-builds.md). |
+| Build Notes | No simulator devices exist, so Xcode's run destination falls through to the connected iPhone carrying real data. Local `xcodebuild` also evicts signing artifacts from shared DerivedData. Cloud CI isolates DerivedData per job and is the only sanctioned way to find out whether something compiles. |
 | AI Backend | Direct Gemini REST API (BYOK — user provides own API key, stored in Keychain) |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
@@ -162,7 +162,7 @@ if (!cols.includes("serving_type")) {
 
 ## Known Gotchas
 
-1. **`xcodebuild` is stricter than Xcode IDE** — missing `import SwiftData` may compile in previews but fail in CLI builds. Always verify with `xcodebuild`.
+1. **CLI builds are stricter than the Xcode IDE** — missing `import SwiftData` may compile in previews but fail in CLI builds. Verify on Cloud CI, never with a local `xcodebuild`.
 2. **`.easeInOut` is a static property** — don't write `.easeInOut(value:)`. The `value:` belongs to `.animation(_:value:)`.
 3. **Ternary type mismatch** — `.primary` is `HierarchicalShapeStyle`, `.orange` is `Color`. Use `Color.primary` to unify.
 4. **`@ObservationIgnored` on `@AppStorage`** — required in `UserGoals` to avoid double-wrapper conflict. Every new `@AppStorage` property needs it.
@@ -229,11 +229,11 @@ Already configured in `OpenFoodJournal.entitlements`:
 ## Current State (Last Updated: 2026-07-31)
 
 - **Branch: `app-store`** — CloudKit migration complete
-- **Turso is live**, not removed. `TursoMirrorService` is constructed in `OpenFoodJournalApp.init` and is a push-only, generation-pruned mirror. It is hard-disabled in Debug builds (`isEnabled` returns `false`); do not re-enable it for developer builds.
+- **Turso is live**, not removed. `TursoMirrorService` is constructed in `OpenFoodJournalApp.init` and is a push-only, generation-pruned mirror. It is hard-disabled in Debug builds — `isEnabled` returns `false` and `loadCredentials()` throws — so no network path reaches Turso from a developer build. Do not re-enable it.
 - Debug builds install as `OFJ Dev` (`k3vnc.OpenFoodJournal.dev`) alongside the TestFlight app, with a separate local sandbox
 - App structure complete: all models, services, and views implemented
 - 4-tab layout: Journal, Food Bank, History, Settings (Containers accessed via RadialMenuButton)
-- Builds successfully with `xcodebuild -destination generic/platform=iOS` (no simulators installed; compile-only verification)
+- Compile verification runs on Cloud CI (`.github/workflows/cloud-ci.yml`), never locally
 - SwiftData + CloudKit Private Database for data persistence and sync
 - Render proxy deployed at `openfoodjournal.onrender.com` (Gemini scan proxy only)
 - Food Bank: save foods from scan/manual entry, browse/search/sort, log to journal
