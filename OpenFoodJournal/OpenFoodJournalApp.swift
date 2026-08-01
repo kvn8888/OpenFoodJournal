@@ -28,7 +28,9 @@ struct MacrosApp: App {
     /// signing and is invisible in source; this is explicit and cannot drift.
     /// Must stay in sync with the `com.apple.developer.icloud-container-identifiers`
     /// entry in the matching entitlements file.
-    private static var cloudKitContainerIdentifier: String {
+    // Internal so the Debug unit suite can enforce the runtime half of the
+    // source-entitlements contract without launching CloudKit.
+    static var cloudKitContainerIdentifier: String {
         #if DEBUG
         return "iCloud.k3vnc.OpenFoodJournal.dev"
         #else
