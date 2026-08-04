@@ -33,6 +33,9 @@ jobs:
       - name: Verify release workflow contracts
         run: bash .github/scripts/test-release-workflow.sh
 
+      - name: Verify Debug and Release isolation contracts
+        run: bash .github/scripts/test-debug-isolation.sh
+
       - name: Compile app and all test targets
         run: |
           xcodebuild \

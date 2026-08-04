@@ -26,6 +26,8 @@ final class NutritionStore {
     private let healthSyncer: (any NutritionEntryHealthSyncing)?
     @ObservationIgnored
     private let isHealthSyncEnabled: () -> Bool
+    @ObservationIgnored
+    private weak var foodImageGenerationQueue: (any SavedFoodImageGenerationQueuing)?
     /// Bumped on every write so SwiftUI views that read it re-evaluate their computed properties
     private(set) var changeCount = 0
 
@@ -39,6 +41,23 @@ final class NutritionStore {
         self.tursoMirror = tursoMirror
         self.healthSyncer = healthSyncer
         self.isHealthSyncEnabled = isHealthSyncEnabled
+    }
+
+    /// Connects the persistence boundary to the app's configured image
+    /// generator after both services have been constructed.
+    func configureFoodImageGenerationQueue(_ queue: any SavedFoodImageGenerationQueuing) {
+        foodImageGenerationQueue = queue
+    }
+
+    /// Canonical creation path for user-created Food Bank items. Generation is
+    /// requested only after SwiftData has saved the food successfully, so the
+    /// queue never points at an item that failed to persist.
+    @discardableResult
+    func addSavedFood(_ food: SavedFood, mirrorReason: String = "saved_food_created") -> Bool {
+        modelContext.insert(food)
+        guard save(mirrorReason: mirrorReason) else { return false }
+        foodImageGenerationQueue?.enqueueFoodIconImageGeneration(for: food.id)
+        return true
     }
 
     // MARK: - Log Entry
@@ -359,8 +378,8 @@ final class NutritionStore {
 
     // MARK: - Save (public for use in edit flows)
 
-    func saveChanges() {
-        save()
+    func saveChanges(mirrorReason: String = "nutrition_store_save") {
+        save(mirrorReason: mirrorReason)
     }
 
     /// Finds the most recent quantity and unit used for this Food Bank item.
@@ -794,10 +813,10 @@ final class NutritionStore {
     }
 
     @discardableResult
-    private func save() -> Bool {
+    private func save(mirrorReason: String = "nutrition_store_save") -> Bool {
         do {
             try modelContext.save()
-            tursoMirror?.scheduleMirror(reason: "nutrition_store_save")
+            tursoMirror?.scheduleMirror(reason: mirrorReason)
             changeCount += 1
             return true
         } catch {

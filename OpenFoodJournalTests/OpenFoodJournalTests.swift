@@ -179,6 +179,7 @@ struct OpenFoodJournalTests {
             session: StubChatURLProtocol.session(),
             defaults: defaults,
             diagnosticOutboxURL: directory.appending(path: "outbox.json"),
+            networkAccess: .unitTests,
             credentialProvider: {
                 ("https://test-diagnostics.turso.io", "test-turso-token")
             }
@@ -207,6 +208,74 @@ struct OpenFoodJournalTests {
             $0.contains("DELETE FROM ofj_ai_diagnostic_events WHERE expires_at <= ?")
         }))
     }
+
+    #if DEBUG
+    @MainActor
+    @Test func developerBuildUsesIsolatedCloudKitAndDisablesHealthKit() {
+        #expect(MacrosApp.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal.dev")
+        #expect(!HealthKitService().isAvailable)
+    }
+
+    @MainActor
+    @Test func developerBuildBlocksTursoWithoutReadingCredentials() async throws {
+        let harness = try ChatTestHarness()
+        let suiteName = "ofj-turso-debug-isolation-tests-(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: TursoMirrorService.enabledKey)
+        defaults.set(true, forKey: TursoMirrorService.includeDiagnosticsKey)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var credentialReadCount = 0
+        var requestCount = 0
+        StubChatURLProtocol.handler = { request in
+            requestCount += 1
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+        defer { StubChatURLProtocol.handler = nil }
+
+        let service = TursoMirrorService(
+            modelContext: harness.context,
+            session: StubChatURLProtocol.session(),
+            defaults: defaults,
+            diagnosticOutboxURL: directory.appending(path: "outbox.json"),
+            credentialProvider: {
+                credentialReadCount += 1
+                return ("https://should-not-run.turso.io", "should-not-run")
+            }
+        )
+
+        #expect(!service.isEnabled)
+        service.recordDiagnostic(AIDiagnosticEvent(
+            eventType: "assistant_span",
+            operation: "debug_isolation",
+            status: "completed"
+        ))
+        #expect(service.pendingDiagnosticCount == 0)
+        #expect(!(await service.flushDiagnosticOutbox()))
+        await service.clearAIDiagnostics()
+
+        do {
+            try await service.testConnection()
+            Issue.record("Debug testConnection unexpectedly reached Turso")
+        } catch TursoMirrorError.disabledInDeveloperBuild {
+            // Expected: the build policy rejects access before credentials.
+        } catch {
+            Issue.record("Unexpected Debug Turso error: \(error)")
+        }
+
+        #expect(credentialReadCount == 0)
+        #expect(requestCount == 0)
+    }
+    #endif
 
     @Test func tursoUpsertStatementUsesPlaceholders() {
         let row = TursoMirrorRow(table: "ofj_app_settings", columns: [

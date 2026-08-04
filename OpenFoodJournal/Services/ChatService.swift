@@ -3443,9 +3443,7 @@ final class ChatService {
             micronutrients: micronutrients,
             servingSize: args["serving_description"]?.stringValue
         )
-        modelContext.insert(food)
-        try? modelContext.save()
-        tursoMirror?.scheduleMirror(reason: "chat_save_food")
+        nutritionStore.addSavedFood(food, mirrorReason: "chat_save_food")
 
         return ToolOutcome(result: .object([
             "status": .string("saved"),

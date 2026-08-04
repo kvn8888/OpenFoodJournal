@@ -8,6 +8,7 @@ import SwiftData
 
 enum TursoMirrorError: LocalizedError, Sendable {
     case missingCredentials
+    case disabledInDeveloperBuild
     case invalidDatabaseURL
     case invalidResponse
     case httpStatus(Int, String)
@@ -17,6 +18,8 @@ enum TursoMirrorError: LocalizedError, Sendable {
         switch self {
         case .missingCredentials:
             "Turso database URL and auth token are required."
+        case .disabledInDeveloperBuild:
+            "Turso is disabled in developer builds."
         case .invalidDatabaseURL:
             "Enter a valid libsql:// or https:// Turso database URL."
         case .invalidResponse:
@@ -26,6 +29,27 @@ enum TursoMirrorError: LocalizedError, Sendable {
         case .pipelineError(let message):
             "Turso SQL pipeline failed: \(message)"
         }
+    }
+}
+
+enum TursoNetworkAccess: Sendable {
+    case buildDefault
+    case unitTests
+
+    var isAllowed: Bool {
+        #if DEBUG
+        switch self {
+        case .buildDefault:
+            return false
+        case .unitTests:
+            // The override exists only so Debug-hosted tests can exercise the
+            // HTTP protocol. It remains unusable from previews and normal app
+            // launches even if a future caller selects it accidentally.
+            return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        }
+        #else
+        return true
+        #endif
     }
 }
 
@@ -266,6 +290,7 @@ enum TursoSchema {
             .init(name: "turso_enabled", type: "INTEGER"),
             .init(name: "turso_include_diagnostics", type: "INTEGER"),
             .init(name: "app_version", type: "TEXT"),
+            .init(name: "app_bundle_id", type: "TEXT"),
             .init(name: "app_build", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
@@ -418,6 +443,8 @@ final class TursoMirrorService {
     @ObservationIgnored
     private let credentialProvider: () -> (databaseURL: String?, authToken: String?)
     @ObservationIgnored
+    private let networkAccess: TursoNetworkAccess
+    @ObservationIgnored
     private let encoder: JSONEncoder
     @ObservationIgnored
     private let isoFormatter: ISO8601DateFormatter
@@ -443,11 +470,13 @@ final class TursoMirrorService {
         diagnosticOutboxMaximumEvents: Int = AIDiagnosticOutboxStore.defaultMaximumEvents,
         diagnosticOutboxMaximumBytes: Int = AIDiagnosticOutboxStore.defaultMaximumBytes,
         diagnosticOutboxMaximumAge: TimeInterval = AIDiagnosticOutboxStore.defaultMaximumAge,
+        networkAccess: TursoNetworkAccess = .buildDefault,
         credentialProvider: (() -> (databaseURL: String?, authToken: String?))? = nil
     ) {
         self.modelContext = modelContext
         self.session = session
         self.defaults = defaults
+        self.networkAccess = networkAccess
         self.credentialProvider = credentialProvider ?? {
             (KeychainService.tursoDatabaseURL, KeychainService.tursoAuthToken)
         }
@@ -474,7 +503,12 @@ final class TursoMirrorService {
     }
 
     var isEnabled: Bool {
-        defaults.bool(forKey: Self.enabledKey)
+        // Developer builds never mirror. The mirror is generation-pruned, so a
+        // developer build pushing its own (separate, possibly empty) dataset
+        // could delete rows the production app still relies on. Keychain
+        // scoping already makes production credentials unreachable from a
+        // Debug build, but that is incidental; this is the actual guarantee.
+        networkAccess.isAllowed && defaults.bool(forKey: Self.enabledKey)
     }
 
     var includeDiagnostics: Bool {
@@ -870,12 +904,22 @@ final class TursoMirrorService {
     // MARK: - Credentials
 
     private var hasCredentials: Bool {
+        guard networkAccess.isAllowed else { return false }
         let credentials = credentialProvider()
         return Self.normalizedHTTPURLString(credentials.databaseURL ?? "") != nil
             && credentials.authToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     private func loadCredentials() throws -> (url: URL, token: String) {
+        // Every network path — mirrorAll, scheduleMirror, testConnection,
+        // runMigrations, the diagnostic flush/export, and clearRemoteDiagnostics
+        // — resolves credentials here. Failing at this one point disables all of
+        // them, including any path added later. Guarding only `isEnabled` left
+        // testConnection, runMigrations and clearRemoteDiagnostics reachable,
+        // and clearRemoteDiagnostics issues DELETE statements.
+        guard networkAccess.isAllowed else {
+            throw TursoMirrorError.disabledInDeveloperBuild
+        }
         let credentials = credentialProvider()
         guard let urlString = credentials.databaseURL,
               let normalized = Self.normalizedHTTPURLString(urlString),
@@ -1246,6 +1290,10 @@ final class TursoMirrorService {
             "turso_enabled": .bool(isEnabled),
             "turso_include_diagnostics": .bool(includeDiagnostics),
             "app_version": .text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"),
+            // CURRENT_PROJECT_VERSION is only stamped with a real number by CI,
+            // so app_build alone cannot identify which app produced a row.
+            // Record the bundle identifier so every row is self-identifying.
+            "app_bundle_id": .text(Bundle.main.bundleIdentifier ?? "unknown"),
             "app_build": .text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"),
             "mirror_generation": .text(generation)
         ]))

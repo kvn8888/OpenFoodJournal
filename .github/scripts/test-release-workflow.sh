@@ -34,6 +34,19 @@ do
   fi
 done
 
+if ! grep -Fq 'gemini-image-contract:' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow is missing the protected Gemini image contract job." >&2
+  exit 1
+fi
+if ! grep -Fq 'testGeminiFoodIconImageLiveContract' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow does not execute the production Gemini image contract test." >&2
+  exit 1
+fi
+if ! grep -Fq 'OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow does not source the Gemini canary key from the protected environment." >&2
+  exit 1
+fi
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"

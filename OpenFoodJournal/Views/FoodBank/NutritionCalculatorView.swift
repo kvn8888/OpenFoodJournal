@@ -112,6 +112,7 @@ struct NutritionCalculatorLibraryView: View {
 struct NutritionCalculatorEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(NutritionStore.self) private var nutritionStore
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     private let calculator: SavedFood?
@@ -275,12 +276,13 @@ struct NutritionCalculatorEditorView: View {
                 calculatorIngredients: ingredients
             )
             calculator.refreshCalculatorNutrition()
-            modelContext.insert(calculator)
+            nutritionStore.addSavedFood(calculator, mirrorReason: "nutrition_calculator_created")
             saved = calculator
         }
 
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: isEditing ? "nutrition_calculator_updated" : "nutrition_calculator_created")
+        if isEditing {
+            nutritionStore.saveChanges(mirrorReason: "nutrition_calculator_updated")
+        }
         onSaved?(saved)
         dismiss()
     }

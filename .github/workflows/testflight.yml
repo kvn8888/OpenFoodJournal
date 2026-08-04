@@ -19,9 +19,63 @@ jobs:
     name: Validate candidate
     uses: ./.github/workflows/cloud-ci.yml
 
+  gemini-image-contract:
+    name: Validate Gemini food-image API
+    needs: cloud-ci
+    if: vars.ENABLE_TESTFLIGHT_AUTOMATION == 'true'
+    runs-on: macos-26
+    timeout-minutes: 20
+    environment: testflight-internal
+
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS: "1"
+      OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}
+
+    steps:
+      - name: Check out trusted TestFlight source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify pinned Xcode toolchain
+        run: bash .github/scripts/verify-xcode.sh
+
+      - name: Require protected Gemini contract credential
+        run: |
+          if [[ -z "${OFJ_GEMINI_API_KEY}" ]]; then
+            echo "Missing OFJ_GEMINI_API_KEY in the testflight-internal environment." >&2
+            exit 1
+          fi
+
+      - name: Select API-contract simulator
+        run: bash .github/scripts/select-unit-test-simulator.sh
+
+      - name: Execute production Gemini food-image contract
+        run: |
+          xcodebuild \
+            -project OpenFoodJournal.xcodeproj \
+            -scheme OpenFoodJournalUnitTests \
+            -destination "platform=iOS Simulator,id=${UNIT_TEST_SIMULATOR_ID}" \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData-gemini-image-contract" \
+            -resultBundlePath "${RUNNER_TEMP}/GeminiFoodImageContract.xcresult" \
+            -parallel-testing-enabled NO \
+            -only-testing:OpenFoodJournalTests/ChatLiveProviderTests/testGeminiFoodIconImageLiveContract \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Retain failed Gemini contract diagnostics briefly
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gemini-food-image-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/GeminiFoodImageContract.xcresult
+          if-no-files-found: ignore
+          retention-days: 3
+
   deploy:
     name: Build and distribute
-    needs: cloud-ci
+    needs:
+      - cloud-ci
+      - gemini-image-contract
     if: vars.ENABLE_TESTFLIGHT_AUTOMATION == 'true'
     runs-on: macos-26
     timeout-minutes: 90

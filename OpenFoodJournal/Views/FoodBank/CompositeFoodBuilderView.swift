@@ -8,6 +8,7 @@ import SwiftData
 struct CompositeFoodBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(NutritionStore.self) private var nutritionStore
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     private let food: SavedFood?
@@ -184,11 +185,12 @@ struct CompositeFoodBuilderView: View {
                 compositeIngredients: ingredients
             )
             composite.refreshCompositeNutrition()
-            modelContext.insert(composite)
+            nutritionStore.addSavedFood(composite, mirrorReason: "composite_created")
         }
 
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: isEditing ? "composite_updated" : "composite_created")
+        if isEditing {
+            nutritionStore.saveChanges(mirrorReason: "composite_updated")
+        }
         dismiss()
     }
 }

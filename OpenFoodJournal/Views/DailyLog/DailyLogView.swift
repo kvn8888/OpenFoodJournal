@@ -274,7 +274,6 @@ private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(MealTimeSettings.self) private var mealTimeSettings
-    @Environment(TursoMirrorService.self) private var tursoMirror
     @Environment(\.dismiss) private var dismiss
 
     @Bindable var entry: NutritionEntry
@@ -343,9 +342,7 @@ private struct ScanResultSheet: View {
 
     private func saveReviewedFood() -> SavedFood {
         let saved = SavedFood(from: entry)
-        nutritionStore.modelContext.insert(saved)
-        try? nutritionStore.modelContext.save()
-        tursoMirror.scheduleMirror(reason: "scan_save_to_food_bank")
+        nutritionStore.addSavedFood(saved, mirrorReason: "scan_save_to_food_bank")
         return saved
     }
 
