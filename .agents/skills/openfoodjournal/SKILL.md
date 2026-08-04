@@ -156,9 +156,11 @@ User taps "AI Search" in Food Bank "+" menu
 
 ```
 Settings → Food Bank → Enable Food Icon Generation
-  → @AppStorage("foodBank.autoGenerateEmojis") enables the manual icon-generation controls, but does not enqueue background work by itself
+  → @AppStorage("foodBank.autoGenerateEmojis") enables icon generation; when generated-image mode is also selected, each newly persisted Food Bank item is queued automatically
   → Optional @AppStorage("foodBank.useGeneratedIconImages") switches the icon target from text emoji to generated images
-  → Toggling either setting must not queue the whole Food Bank. Generation starts only from Settings → "Generate Missing ..." or, when icon generation is enabled, a Food Bank row context-menu generate/regenerate action.
+  → `NutritionStore.addSavedFood(...)` is the canonical creation boundary. After a successful save it notifies `SavedFoodImageGenerationQueuing`; `ScanService` deduplicates IDs and processes them FIFO so additions made during an active generation are not dropped.
+  → Toggling either setting must not queue the whole existing Food Bank. Settings → "Generate Missing ..." remains the explicit backfill action, and Food Bank row context-menu generation remains available.
+  → Backup restore preserves restored records without automatically spending BYOK image-generation quota.
   → Emoji mode: ScanService.backfillMissingFoodEmojis() fetches all SavedFood rows with empty emoji
   → Image mode: ScanService.backfillMissingFoodIconImages() fetches all SavedFood rows without generated icon image data
   → Processes foods sequentially. Emoji mode uses the selected provider's emoji model and a JSON-only one-emoji prompt; image mode uses direct Gemini `models/gemini-3.1-flash-lite-image` with the Gemini key.

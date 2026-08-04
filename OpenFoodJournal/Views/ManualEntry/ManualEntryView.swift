@@ -74,8 +74,6 @@ struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Environment(TursoMirrorService.self) private var tursoMirror
 
     let defaultDate: Date
 
@@ -365,9 +363,7 @@ struct ManualEntryView: View {
         // Optionally save to Food Bank for quick re-logging
         if saveToFoodBank {
             let savedFood = SavedFood(from: entry)
-            modelContext.insert(savedFood)
-            try? modelContext.save()
-            tursoMirror.scheduleMirror(reason: "manual_food_bank_save")
+            nutritionStore.addSavedFood(savedFood, mirrorReason: "manual_food_bank_save")
         }
 
         dismiss()

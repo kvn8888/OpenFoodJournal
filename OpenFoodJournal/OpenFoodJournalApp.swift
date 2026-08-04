@@ -111,11 +111,13 @@ struct MacrosApp: App {
             }
         )
         _nutritionStore = State(initialValue: store)
-        _scanService = State(initialValue: ScanService(
+        let scanService = ScanService(
             modelContext: container.mainContext,
             tursoMirror: tursoMirror,
             modelCatalog: isTest ? nil : modelCatalog
-        ))
+        )
+        store.configureFoodImageGenerationQueue(scanService)
+        _scanService = State(initialValue: scanService)
         let goals = UserGoals()
         _userGoals = State(initialValue: goals)
         #if DEBUG

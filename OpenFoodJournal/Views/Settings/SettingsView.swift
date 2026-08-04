@@ -442,6 +442,9 @@ struct SettingsView: View {
                     }
                     .onChange(of: autoGenerateFoodEmojis) {
                         tursoMirror.scheduleMirror(reason: "food_emoji_setting_changed")
+                        if autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                            scanService.resumeQueuedFoodIconImageGeneration()
+                        }
                     }
 
                     Toggle(isOn: $useGeneratedFoodIconImages) {
@@ -449,6 +452,9 @@ struct SettingsView: View {
                     }
                     .onChange(of: useGeneratedFoodIconImages) {
                         tursoMirror.scheduleMirror(reason: "food_icon_mode_changed")
+                        if autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                            scanService.resumeQueuedFoodIconImageGeneration()
+                        }
                     }
 
                     LabeledContent(missingFoodIconLabel, value: missingFoodIconCount.formatted())
@@ -489,7 +495,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Food Bank")
                 } footer: {
-                    Text("Toggles only change icon preferences. Generate missing icons manually with the button above or a Food Bank row context menu. Emoji mode uses the selected AI provider. Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails.")
+                    Text("When icon generation and generated images are enabled, each newly saved Food Bank item is queued automatically. Generate Missing handles older items. Emoji mode uses the selected AI provider. Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails.")
                 }
 
                 // MARK: AI Usage
@@ -716,6 +722,11 @@ struct SettingsView: View {
             hasParallelAPIKey = KeychainService.hasParallelAPIKey
             _ = GeminiCostAccumulator.current(in: modelContext)
             try? modelContext.save()
+        }
+        .onChange(of: hasAPIKey) {
+            if hasAPIKey && autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                scanService.resumeQueuedFoodIconImageGeneration()
+            }
         }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView()

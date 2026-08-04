@@ -920,7 +920,7 @@ private struct OpenRouterError: Codable {
 
 @Observable
 @MainActor
-final class ScanService {
+final class ScanService: SavedFoodImageGenerationQueuing {
     static let maxImagesPerScan = 4
     private static let foodEmojiPersistenceBatchSize = 10
     // Image generation currently uses this concrete Gemini image endpoint; the
@@ -976,6 +976,8 @@ final class ScanService {
     @ObservationIgnored private let tursoMirror: TursoMirrorService?
     @ObservationIgnored private let diagnosticSink: (any AIDiagnosticWriting)?
     @ObservationIgnored private let modelCatalog: RuntimeModelCatalog?
+    @ObservationIgnored private var foodIconGenerationQueue = FoodIconGenerationQueue()
+    @ObservationIgnored private var foodIconGenerationWorker: Task<Void, Never>?
 
     init(
         modelContext: ModelContext? = nil,
@@ -1568,6 +1570,152 @@ final class ScanService {
 
     // MARK: - Food Bank Emoji Assignment
 
+    /// Enqueues a newly persisted Food Bank item for generated-image work.
+    /// Rapid additions are deduplicated and processed sequentially so no save
+    /// is dropped while a previous Gemini image request is still running.
+    func enqueueFoodIconImageGeneration(for foodID: UUID) {
+        guard let food = savedFood(withID: foodID) else { return }
+        guard FoodIconGenerationPolicy.shouldAutomaticallyGenerate(
+            isGenerationEnabled: UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.autoGenerateKey),
+            usesGeneratedImages: UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey),
+            needsGeneratedImage: food.needsFoodBankGeneratedIconImage
+        ) else { return }
+        guard foodIconGenerationQueue.enqueue(foodID) else { return }
+
+        if !isAssigningFoodEmojis {
+            foodEmojiCompletedCount = 0
+            foodEmojiTotalCount = foodIconGenerationQueue.outstandingCount
+            foodEmojiProgressMessage = "Queued image generation for \(foodDisplayName(food))."
+        }
+        startQueuedFoodIconGenerationIfPossible()
+    }
+
+    /// Rechecks a queue that was waiting for credentials or another Food Bank
+    /// generation operation. Settings calls this after the Gemini key or image
+    /// generation preferences become usable.
+    func resumeQueuedFoodIconImageGeneration() {
+        startQueuedFoodIconGenerationIfPossible()
+    }
+
+    private func startQueuedFoodIconGenerationIfPossible() {
+        guard foodIconGenerationWorker == nil,
+              !isAssigningFoodEmojis,
+              !foodIconGenerationQueue.isEmpty else { return }
+        guard UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.autoGenerateKey),
+              UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey) else {
+            return
+        }
+        guard KeychainService.geminiAPIKey?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty != nil else {
+            foodEmojiCompletedCount = 0
+            foodEmojiTotalCount = foodIconGenerationQueue.outstandingCount
+            foodEmojiProgressMessage = "\(foodIconGenerationQueue.outstandingCount.formatted()) food image\(foodIconGenerationQueue.outstandingCount == 1 ? "" : "s") queued. Add a Gemini API key to start."
+            return
+        }
+
+        foodIconGenerationWorker = Task { [weak self] in
+            await self?.processQueuedFoodIconImages()
+        }
+    }
+
+    private func processQueuedFoodIconImages() async {
+        guard let modelContext,
+              let apiKey = KeychainService.geminiAPIKey?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .nilIfEmpty else {
+            foodIconGenerationWorker = nil
+            return
+        }
+
+        isAssigningFoodEmojis = true
+        foodEmojiCompletedCount = 0
+        foodEmojiTotalCount = foodIconGenerationQueue.outstandingCount
+        var completedCount = 0
+        var failedCount = 0
+
+        defer {
+            isAssigningFoodEmojis = false
+            foodIconGenerationWorker = nil
+            if foodIconGenerationQueue.isEmpty {
+                foodEmojiProgressMessage = failedCount == 0
+                    ? "Queued food image generation complete."
+                    : "Queued food image generation finished. \(failedCount.formatted()) failed."
+            } else if !UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.autoGenerateKey)
+                        || !UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey) {
+                foodEmojiProgressMessage = "\(foodIconGenerationQueue.outstandingCount.formatted()) food image\(foodIconGenerationQueue.outstandingCount == 1 ? "" : "s") queued. Re-enable generated Food Bank images to continue."
+            }
+            startQueuedFoodIconGenerationIfPossible()
+        }
+
+        while !Task.isCancelled,
+              UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.autoGenerateKey),
+              UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey),
+              KeychainService.hasGeminiAPIKey,
+              let foodID = foodIconGenerationQueue.beginNext() {
+            foodEmojiTotalCount = completedCount + foodIconGenerationQueue.outstandingCount
+
+            guard let food = savedFood(withID: foodID) else {
+                foodIconGenerationQueue.finishActive()
+                completedCount += 1
+                foodEmojiCompletedCount = completedCount
+                continue
+            }
+            guard food.needsFoodBankGeneratedIconImage else {
+                foodIconGenerationQueue.finishActive()
+                completedCount += 1
+                foodEmojiCompletedCount = completedCount
+                continue
+            }
+
+            foodEmojiProgressMessage = "Generating \(completedCount + 1) of \(foodEmojiTotalCount): \(foodDisplayName(food))"
+            let cacheKey = foodIconImageFailureCacheKey(for: food)
+            if hasRecentGenerationFailure(
+                storageKey: Self.foodIconImageFailureCacheStorageKey,
+                cacheKey: cacheKey
+            ) {
+                failedCount += 1
+            } else {
+                do {
+                    let icon = try await generateFoodIconImagePayload(for: food, apiKey: apiKey)
+                    apply(icon, to: food)
+                    clearGenerationFailure(
+                        storageKey: Self.foodIconImageFailureCacheStorageKey,
+                        cacheKey: cacheKey
+                    )
+                    try modelContext.save()
+                    tursoMirror?.scheduleMirror(reason: "food_icon_image_auto_generated")
+                } catch {
+                    failedCount += 1
+                    rememberGenerationFailure(
+                        storageKey: Self.foodIconImageFailureCacheStorageKey,
+                        cacheKey: cacheKey
+                    )
+                    #if DEBUG
+                    print("⚠️ Queued food image generation failed for \(food.name): \(error.localizedDescription)")
+                    #endif
+                }
+            }
+
+            foodIconGenerationQueue.finishActive()
+            completedCount += 1
+            foodEmojiCompletedCount = completedCount
+        }
+    }
+
+    private func savedFood(withID foodID: UUID) -> SavedFood? {
+        guard let modelContext else { return nil }
+        var descriptor = FetchDescriptor<SavedFood>(
+            predicate: #Predicate { $0.id == foodID }
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    private func foodDisplayName(_ food: SavedFood) -> String {
+        food.name.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty ?? "Saved food"
+    }
+
     /// Assigns missing Food Bank emojis one at a time. This intentionally avoids
     /// parallel Gemini calls so a large Food Bank cannot burst through the user's
     /// BYOK quota or obscure which food caused a bad response.
@@ -1629,6 +1777,7 @@ final class ScanService {
         defer {
             savePendingEmojiBackfillChanges(reason: "food_emoji_backfill_finished")
             isAssigningFoodEmojis = false
+            startQueuedFoodIconGenerationIfPossible()
         }
 
         for (index, food) in targets.enumerated() {
@@ -1742,6 +1891,7 @@ final class ScanService {
         defer {
             savePendingFoodIconChanges(reason: "food_icon_image_backfill_finished")
             isAssigningFoodEmojis = false
+            startQueuedFoodIconGenerationIfPossible()
         }
 
         for (index, food) in targets.enumerated() {
@@ -1795,7 +1945,10 @@ final class ScanService {
         foodEmojiCompletedCount = 0
         foodEmojiTotalCount = 1
         foodEmojiProgressMessage = "Regenerating emoji for \(food.name)"
-        defer { isAssigningFoodEmojis = false }
+        defer {
+            isAssigningFoodEmojis = false
+            startQueuedFoodIconGenerationIfPossible()
+        }
         let cacheKey = foodEmojiFailureCacheKey(for: food, config: aiConfig)
 
         do {
@@ -1836,7 +1989,10 @@ final class ScanService {
         foodEmojiCompletedCount = 0
         foodEmojiTotalCount = 1
         foodEmojiProgressMessage = "\(force ? "Regenerating" : "Generating") image for \(food.name)"
-        defer { isAssigningFoodEmojis = false }
+        defer {
+            isAssigningFoodEmojis = false
+            startQueuedFoodIconGenerationIfPossible()
+        }
 
         do {
             let icon = try await generateFoodIconImagePayload(for: food, apiKey: apiKey)
