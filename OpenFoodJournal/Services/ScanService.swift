@@ -241,49 +241,65 @@ private struct GeminiGenerationConfig: Codable {
     }
 }
 
-private struct GeminiImageGenerationRequest: Encodable {
+/// Thinking levels published specifically for `gemini-3.1-flash-lite-image`.
+///
+/// Source: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image
+///
+/// IMPORTANT: These values are model-specific. Text Gemini models may accept
+/// `low`, but Nano Banana 2 Lite documents only `minimal` and `high`. Do not add
+/// `low` here: a previously hard-coded `low` value caused production HTTP 400s
+/// when Google's backend stopped tolerating it on 2026-07-31.
+enum GeminiFlashLiteImageThinkingLevel: String, Encodable, CaseIterable, Sendable {
+    case minimal
+    case high
+}
+
+struct GeminiImageGenerationRequest: Encodable, Sendable {
     let model: String
     let input: String
     let systemInstruction: String
     let generationConfig: GeminiImageGenerationConfig
-    let responseModalities: [String]
+    let responseFormat: GeminiImageResponseFormat
 
     enum CodingKeys: String, CodingKey {
         case model
         case input
         case systemInstruction = "system_instruction"
         case generationConfig = "generation_config"
-        case responseModalities = "response_modalities"
+        case responseFormat = "response_format"
     }
 }
 
-private struct GeminiImageGenerationConfig: Encodable {
+struct GeminiImageGenerationConfig: Encodable, Sendable {
     let temperature: Double
-    let maxOutputTokens: Int
     let topP: Double
-    let thinkingLevel: String
-    let imageConfig: GeminiImageConfig
+    let thinkingLevel: GeminiFlashLiteImageThinkingLevel
 
     enum CodingKeys: String, CodingKey {
         case temperature
-        case maxOutputTokens = "max_output_tokens"
         case topP = "top_p"
         case thinkingLevel = "thinking_level"
-        case imageConfig = "image_config"
     }
 }
 
-private struct GeminiImageConfig: Encodable {
+/// Current Interactions image-output contract. Image configuration belongs in
+/// top-level `response_format`, not legacy `generation_config.image_config`.
+/// Source: https://ai.google.dev/gemini-api/docs/interactions-breaking-changes-may-2026
+struct GeminiImageResponseFormat: Encodable, Sendable {
+    let type: String
+    let mimeType: String
     let aspectRatio: String
     let imageSize: String
 
     enum CodingKeys: String, CodingKey {
+        case type
+        case mimeType = "mime_type"
         case aspectRatio = "aspect_ratio"
         case imageSize = "image_size"
     }
 }
 
-private struct GeneratedFoodIconImage: Sendable {
+struct GeminiGeneratedFoodIconPayload: Sendable {
     let data: Data
     let mimeType: String
 }
@@ -301,7 +317,7 @@ private struct GeminiInteractionSSEEvent: Decodable {
     let delta: GeminiInteractionDelta?
     let usage: GeminiInteractionUsage?
     let metadata: GeminiStreamMetadata?
-    let error: GeminiAPIError?
+    let error: GeminiScanAPIError?
 
     enum CodingKeys: String, CodingKey {
         case eventType = "event_type"
@@ -369,14 +385,33 @@ private struct GeminiGroundingToolCount: Codable {
 }
 
 /// Error response from the Gemini API (e.g. invalid key, quota exceeded).
-private struct GeminiAPIError: Codable {
-    let code: Int?
+struct GeminiScanAPIError: Codable {
+    let code: String?
     let message: String?
     let status: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case message
+        case status
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let stringCode = try? container.decode(String.self, forKey: .code) {
+            code = stringCode
+        } else if let numericCode = try? container.decode(Int.self, forKey: .code) {
+            code = String(numericCode)
+        } else {
+            code = nil
+        }
+        message = try container.decodeIfPresent(String.self, forKey: .message)
+        status = try container.decodeIfPresent(String.self, forKey: .status)
+    }
 }
 
-private struct GeminiAPIErrorEnvelope: Decodable {
-    let error: GeminiAPIError?
+struct GeminiScanAPIErrorEnvelope: Decodable {
+    let error: GeminiScanAPIError?
 }
 
 // MARK: - Nutrition Response Shape
@@ -925,7 +960,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     private static let foodEmojiPersistenceBatchSize = 10
     // Image generation currently uses this concrete Gemini image endpoint; the
     // "latest alias only" rule above still applies to text scan/emoji models.
-    private static let foodIconImageModel = "models/gemini-3.1-flash-lite-image"
+    static let foodIconImageModel = "models/gemini-3.1-flash-lite-image"
     private static let foodIconImageSystemInstruction = "Pure White background. 3d emoji. Simple. Center the food object. No text on the food items"
     // Public Gemini API Standard paid-tier pricing checked 2026-06-30. AI Studio
     // may show a lower studio/free estimate; persisted app estimates use the
@@ -939,14 +974,18 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     private static let foodIconStoredJPEGQuality = 0.82
     private static let foodIconStoredMimeType = "image/jpeg"
     private static let foodIconTransparentMimeType = "image/png"
-    // Gemini Interactions currently rejects the older "minimal" value for
-    // thinking_level, including for the image model.
-    private static let foodIconImageThinkingLevel = "low"
+    // DO NOT substitute `low` here. Nano Banana 2 Lite's published enum is
+    // `minimal`/`high`, not the text-model `low`/`high` enum. Google documents
+    // both supported values at the URL below. `high` is documented and was
+    // live-verified against the exact production payload on 2026-07-31; the
+    // TestFlight live contract must pass before this value can ship.
+    // https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image
+    static let foodIconImageThinkingLevel = GeminiFlashLiteImageThinkingLevel.high
     private static let generationFailureRetryInterval: TimeInterval = 60 * 60
     private static let foodEmojiFailureCacheStorageKey = "foodBank.foodEmojiGenerationFailures"
     private static let foodIconImageFailureCacheStorageKey = "foodBank.foodIconImageGenerationFailures"
     private static let foodEmojiGenerationCacheVersion = "food-emoji-v1"
-    private static let foodIconImageGenerationCacheVersion = "food-icon-image-v2-low-160"
+    private static let foodIconImageGenerationCacheVersion = "food-icon-image-v3-high-response-format-160"
 
     // MARK: State
 
@@ -994,7 +1033,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     // MARK: Configuration
 
     /// Gemini Interactions endpoint. The model is supplied in the JSON body.
-    private static let geminiInteractionsURL = "https://generativelanguage.googleapis.com/v1beta/interactions"
+    static let geminiInteractionsURL = "https://generativelanguage.googleapis.com/v1beta/interactions"
     /// OpenRouter's OpenAI-compatible chat completions endpoint.
     private static let openRouterChatCompletionsURL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -2017,7 +2056,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             return
         }
 
-        let currentIcon = GeneratedFoodIconImage(
+        let currentIcon = GeminiGeneratedFoodIconPayload(
             data: data,
             mimeType: food.generatedIconImageMimeType ?? "image/*"
         )
@@ -2039,7 +2078,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
     }
 
-    private func apply(_ icon: GeneratedFoodIconImage, to food: SavedFood) {
+    private func apply(_ icon: GeminiGeneratedFoodIconPayload, to food: SavedFood) {
         food.generatedIconImageData = icon.data
         food.generatedIconImageMimeType = icon.mimeType
         food.generatedIconImageUpdatedAt = .now
@@ -2127,7 +2166,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             guard let data = food.generatedIconImageData,
                   !data.isEmpty,
                   let optimized = Self.optimizedStoredFoodIconImage(
-                      from: GeneratedFoodIconImage(
+                      from: GeminiGeneratedFoodIconPayload(
                           data: data,
                           mimeType: food.generatedIconImageMimeType ?? "image/*"
                       )
@@ -2264,14 +2303,14 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return emoji
     }
 
-    private func generateFoodIconImagePayload(for food: SavedFood, apiKey: String) async throws -> GeneratedFoodIconImage {
+    private func generateFoodIconImagePayload(for food: SavedFood, apiKey: String) async throws -> GeminiGeneratedFoodIconPayload {
         let start = ContinuousClock.now
         let prompt = Self.foodIconImagePrompt(name: food.name, brand: food.brand)
         let requestMetadata = GeminiRequestLogMetadata(
             apiMethod: "interactions.create",
             aiProvider: AIProvider.gemini.rawValue,
             responseMimeType: "image/*",
-            thinkingLevel: Self.foodIconImageThinkingLevel,
+            thinkingLevel: Self.foodIconImageThinkingLevel.rawValue,
             includeThoughts: false,
             tools: [],
             imageCount: 0,
@@ -2328,7 +2367,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         prompt: String,
         apiKey: String,
         trace: GeminiCallTrace
-    ) async throws -> GeneratedFoodIconImage {
+    ) async throws -> GeminiGeneratedFoodIconPayload {
         let redactedEndpoint = Self.geminiInteractionsURL
         let attemptStart = ContinuousClock.now
         var attempt = GeminiModelAttemptLog(model: Self.foodIconImageModel, endpoint: redactedEndpoint)
@@ -2350,22 +2389,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             try fail(ScanError.invalidResponse, stage: "build_url")
         }
 
-        let requestBody = GeminiImageGenerationRequest(
-            model: Self.foodIconImageModel,
-            input: prompt,
-            systemInstruction: Self.foodIconImageSystemInstruction,
-            generationConfig: GeminiImageGenerationConfig(
-                temperature: 1,
-                maxOutputTokens: 65_536,
-                topP: 0.95,
-                thinkingLevel: Self.foodIconImageThinkingLevel,
-                imageConfig: GeminiImageConfig(
-                    aspectRatio: "1:1",
-                    imageSize: "1K"
-                )
-            ),
-            responseModalities: ["image"]
-        )
+        let requestBody = Self.foodIconImageRequest(prompt: prompt)
 
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "POST"
@@ -2397,7 +2421,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
         guard (200..<300).contains(httpResponse.statusCode) else {
             attempt.rawErrorBody = String(data: data, encoding: .utf8)
-            let apiResponse = try? JSONDecoder().decode(GeminiAPIErrorEnvelope.self, from: data)
+            let apiResponse = try? JSONDecoder().decode(GeminiScanAPIErrorEnvelope.self, from: data)
             let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
             #if DEBUG
             if let rawErrorBody = attempt.rawErrorBody {
@@ -2443,7 +2467,29 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return icon
     }
 
-    private static func optimizedStoredFoodIconImage(from icon: GeneratedFoodIconImage) -> GeneratedFoodIconImage? {
+    /// Builds the exact production payload used by both the app and the live
+    /// TestFlight contract test. Keeping one builder prevents CI from validating
+    /// a hand-written request that can drift away from the shipped request.
+    static func foodIconImageRequest(prompt: String) -> GeminiImageGenerationRequest {
+        GeminiImageGenerationRequest(
+            model: Self.foodIconImageModel,
+            input: prompt,
+            systemInstruction: Self.foodIconImageSystemInstruction,
+            generationConfig: GeminiImageGenerationConfig(
+                temperature: 1,
+                topP: 0.95,
+                thinkingLevel: Self.foodIconImageThinkingLevel
+            ),
+            responseFormat: GeminiImageResponseFormat(
+                type: "image",
+                mimeType: "image/jpeg",
+                aspectRatio: "1:1",
+                imageSize: "1K"
+            )
+        )
+    }
+
+    private static func optimizedStoredFoodIconImage(from icon: GeminiGeneratedFoodIconPayload) -> GeminiGeneratedFoodIconPayload? {
         guard let image = UIImage(data: icon.data) else { return nil }
         guard let resized = resizedFoodIconImage(from: image, opaque: true, fillColor: .white) else {
             return nil
@@ -2452,10 +2498,10 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         guard let data = resized.jpegData(compressionQuality: foodIconStoredJPEGQuality) else {
             return nil
         }
-        return GeneratedFoodIconImage(data: data, mimeType: foodIconStoredMimeType)
+        return GeminiGeneratedFoodIconPayload(data: data, mimeType: foodIconStoredMimeType)
     }
 
-    private static func pixelPassedTransparentFoodIconImage(from icon: GeneratedFoodIconImage) -> GeneratedFoodIconImage? {
+    private static func pixelPassedTransparentFoodIconImage(from icon: GeminiGeneratedFoodIconPayload) -> GeminiGeneratedFoodIconPayload? {
         guard let image = UIImage(data: icon.data),
               let resized = resizedFoodIconImage(from: image, opaque: false, fillColor: nil),
               let cgImage = resized.cgImage else {
@@ -2567,7 +2613,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         print("🧪 Food icon Pixel Pass backgroundPixels=\(queue.count)/\(width * height) softShadowPixels=\(softShadowPixelCount) bytes=\(icon.data.count)->\(pngData.count)")
         #endif
 
-        return GeneratedFoodIconImage(data: pngData, mimeType: foodIconTransparentMimeType)
+        return GeminiGeneratedFoodIconPayload(data: pngData, mimeType: foodIconTransparentMimeType)
     }
 
     private static func resizedFoodIconImage(from image: UIImage, opaque: Bool, fillColor: UIColor?) -> UIImage? {
@@ -2631,9 +2677,9 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return nil
     }
 
-    nonisolated private static func extractGeneratedFoodIconImage(from data: Data) -> GeneratedFoodIconImage? {
+    nonisolated static func extractGeneratedFoodIconImage(from data: Data) -> GeminiGeneratedFoodIconPayload? {
         if let mimeType = imageMimeType(for: data, declaredMimeType: nil) {
-            return GeneratedFoodIconImage(data: data, mimeType: mimeType)
+            return GeminiGeneratedFoodIconPayload(data: data, mimeType: mimeType)
         }
         guard let object = try? JSONSerialization.jsonObject(with: data) else { return nil }
         return findGeneratedFoodIconImage(in: object, inheritedMimeType: nil)
@@ -2642,7 +2688,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     nonisolated private static func findGeneratedFoodIconImage(
         in object: Any,
         inheritedMimeType: String?
-    ) -> GeneratedFoodIconImage? {
+    ) -> GeminiGeneratedFoodIconPayload? {
         if let dictionary = object as? [String: Any] {
             let declaredMimeType = firstString(
                 in: dictionary,
@@ -2694,7 +2740,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     nonisolated private static func decodeImageBase64(
         _ raw: String,
         declaredMimeType: String?
-    ) -> GeneratedFoodIconImage? {
+    ) -> GeminiGeneratedFoodIconPayload? {
         let base64: String
         if let commaIndex = raw.firstIndex(of: ",") {
             base64 = String(raw[raw.index(after: commaIndex)...])
@@ -2707,7 +2753,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
               let mimeType = imageMimeType(for: decoded, declaredMimeType: declaredMimeType) else {
             return nil
         }
-        return GeneratedFoodIconImage(data: decoded, mimeType: mimeType)
+        return GeminiGeneratedFoodIconPayload(data: decoded, mimeType: mimeType)
     }
 
     nonisolated private static func imageMimeType(for data: Data, declaredMimeType: String?) -> String? {
@@ -3087,7 +3133,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         guard (200..<300).contains(httpResponse.statusCode) else {
             let data = try await collectData(from: bytes)
             attempt.rawErrorBody = String(data: data, encoding: .utf8)
-            let apiResponse = try? JSONDecoder().decode(GeminiAPIErrorEnvelope.self, from: data)
+            let apiResponse = try? JSONDecoder().decode(GeminiScanAPIErrorEnvelope.self, from: data)
             let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
             #if DEBUG
             if let rawErrorBody = attempt.rawErrorBody {
@@ -3467,7 +3513,10 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
         if let apiError = event.error {
             attempt.parseStage = "interaction_stream_error"
-            throw ScanError.serverError(apiError.code ?? 500, apiError.message ?? "Unknown Gemini error")
+            throw ScanError.serverError(
+                Int(apiError.code ?? "") ?? 500,
+                apiError.message ?? "Unknown Gemini error"
+            )
         }
 
         if let stepType = event.step?.type, stepType.contains("google_search") {
