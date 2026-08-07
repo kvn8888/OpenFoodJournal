@@ -239,7 +239,14 @@ Sources are attempted in order, and `releaseNotes.source` in the manifest record
 | 3 | `github-models` | Legacy path; GitHub Models is being retired and now answers with a brownout error, so expect this tier to fail. |
 | 4 | `deterministic-git-history` | No generator succeeded; notes are cleaned commit subjects. |
 
-The router performs no cross-provider routing on its own: no provider-level fallbacks are configured and `max_retries` is `0` on every provider, so one upstream outage would fail the call outright. It does honour a per-request fallback chain, so the request carries one, taken from `releaseNotesFallbackModels` in `ci/release-config.json` and overridable with the comma-separated `RELEASE_NOTES_FALLBACK_MODELS`. Entries are fully qualified `provider/model` strings, tried in order when the primary errors, and the chain deliberately spans providers—an OpenAI outage is only survivable if the next entry is not also OpenAI. `releaseNotes.model` in the manifest records the model that actually answered, which is not necessarily the one that was requested.
+Model names are deliberately **unprefixed** (`gpt-5.6-sol`, not `openai/gpt-5.6-sol`). An unprefixed name lets the virtual key select among every provider whose keys serve that model, which is the layer where the router's weighting and key rotation apply. Prefixing pins the request to one upstream and bypasses that selection entirely, so the contract test rejects any `provider/model` name in the config.
+
+Provider selection cannot substitute a *different* model, so it does not help if a model is withdrawn or unavailable everywhere. The per-request chain in `releaseNotesFallbackModels` covers that case, overridable with the comma-separated `RELEASE_NOTES_FALLBACK_MODELS`, tried in order when the primary errors. `releaseNotes.model` in the manifest records the model that actually answered, which is not necessarily the one requested.
+
+Two router-side settings limit how much of this actually protects a release, and neither lives in this repo:
+
+- Every provider has `max_retries: 0`, so there is no retry budget for transient 429s, 5xx responses, or timeouts before the router gives up on a provider.
+- Every provider and key weight is `null`, so traffic is not distributed—observed requests all land on the same provider.
 
 Because the router is a single self-hosted machine, none of its failure modes fail the release—an unreachable host, a rejected key, or a reply that fails validation each fall through to the next tier. A run that lands on `deterministic-git-history` still ships, but the notes will read like a changelog; treat that source in the approval summary as a signal to write the copy by hand.
 

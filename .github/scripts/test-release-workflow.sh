@@ -124,9 +124,11 @@ if ! jq -e --arg model "${notes_model}" \
   echo "The primary release-note model must not appear in its own fallback chain." >&2
   exit 1
 fi
-if ! jq -e '.releaseNotesFallbackModels | all(test("^[^/]+/.+$"))' \
+# Models must stay unprefixed so the router keeps choosing the provider. A
+# "provider/model" name silently pins the release to one upstream.
+if jq -e '[.releaseNotesModel] + .releaseNotesFallbackModels | any(test("/"))' \
   ci/release-config.json >/dev/null; then
-  echo "Release-note fallbacks must be fully qualified as provider/model." >&2
+  echo "Release-note models must be unprefixed so the router selects the provider." >&2
   exit 1
 fi
 

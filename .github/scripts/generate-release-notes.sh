@@ -72,11 +72,14 @@ elif [[ -n "${model}" && "${model}" != "null" ]] &&
   request_path="${RUNNER_TEMP:-/tmp}/release-notes-request.json"
   response_path="${RUNNER_TEMP:-/tmp}/release-notes-response.json"
 
-  # The router does no automatic cross-provider routing on its own: no
-  # provider-level fallbacks are configured and max_retries is 0, so a single
-  # upstream outage would otherwise fail the whole call. Bifrost does honour a
-  # per-request fallback chain, so send one. Entries are "provider/model" and
-  # are tried in order when the primary errors.
+  # Models are named without a provider prefix on purpose. An unprefixed name
+  # lets the router pick among the providers whose keys serve that model, which
+  # is where its weighting and key rotation apply; pinning "openai/gpt-5.6-sol"
+  # would override that selection and tie the release to one provider.
+  #
+  # That selection cannot substitute a different model, though, so it does not
+  # help when a model is withdrawn or unavailable everywhere. The explicit chain
+  # below covers that case: entries are tried in order when the primary errors.
   fallbacks_json="$(
     jq -c '.releaseNotesFallbackModels // []' ci/release-config.json
   )"
