@@ -72,11 +72,32 @@ elif [[ -n "${model}" && "${model}" != "null" ]] &&
   request_path="${RUNNER_TEMP:-/tmp}/release-notes-request.json"
   response_path="${RUNNER_TEMP:-/tmp}/release-notes-response.json"
 
+  # The router does no automatic cross-provider routing on its own: no
+  # provider-level fallbacks are configured and max_retries is 0, so a single
+  # upstream outage would otherwise fail the whole call. Bifrost does honour a
+  # per-request fallback chain, so send one. Entries are "provider/model" and
+  # are tried in order when the primary errors.
+  fallbacks_json="$(
+    jq -c '.releaseNotesFallbackModels // []' ci/release-config.json
+  )"
+  if [[ -n "${RELEASE_NOTES_FALLBACK_MODELS:-}" ]]; then
+    # Comma-separated override, so the chain can be changed without a commit.
+    fallbacks_json="$(
+      jq -Rc 'split(",") | map(gsub("^\\s+|\\s+$"; "")) | map(select(length > 0))' \
+        <<< "${RELEASE_NOTES_FALLBACK_MODELS}"
+    )"
+  fi
+  # A model must never list itself as its own fallback.
+  fallbacks_json="$(
+    jq -c --arg model "${model}" 'map(select(. != $model))' <<< "${fallbacks_json}"
+  )"
+
   jq -n \
     --arg model "${model}" \
     --arg system "$(cat "${system_prompt_path}")" \
     --arg user "$(render_prompt)" \
     --argjson maxTokens "${max_tokens}" \
+    --argjson fallbacks "${fallbacks_json}" \
     '{
       model: $model,
       messages: [
@@ -85,7 +106,9 @@ elif [[ -n "${model}" && "${model}" != "null" ]] &&
       ],
       max_tokens: $maxTokens,
       temperature: 0.2
-    }' > "${request_path}"
+    }
+    + (if ($fallbacks | length) > 0 then {fallbacks: $fallbacks} else {} end)' \
+    > "${request_path}"
 
   # Preferred provider: the self-hosted Bifrost router. It is a single machine,
   # so every failure below has to fall through rather than fail the release.
@@ -104,18 +127,24 @@ elif [[ -n "${model}" && "${model}" != "null" ]] &&
 
     if bash .github/scripts/validate-release-notes.sh "${output_notes_path}" "${locale}" >/dev/null; then
       notes_source="bifrost"
-      notes_model="${model}"
+      # A fallback may have served this, so report what actually answered
+      # rather than what was asked for.
+      notes_model="$(jq -r '.model // empty' "${response_path}")"
+      notes_model="${notes_model:-${model}}"
     else
       echo "Bifrost release-note generation was unusable; trying GitHub Models." >&2
     fi
   fi
 
   if [[ -z "${notes_source}" && -n "${GH_TOKEN:-}" ]]; then
-    # GitHub Models names models the same way (provider/model), so the request
-    # body is reusable as-is.
+    # GitHub Models names models the same way (provider/model), but has no
+    # concept of a fallback chain and rejects the unknown field.
+    github_request_path="${RUNNER_TEMP:-/tmp}/release-notes-request-github.json"
+    jq 'del(.fallbacks)' "${request_path}" > "${github_request_path}"
+
     call_chat_completions \
       "https://models.github.ai/inference/chat/completions" \
-      "${request_path}" \
+      "${github_request_path}" \
       "${response_path}" \
       -H "Accept: application/vnd.github+json" \
       -H "Authorization: Bearer ${GH_TOKEN}" \
