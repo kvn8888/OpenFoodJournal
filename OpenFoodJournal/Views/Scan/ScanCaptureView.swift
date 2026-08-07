@@ -650,8 +650,9 @@ final class CameraController: NSObject, ObservableObject {
     /// https://developer.apple.com/documentation/avfoundation/avcapturesystemzoomslider
     private func configureZoom(for device: AVCaptureDevice) {
         let availableRange = Double(device.minAvailableVideoZoomFactor)...Double(device.maxAvailableVideoZoomFactor)
-        let systemRange = device.activeFormat.systemRecommendedVideoZoomRange
-        let recommendedRange = Double(systemRange.lowerBound)...Double(systemRange.upperBound)
+        let recommendedRange = device.activeFormat.systemRecommendedVideoZoomRange
+            .map { Double($0.lowerBound)...Double($0.upperBound) }
+            ?? availableRange
         let lowerBound = min(
             max(recommendedRange.lowerBound, availableRange.lowerBound),
             availableRange.upperBound
