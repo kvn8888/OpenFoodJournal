@@ -15,45 +15,36 @@ output_notes_path="$5"
 output_metadata_path="$6"
 model="$7"
 override_path="metadata/releases/${version}/${locale}/whats-new.txt"
+system_prompt_path="ci/prompts/whats-new-system.txt"
+user_prompt_path="ci/prompts/whats-new-user.txt"
 notes_source=""
+notes_model=""
 
 mkdir -p "$(dirname "${output_notes_path}")" "$(dirname "${output_metadata_path}")"
 
-if [[ -f "${override_path}" ]]; then
-  cp "${override_path}" "${output_notes_path}"
-  notes_source="repository-override"
-elif [[ -n "${GH_TOKEN:-}" && -n "${model}" && "${model}" != "null" ]]; then
-  prompt="$(
-    jq -Rs \
-      --arg version "${version}" \
-      --arg changes "$(cat "${what_to_test_path}")" \
-      '
-        "Write concise public App Store What'\''s New notes for OpenFoodJournal version "
-        + $version
-        + ". Use only the supplied change evidence. Prefer 2 to 5 short user-facing bullets. "
-        + "Do not mention commits, hashes, branches, CI, internal testing, implementation details, "
-        + "future work, or claims not supported by the evidence. Return only the final notes, "
-        + "with no heading or code fence.\n\nChange evidence:\n"
-        + $changes
-      ' /dev/null
-  )"
-  request_path="${RUNNER_TEMP:-/tmp}/release-notes-request.json"
-  response_path="${RUNNER_TEMP:-/tmp}/release-notes-response.json"
-  jq -n \
-    --arg model "${model}" \
-    --arg prompt "${prompt}" \
-    '{
-      model: $model,
-      messages: [
-        {
-          role: "system",
-          content: "You are a careful App Store release editor. Accuracy and plain language matter more than marketing."
-        },
-        {role: "user", content: $prompt}
-      ],
-      max_tokens: 700,
-      temperature: 0.2
-    }' > "${request_path}"
+# Reasoning models bill hidden reasoning tokens against this cap. A budget that
+# only covers the visible bullets returns an empty message and silently demotes
+# the run to deterministic notes, so leave headroom for the reasoning pass.
+max_tokens=2500
+
+render_prompt() {
+  sed -e "s/{{VERSION}}/${version}/g" "${user_prompt_path}" |
+    awk -v evidence="${what_to_test_path}" '
+      $0 == "{{EVIDENCE}}" {
+        while ((getline line < evidence) > 0) print line
+        next
+      }
+      { print }
+    '
+}
+
+# Emits the assistant text on success, nothing on failure. Callers decide
+# whether an empty result is fatal.
+call_chat_completions() {
+  local endpoint="$1"
+  local request_path="$2"
+  local response_path="$3"
+  shift 3
 
   if curl \
     --silent \
@@ -62,23 +53,81 @@ elif [[ -n "${GH_TOKEN:-}" && -n "${model}" && "${model}" != "null" ]]; then
     --retry 2 \
     --retry-all-errors \
     --connect-timeout 10 \
-    --max-time 45 \
+    --max-time 90 \
     -X POST \
-    -H "Accept: application/vnd.github+json" \
-    -H "Authorization: Bearer ${GH_TOKEN}" \
-    -H "X-GitHub-Api-Version: 2026-03-10" \
     -H "Content-Type: application/json" \
-    https://models.github.ai/inference/chat/completions \
+    "$@" \
+    "${endpoint}" \
     --data-binary "@${request_path}" \
     > "${response_path}"; then
-    jq -r '.choices[0].message.content // empty' "${response_path}" > "${output_notes_path}"
+    jq -r '.choices[0].message.content // empty' "${response_path}"
+  fi
+}
+
+if [[ -f "${override_path}" ]]; then
+  cp "${override_path}" "${output_notes_path}"
+  notes_source="repository-override"
+elif [[ -n "${model}" && "${model}" != "null" ]] &&
+  [[ -f "${system_prompt_path}" && -f "${user_prompt_path}" ]]; then
+  request_path="${RUNNER_TEMP:-/tmp}/release-notes-request.json"
+  response_path="${RUNNER_TEMP:-/tmp}/release-notes-response.json"
+
+  jq -n \
+    --arg model "${model}" \
+    --arg system "$(cat "${system_prompt_path}")" \
+    --arg user "$(render_prompt)" \
+    --argjson maxTokens "${max_tokens}" \
+    '{
+      model: $model,
+      messages: [
+        {role: "system", content: $system},
+        {role: "user", content: $user}
+      ],
+      max_tokens: $maxTokens,
+      temperature: 0.2
+    }' > "${request_path}"
+
+  # Preferred provider: the self-hosted Bifrost router. It is a single machine,
+  # so every failure below has to fall through rather than fail the release.
+  if [[ -n "${BIFROST_BASE_URL:-}" && -n "${BIFROST_VIRTUAL_KEY:-}" ]]; then
+    bifrost_args=(-H "x-bf-vk: ${BIFROST_VIRTUAL_KEY}")
+    if [[ -n "${BIFROST_AUTHORIZATION:-}" ]]; then
+      bifrost_args+=(-H "Authorization: ${BIFROST_AUTHORIZATION}")
+    fi
+
+    call_chat_completions \
+      "${BIFROST_BASE_URL%/}/chat/completions" \
+      "${request_path}" \
+      "${response_path}" \
+      "${bifrost_args[@]}" \
+      > "${output_notes_path}"
+
+    if bash .github/scripts/validate-release-notes.sh "${output_notes_path}" "${locale}" >/dev/null; then
+      notes_source="bifrost"
+      notes_model="${model}"
+    else
+      echo "Bifrost release-note generation was unusable; trying GitHub Models." >&2
+    fi
+  fi
+
+  if [[ -z "${notes_source}" && -n "${GH_TOKEN:-}" ]]; then
+    # GitHub Models names models the same way (provider/model), so the request
+    # body is reusable as-is.
+    call_chat_completions \
+      "https://models.github.ai/inference/chat/completions" \
+      "${request_path}" \
+      "${response_path}" \
+      -H "Accept: application/vnd.github+json" \
+      -H "Authorization: Bearer ${GH_TOKEN}" \
+      -H "X-GitHub-Api-Version: 2026-03-10" \
+      > "${output_notes_path}"
+
     if bash .github/scripts/validate-release-notes.sh "${output_notes_path}" "${locale}" >/dev/null; then
       notes_source="github-models"
+      notes_model="${model}"
     else
-      notes_source=""
+      echo "GitHub Models release-note generation was unavailable; using deterministic notes." >&2
     fi
-  else
-    echo "GitHub Models release-note generation was unavailable; using deterministic notes." >&2
   fi
 fi
 
@@ -96,6 +145,7 @@ if [[ -z "${notes_source}" ]]; then
       awk '{ print "• " $0 }'
   } > "${output_notes_path}"
   notes_source="deterministic-git-history"
+  notes_model=""
 fi
 
 bash .github/scripts/validate-release-notes.sh "${output_notes_path}" "${locale}"
@@ -103,7 +153,7 @@ bash .github/scripts/validate-release-notes.sh "${output_notes_path}" "${locale}
 jq -n \
   --arg buildNumber "${build_number}" \
   --arg generatedAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-  --arg model "$([[ "${notes_source}" == "github-models" ]] && printf '%s' "${model}")" \
+  --arg model "${notes_model}" \
   --arg source "${notes_source}" \
   --arg version "${version}" \
   '{

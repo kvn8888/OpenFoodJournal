@@ -117,8 +117,8 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
   "whatsNew": "Public, version-specific release notes",
   "whatsNewSHA256": "SHA-256 of the attached notes file",
   "releaseNotes": {
-    "source": "github-models",
-    "model": "openai/gpt-4.1",
+    "source": "bifrost",
+    "model": "openai/gpt-5.6-sol",
     "requiresHumanApproval": true
   },
   "version": "1.4",
@@ -228,7 +228,22 @@ The legacy `main` branch remains historical and is not part of the release train
 
 ## AI release assistant boundary
 
-The TestFlight workflow currently uses GitHub Models `openai/gpt-4.1` through the job’s short-lived `GITHUB_TOKEN` and `models: read` permission. It sends only bounded commit-derived change evidence—never source code, app data, Apple credentials, signing assets, or AI-provider keys. `RELEASE_NOTES_MODEL` may override the versioned default. A reviewed file at `metadata/releases/<version>/<locale>/whats-new.txt` takes precedence when exact copy is required.
+The TestFlight workflow drafts release notes through the self-hosted Bifrost router at `vars.BIFROST_BASE_URL`, authenticated with the `BIFROST_VIRTUAL_KEY` and `BIFROST_AUTHORIZATION` secrets. It sends only bounded commit-derived change evidence—never source code, app data, Apple credentials, signing assets, or AI-provider keys. `RELEASE_NOTES_MODEL` may override the versioned default in `ci/release-config.json`. A reviewed file at `metadata/releases/<version>/<locale>/whats-new.txt` takes precedence when exact copy is required.
+
+Sources are attempted in order, and `releaseNotes.source` in the manifest records which one produced the text:
+
+| Order | `source` | Condition |
+| --- | --- | --- |
+| 1 | `repository-override` | A committed `whats-new.txt` exists for the version and locale. |
+| 2 | `bifrost` | `BIFROST_BASE_URL` and `BIFROST_VIRTUAL_KEY` are set and the reply passes validation. |
+| 3 | `github-models` | Legacy path; GitHub Models is being retired and now answers with a brownout error, so expect this tier to fail. |
+| 4 | `deterministic-git-history` | No generator succeeded; notes are cleaned commit subjects. |
+
+Because the router is a single self-hosted machine, none of its failure modes fail the release—an unreachable host, a rejected key, or a reply that fails validation each fall through to the next tier. A run that lands on `deterministic-git-history` still ships, but the notes will read like a changelog; treat that source in the approval summary as a signal to write the copy by hand.
+
+The prompt is versioned at `ci/prompts/whats-new-system.txt` and `ci/prompts/whats-new-user.txt` rather than embedded in the script, so wording changes are reviewable. `{{VERSION}}` and `{{EVIDENCE}}` are substituted at run time, and `{{EVIDENCE}}` must remain alone on its own line. The prompt deliberately instructs the model to discard internal changes (toolchain, CI, tests, refactors, debug-only builds, credential handling) rather than paraphrase them, to avoid naming gestures or screens the evidence does not name, and to translate developer vocabulary into user-visible terms.
+
+`max_tokens` is set well above the visible output length on purpose: reasoning models bill hidden reasoning tokens against the same cap, and too small a budget returns an empty message that silently demotes the run to deterministic notes.
 
 AI can safely prepare a release proposal containing:
 

@@ -72,7 +72,8 @@ what_to_test="${fixture_root}/what-to-test.txt"
 generated_notes="${fixture_root}/generated-notes.txt"
 generated_metadata="${fixture_root}/generated-metadata.json"
 printf '%s\n' '- fix: repair dietary-energy reconciliation' > "${what_to_test}"
-env -u GH_TOKEN RUNNER_TEMP="${fixture_root}" \
+env -u GH_TOKEN -u BIFROST_BASE_URL -u BIFROST_VIRTUAL_KEY -u BIFROST_AUTHORIZATION \
+  RUNNER_TEMP="${fixture_root}" \
   bash .github/scripts/generate-release-notes.sh \
   1.4 \
   11 \
@@ -80,7 +81,7 @@ env -u GH_TOKEN RUNNER_TEMP="${fixture_root}" \
   "${what_to_test}" \
   "${generated_notes}" \
   "${generated_metadata}" \
-  openai/gpt-4.1 >/dev/null
+  openai/gpt-5.6-sol >/dev/null
 grep -q 'repair dietary-energy reconciliation' "${generated_notes}"
 if grep -q 'fix:' "${generated_notes}"; then
   echo "Deterministic public notes leaked a conventional-commit prefix." >&2
@@ -88,6 +89,25 @@ if grep -q 'fix:' "${generated_notes}"; then
 fi
 test "$(jq -r '.source' "${generated_metadata}")" = "deterministic-git-history"
 test "$(jq -r '.requiresHumanApproval' "${generated_metadata}")" = "true"
+
+# The prompt lives outside the script; a rename or a lost placeholder would
+# otherwise only surface as silently degraded notes during a real release.
+for prompt_file in ci/prompts/whats-new-system.txt ci/prompts/whats-new-user.txt; do
+  if [[ ! -s "${prompt_file}" ]]; then
+    echo "Missing or empty release-note prompt: ${prompt_file}" >&2
+    exit 1
+  fi
+done
+for placeholder in '{{VERSION}}' '{{EVIDENCE}}'; do
+  if ! grep -qF "${placeholder}" ci/prompts/whats-new-user.txt; then
+    echo "Release-note prompt lost the ${placeholder} placeholder." >&2
+    exit 1
+  fi
+done
+if ! grep -qE '^\{\{EVIDENCE\}\}$' ci/prompts/whats-new-user.txt; then
+  echo "{{EVIDENCE}} must sit alone on its own line for substitution to work." >&2
+  exit 1
+fi
 
 promotion_repo="${fixture_root}/promotion-repo"
 mkdir -p \
