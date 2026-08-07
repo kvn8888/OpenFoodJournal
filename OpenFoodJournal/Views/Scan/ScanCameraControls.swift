@@ -97,11 +97,14 @@ struct ScanCameraControls: View {
     }
 
     private var bottomControls: some View {
-        GlassEffectContainer(spacing: OFJSpace.s12) {
-            VStack(spacing: OFJSpace.s12) {
-                zoomControl
-                modeSelector
-                captureBar
+        VStack(spacing: OFJSpace.s12) {
+            zoomControl
+
+            GlassEffectContainer(spacing: OFJSpace.s12) {
+                VStack(spacing: OFJSpace.s12) {
+                    modeSelector
+                    captureBar
+                }
             }
         }
         .padding(.horizontal, OFJSpace.s16)
@@ -139,10 +142,9 @@ struct ScanCameraControls: View {
             maxWidth: OFJLayout.cameraZoomControlWidth,
             minHeight: OFJLayout.cameraZoomControlHeight
         )
-        .glassEffect(
-            .regular.tint(.black.opacity(0.42)).interactive(),
-            in: .capsule
-        )
+        // Keep zoom visually native. Wrapping Slider in a custom glass capsule
+        // makes it read like the discrete zoom pills this control replaced.
+        // The camera's bottom gradient already provides the needed contrast.
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Camera zoom")
         .accessibilityValue(zoomConfiguration.displayLabel(for: zoomFactor))
