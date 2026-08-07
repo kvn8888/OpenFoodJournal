@@ -130,7 +130,6 @@ struct ScanCameraControls: View {
             } maximumValueLabel: {
                 Image(systemName: "plus.magnifyingglass")
             }
-            .sliderNeutralValue(zoomConfiguration.neutralFactor)
             .tint(.white)
             .disabled(!zoomConfiguration.isAdjustable)
         }
