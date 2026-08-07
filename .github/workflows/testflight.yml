@@ -176,6 +176,9 @@ jobs:
         id: notes
         env:
           RELEASE_NOTES_MODEL: ${{ vars.RELEASE_NOTES_MODEL }}
+          BIFROST_BASE_URL: ${{ vars.BIFROST_BASE_URL }}
+          BIFROST_VIRTUAL_KEY: ${{ secrets.BIFROST_VIRTUAL_KEY }}
+          BIFROST_AUTHORIZATION: ${{ secrets.BIFROST_AUTHORIZATION }}
         run: |
           model="${RELEASE_NOTES_MODEL:-$(jq -r '.releaseNotesModel' ci/release-config.json)}"
           bash .github/scripts/generate-release-notes.sh \

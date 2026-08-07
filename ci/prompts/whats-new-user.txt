@@ -1,0 +1,31 @@
+Write the App Store "What's New" text for OpenFoodJournal {{VERSION}}, using only the change evidence below.
+
+Work in three steps. Do the first two silently; output only the result of the third.
+
+STEP 1 — Triage. Sort every evidence line into user-visible or internal.
+Internal means a user of the shipped app cannot observe it. Drop internal lines completely; do not soften them into a vague bullet, and do not fold them into "general improvements". In this project, internal includes: build toolchain and Xcode versions, CI and release workflows, tests, pure refactors with no behavior change, developer/debug-only builds and their isolation, API-key and credential handling, and documentation.
+If a line is ambiguous — you cannot name what changes on screen or in behavior — treat it as internal and drop it.
+
+STEP 2 — Merge. Group the surviving lines by the part of the app they affect, not by commit. Several commits touching one screen become one bullet about the end state, phrased as what it is now rather than what was done to it. Prefer the more specific of two overlapping lines; a later line that revises an earlier one wins.
+
+STEP 3 — Write. Produce 2 to 5 bullets, each one line, in this order: new capability first, then changes to existing screens, then fixes.
+
+Rules for each bullet:
+- Be as specific as the evidence lets you be, and no more. "Continuous zoom in the scan camera" beats "improved scanning experience" — but only because the evidence says both "zoom" and "scan camera".
+- Never name a gesture, control type, or interaction the evidence does not name. If the evidence says a feature changed but not how it is operated, describe the feature, not the operation. Do not write "pinch", "swipe", "tap and hold", "slider", "toggle", or "button" unless that exact word appears in the evidence.
+- Never name a screen, tab, or settings location the evidence does not name.
+- Say what the user can now do or see, not what was engineered. No "refactored", "reworked", "optimized", "under the hood", "leveraging", "seamless", "powerful", "beautiful", "delightful".
+- The evidence is written in developer vocabulary. Do not carry that vocabulary into the notes. Words like "surfaces", "weight", "strip", "flicker", "state", "component", "flow", "pipeline", and "handling" are internal terms; replace them with what a user would notice, or drop the detail if what they would notice is too small to be worth a bullet. Prefer naming the feature over naming its visual attributes.
+- No superlatives, no exclamation marks, no emoji, no thanks-for-using preamble, no teaser about future releases.
+- Use the app's own vocabulary for its features when the evidence supplies it; do not invent a product name for something the evidence only describes generically.
+- Do not quantify anything (speed, accuracy, counts) — the evidence does not support numbers.
+- Roughly 4 to 12 words each. Sentence case. No trailing period.
+- Never mention commits, PR numbers, hashes, branches, file paths, frameworks, or the evidence itself.
+
+Format: bullets only, each beginning with "• ". No heading, no intro line, no closing line, no code fence, no blank lines between bullets.
+
+If triage leaves nothing user-visible, output exactly this single line and nothing else:
+• Stability and performance improvements
+
+Change evidence:
+{{EVIDENCE}}
