@@ -109,6 +109,27 @@ if ! grep -qE '^\{\{EVIDENCE\}\}$' ci/prompts/whats-new-user.txt; then
   exit 1
 fi
 
+# The router applies no cross-provider routing of its own, so the configured
+# fallback chain is the only thing standing between one provider outage and
+# changelog-style release notes.
+notes_model="$(jq -r '.releaseNotesModel' ci/release-config.json)"
+if ! jq -e '.releaseNotesFallbackModels | type == "array" and length > 0' \
+  ci/release-config.json >/dev/null; then
+  echo "ci/release-config.json must list at least one release-note fallback model." >&2
+  exit 1
+fi
+if ! jq -e --arg model "${notes_model}" \
+  '.releaseNotesFallbackModels | all(. != $model)' \
+  ci/release-config.json >/dev/null; then
+  echo "The primary release-note model must not appear in its own fallback chain." >&2
+  exit 1
+fi
+if ! jq -e '.releaseNotesFallbackModels | all(test("^[^/]+/.+$"))' \
+  ci/release-config.json >/dev/null; then
+  echo "Release-note fallbacks must be fully qualified as provider/model." >&2
+  exit 1
+fi
+
 promotion_repo="${fixture_root}/promotion-repo"
 mkdir -p \
   "${promotion_repo}/.github/scripts" \

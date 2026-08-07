@@ -11,6 +11,10 @@
   "requiredXcodeBuild": "17F113",
   "ascVersion": "3.1.1",
   "releaseNotesModel": "openai/gpt-5.6-sol",
+  "releaseNotesFallbackModels": [
+    "azure/gpt-5.6-sol",
+    "openai/gpt-5.6-terra"
+  ],
   "ascSHA256": {
     "arm64": "47d9be058359ab29c4f562361abfed710b7f24acdaa79c78777bc6e25e118fef",
     "x86_64": "8fbb62de183d62828bf94a433d446bcc5dfd3b26f51de9d4105200df9aacd806"
