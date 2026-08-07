@@ -149,15 +149,15 @@ struct ScanCaptureView: View {
     private var cameraOverlay: some View {
         ScanCameraControls(
             mode: $mode,
-            zoomLevel: camera.zoomLevel,
-            availableZoomLevels: camera.availableZoomLevels,
+            zoomFactor: camera.zoomFactor,
+            zoomConfiguration: camera.zoomConfiguration,
             torchOn: camera.torchOn,
             torchAvailable: camera.isTorchAvailable,
             canRetry: scanService.lastSubmittedScan != nil,
             isBusy: scanService.isScanning,
             onExit: { dismiss() },
             onRetry: retryLastScan,
-            onZoom: camera.setZoom,
+            onZoom: camera.setZoomFactor,
             onTorch: camera.toggleTorch,
             onCapture: { Task { await capture() } },
             onLibrary: { showPhotoPicker = true }
@@ -449,27 +449,45 @@ private struct CapturedScanPhoto: Identifiable {
     let image: UIImage
 }
 
-enum CameraZoomLevel: Double, CaseIterable, Identifiable {
-    case half = 0.5
-    case one = 1.0
-    case two = 2.0
+/// Maps AVFoundation's device zoom values to the factors people recognize from
+/// Apple's camera interfaces. Virtual cameras often report 1.0 while showing
+/// 0.5x; `displayVideoZoomFactorMultiplier` is the system-provided conversion.
+struct CameraZoomConfiguration: Equatable, Sendable {
+    static let fallback = CameraZoomConfiguration(
+        range: 1.0...2.0,
+        displayMultiplier: 1.0
+    )
 
-    var id: Double { rawValue }
+    let range: ClosedRange<Double>
+    let displayMultiplier: Double
 
-    var label: String {
-        switch self {
-        case .half: "0.5x"
-        case .one: "1x"
-        case .two: "2x"
-        }
+    init(range: ClosedRange<Double>, displayMultiplier: Double) {
+        self.range = range
+        self.displayMultiplier = max(displayMultiplier, 0.01)
     }
 
-    var accessibilityLabel: String {
-        switch self {
-        case .half: "Set camera zoom to 0.5 times"
-        case .one: "Set camera zoom to 1 times"
-        case .two: "Set camera zoom to 2 times"
-        }
+    var isAdjustable: Bool {
+        range.upperBound - range.lowerBound > 0.001
+    }
+
+    var neutralFactor: Double {
+        clampedFactor(1.0 / displayMultiplier)
+    }
+
+    func clampedFactor(_ factor: Double) -> Double {
+        min(max(factor, range.lowerBound), range.upperBound)
+    }
+
+    func displayFactor(for factor: Double) -> Double {
+        clampedFactor(factor) * displayMultiplier
+    }
+
+    func displayLabel(for factor: Double) -> String {
+        let displayed = displayFactor(for: factor)
+        let precision = displayed.rounded() == displayed ? 0 : 1
+        return displayed.formatted(
+            .number.precision(.fractionLength(precision))
+        ) + "×"
     }
 }
 
@@ -510,8 +528,8 @@ final class CameraController: NSObject, ObservableObject {
     @Published var isReady = false
     @Published var torchOn = false
     @Published var permissionDenied = false
-    @Published var zoomLevel: CameraZoomLevel = .one
-    @Published var availableZoomLevels: [CameraZoomLevel] = [.one]
+    @Published private(set) var zoomFactor = 1.0
+    @Published private(set) var zoomConfiguration = CameraZoomConfiguration.fallback
     @Published private(set) var isTorchAvailable = false
 
     let session = AVCaptureSession()
@@ -537,8 +555,7 @@ final class CameraController: NSObject, ObservableObject {
         if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
         session.commitConfiguration()
 
-        refreshAvailableZoomLevels()
-        guard configureVideoInput(for: zoomLevel) else { return }
+        guard configureVideoInput() else { return }
 
         session.startRunning()
         isReady = true
@@ -556,11 +573,21 @@ final class CameraController: NSObject, ObservableObject {
         device.unlockForConfiguration()
     }
 
-    func setZoom(_ level: CameraZoomLevel) {
-        guard availableZoomLevels.contains(level) else { return }
-        zoomLevel = level
-        guard isReady else { return }
-        _ = configureVideoInput(for: level)
+    func setZoomFactor(_ factor: Double) {
+        let clampedFactor = zoomConfiguration.clampedFactor(factor)
+        guard let activeDevice else {
+            zoomFactor = clampedFactor
+            return
+        }
+
+        do {
+            try activeDevice.lockForConfiguration()
+            activeDevice.videoZoomFactor = CGFloat(clampedFactor)
+            activeDevice.unlockForConfiguration()
+            zoomFactor = Double(activeDevice.videoZoomFactor)
+        } catch {
+            zoomFactor = Double(activeDevice.videoZoomFactor)
+        }
     }
 
     func capturePhoto() async -> UIImage? {
@@ -571,19 +598,8 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
-    private func refreshAvailableZoomLevels() {
-        var levels: [CameraZoomLevel] = []
-        for level in CameraZoomLevel.allCases where device(for: level) != nil {
-            levels.append(level)
-        }
-        availableZoomLevels = levels.isEmpty ? [.one] : levels
-        if !availableZoomLevels.contains(zoomLevel) {
-            zoomLevel = availableZoomLevels.contains(.one) ? .one : availableZoomLevels[0]
-        }
-    }
-
-    private func configureVideoInput(for level: CameraZoomLevel) -> Bool {
-        guard let device = device(for: level),
+    private func configureVideoInput() -> Bool {
+        guard let device = preferredBackCamera(),
               let input = try? AVCaptureDeviceInput(device: device)
         else { return false }
 
@@ -606,26 +622,55 @@ final class CameraController: NSObject, ObservableObject {
         isTorchAvailable = device.hasTorch
         session.commitConfiguration()
 
-        applyZoom(level, to: device)
+        configureZoom(for: device)
         return true
     }
 
-    private func device(for level: CameraZoomLevel) -> AVCaptureDevice? {
-        switch level {
-        case .half:
-            return AVCaptureDevice.default(.builtInUltraWideCamera, for: .video, position: .back)
-        case .one, .two:
-            return AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+    /// A virtual rear camera lets AVFoundation perform seamless constituent-lens
+    /// switching while one native slider drives a continuous zoom range.
+    private func preferredBackCamera() -> AVCaptureDevice? {
+        let preferredTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInTripleCamera,
+            .builtInDualWideCamera,
+            .builtInDualCamera,
+            .builtInWideAngleCamera,
+        ]
+
+        for type in preferredTypes {
+            if let device = AVCaptureDevice.default(type, for: .video, position: .back) {
+                return device
+            }
         }
+        return AVCaptureDevice.default(for: .video)
     }
 
-    private func applyZoom(_ level: CameraZoomLevel, to device: AVCaptureDevice) {
-        let requestedZoom: CGFloat = level == .two ? 2.0 : 1.0
-        let clampedZoom = min(max(requestedZoom, device.minAvailableVideoZoomFactor), device.maxAvailableVideoZoomFactor)
+    /// Apple uses this same recommended range for `AVCaptureSystemZoomSlider`.
+    /// That control belongs to the physical Camera Control overlay, so the
+    /// visible scan UI uses SwiftUI's native `Slider` with the identical range.
+    /// https://developer.apple.com/documentation/avfoundation/avcapturesystemzoomslider
+    private func configureZoom(for device: AVCaptureDevice) {
+        let availableRange = Double(device.minAvailableVideoZoomFactor)
+            ...Double(device.maxAvailableVideoZoomFactor)
+        let recommendedRange = device.activeFormat.systemRecommendedVideoZoomRange
+            .map { Double($0.lowerBound)...Double($0.upperBound) }
+            ?? availableRange
+        let lowerBound = min(
+            max(recommendedRange.lowerBound, availableRange.lowerBound),
+            availableRange.upperBound
+        )
+        let upperBound = max(
+            lowerBound,
+            min(recommendedRange.upperBound, availableRange.upperBound)
+        )
+        let configuration = CameraZoomConfiguration(
+            range: lowerBound...upperBound,
+            displayMultiplier: Double(device.displayVideoZoomFactorMultiplier)
+        )
+        let initialFactor = configuration.neutralFactor
 
         do {
             try device.lockForConfiguration()
-            device.videoZoomFactor = clampedZoom
+            device.videoZoomFactor = CGFloat(initialFactor)
             if torchOn {
                 if device.hasTorch {
                     device.torchMode = .on
@@ -634,8 +679,12 @@ final class CameraController: NSObject, ObservableObject {
                 }
             }
             device.unlockForConfiguration()
+            zoomConfiguration = configuration
+            zoomFactor = Double(device.videoZoomFactor)
         } catch {
             torchOn = false
+            zoomConfiguration = configuration
+            zoomFactor = configuration.clampedFactor(Double(device.videoZoomFactor))
         }
     }
 }

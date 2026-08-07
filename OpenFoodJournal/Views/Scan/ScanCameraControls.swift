@@ -36,15 +36,15 @@ struct ScanCameraModeDescriptor: Identifiable, Equatable {
 struct ScanCameraControls: View {
     @Binding var mode: ScanMode
 
-    let zoomLevel: CameraZoomLevel
-    let availableZoomLevels: [CameraZoomLevel]
+    let zoomFactor: Double
+    let zoomConfiguration: CameraZoomConfiguration
     let torchOn: Bool
     let torchAvailable: Bool
     let canRetry: Bool
     let isBusy: Bool
     let onExit: () -> Void
     let onRetry: () -> Void
-    let onZoom: (CameraZoomLevel) -> Void
+    let onZoom: (Double) -> Void
     let onTorch: () -> Void
     let onCapture: () -> Void
     let onLibrary: () -> Void
@@ -99,7 +99,7 @@ struct ScanCameraControls: View {
     private var bottomControls: some View {
         GlassEffectContainer(spacing: OFJSpace.s12) {
             VStack(spacing: OFJSpace.s12) {
-                zoomSelector
+                zoomControl
                 modeSelector
                 captureBar
             }
@@ -108,45 +108,45 @@ struct ScanCameraControls: View {
         .padding(.bottom, OFJSpace.s24)
     }
 
-    private var zoomSelector: some View {
-        HStack(spacing: OFJSpace.s4) {
-            ForEach(CameraZoomLevel.allCases) { level in
-                let isAvailable = availableZoomLevels.contains(level)
-                let isSelected = zoomLevel == level
-
-                Button {
-                    onZoom(level)
-                } label: {
-                    Text(level.label)
-                        .font(OFJType.cameraZoom)
-                        .monospacedDigit()
-                        .foregroundStyle(.white)
-                        .frame(width: OFJLayout.minimumHitTarget)
-                        .frame(height: OFJLayout.cameraZoomVisualHeight)
-                        .glassEffect(
-                            .regular
-                                .tint(
-                                    isSelected
-                                        ? .white.opacity(0.30)
-                                        : .black.opacity(0.42)
-                                )
-                                .interactive(),
-                            in: .capsule
-                        )
-                }
-                .buttonStyle(.plain)
-                .frame(
-                    minWidth: OFJLayout.minimumHitTarget,
-                    minHeight: OFJLayout.minimumHitTarget
+    private var zoomControl: some View {
+        VStack(spacing: OFJSpace.s3) {
+            Text(zoomConfiguration.displayLabel(for: zoomFactor))
+                .font(OFJType.cameraZoom)
+                .monospacedDigit()
+                .ofjNumericTextTransition(
+                    value: zoomConfiguration.displayFactor(for: zoomFactor)
                 )
-                .disabled(!isAvailable)
-                .opacity(isAvailable ? 1 : 0.35)
-                .accessibilityLabel(level.accessibilityLabel)
-                .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            Slider(
+                value: Binding(
+                    get: { zoomFactor },
+                    set: onZoom
+                ),
+                in: zoomConfiguration.range
+            ) {
+                Text("Zoom")
+            } minimumValueLabel: {
+                Image(systemName: "minus.magnifyingglass")
+            } maximumValueLabel: {
+                Image(systemName: "plus.magnifyingglass")
             }
+            .sliderNeutralValue(zoomConfiguration.neutralFactor)
+            .tint(.white)
+            .disabled(!zoomConfiguration.isAdjustable)
         }
-        .accessibilityElement(children: .contain)
+        .foregroundStyle(.white)
+        .padding(.horizontal, OFJSpace.s12)
+        .frame(
+            maxWidth: OFJLayout.cameraZoomControlWidth,
+            minHeight: OFJLayout.cameraZoomControlHeight
+        )
+        .glassEffect(
+            .regular.tint(.black.opacity(0.42)).interactive(),
+            in: .capsule
+        )
+        .accessibilityElement(children: .combine)
         .accessibilityLabel("Camera zoom")
+        .accessibilityValue(zoomConfiguration.displayLabel(for: zoomFactor))
     }
 
     private var modeSelector: some View {
@@ -326,8 +326,13 @@ struct CaptureButton: View {
 #if DEBUG
 private struct ScanCameraControlsPreview: View {
     @State private var mode = ScanMode.foodPhoto
-    @State private var zoom = CameraZoomLevel.one
+    @State private var zoom = 2.0
     @State private var torchOn = false
+
+    private let zoomConfiguration = CameraZoomConfiguration(
+        range: 1.0...10.0,
+        displayMultiplier: 0.5
+    )
 
     var body: some View {
         ZStack {
@@ -340,8 +345,8 @@ private struct ScanCameraControlsPreview: View {
 
             ScanCameraControls(
                 mode: $mode,
-                zoomLevel: zoom,
-                availableZoomLevels: CameraZoomLevel.allCases,
+                zoomFactor: zoom,
+                zoomConfiguration: zoomConfiguration,
                 torchOn: torchOn,
                 torchAvailable: true,
                 canRetry: true,

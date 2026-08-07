@@ -304,7 +304,8 @@ enum OFJLayout {
     static let cameraTopControlSize: CGFloat = 50
     static let cameraUtilityControlSize: CGFloat = 52
     static let cameraModeControlHeight: CGFloat = 72
-    static let cameraZoomVisualHeight: CGFloat = 30
+    static let cameraZoomControlWidth: CGFloat = 280
+    static let cameraZoomControlHeight: CGFloat = 58
     static let cameraShutterSize: CGFloat = 78
     static let journalBottomClearance: CGFloat = 100
     static let emptyStateTopPadding = OFJSpace.s40

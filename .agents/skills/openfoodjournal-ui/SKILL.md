@@ -142,7 +142,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 - The live camera is the mode-selection surface; do not add a separate full-screen mode chooser.
 - Show exactly three labeled rectangular controls in this order: Scan Food, Barcode, Food Label.
-- Keep 0.5x/1x/2x zoom as small pills immediately above the mode row.
+- Use SwiftUI's native continuous `Slider` immediately above the mode row. Its range comes from AVFoundation's `systemRecommendedVideoZoomRange`, its neutral point represents the displayed 1× factor, and it must not be replaced with bespoke discrete zoom pills.
 - Place circular torch and photo-library controls to the left and right of the centered shutter.
 - The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
 - Camera controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.

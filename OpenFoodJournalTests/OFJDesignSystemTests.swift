@@ -64,7 +64,8 @@ struct OFJDesignSystemTests {
         #expect(OFJLayout.cameraTopControlSize >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.cameraUtilityControlSize >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.cameraModeControlHeight >= OFJLayout.minimumHitTarget)
-        #expect(OFJLayout.cameraZoomVisualHeight < OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraZoomControlWidth > OFJLayout.minimumHitTarget)
+        #expect(OFJLayout.cameraZoomControlHeight >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.cameraShutterSize > OFJLayout.cameraUtilityControlSize)
         #expect(OFJLayout.journalBottomClearance == 100)
     }
@@ -77,6 +78,22 @@ struct OFJDesignSystemTests {
         #expect(descriptors.map(\.title) == ["Scan Food", "Barcode", "Food Label"])
         #expect(descriptors.allSatisfy { !$0.symbol.isEmpty })
         #expect(!descriptors.map(\.mode).contains(.manual))
+    }
+
+    @Test("camera zoom uses Apple's display multiplier and preserves a visible 1x neutral point")
+    func cameraZoomConfiguration() {
+        let configuration = CameraZoomConfiguration(
+            range: 1.0...10.0,
+            displayMultiplier: 0.5
+        )
+
+        #expect(configuration.neutralFactor == 2.0)
+        #expect(configuration.displayFactor(for: 1.0) == 0.5)
+        #expect(configuration.displayFactor(for: 2.0) == 1.0)
+        #expect(configuration.displayLabel(for: 2.0) == "1×")
+        #expect(configuration.displayLabel(for: 3.0) == "1.5×")
+        #expect(configuration.clampedFactor(100) == 10.0)
+        #expect(configuration.isAdjustable)
     }
 
     @Test(
