@@ -222,6 +222,7 @@ final class ChatService {
     private(set) var activeStartedAt: Date?
     private(set) var activePhaseStartedAt: Date?
     private(set) var visibleReasoningSummary = ""
+    private(set) var titleGenerationThreadIDs: Set<UUID> = []
 
     // MARK: Dependencies
 
@@ -243,6 +244,7 @@ final class ChatService {
     @ObservationIgnored private let monotonicClock: any ChatMonotonicClock
     @ObservationIgnored private let jitterUnitProvider: () -> Double
     @ObservationIgnored private let modelCatalog: RuntimeModelCatalog?
+    @ObservationIgnored private let automaticallyGeneratesTitles: Bool
 
     @ObservationIgnored
     private var permissionContinuation: CheckedContinuation<ChatPermissionDecision, Never>?
@@ -301,7 +303,8 @@ final class ChatService {
         monotonicClock: (any ChatMonotonicClock)? = nil,
         jitterUnitProvider: (() -> Double)? = nil,
         permissionDecisionProvider: ((ChatPermissionRequest) async -> ChatPermissionDecision)? = nil,
-        modelCatalog: RuntimeModelCatalog? = nil
+        modelCatalog: RuntimeModelCatalog? = nil,
+        automaticallyGeneratesTitles: Bool = true
     ) {
         let liveSession = session ?? Self.makeSession()
         self.modelContext = modelContext
@@ -363,6 +366,7 @@ final class ChatService {
         self.jitterUnitProvider = jitterUnitProvider ?? { Double.random(in: -1...1) }
         self.permissionDecisionProvider = permissionDecisionProvider
         self.modelCatalog = modelCatalog
+        self.automaticallyGeneratesTitles = automaticallyGeneratesTitles
         restoreInterruptedRuns()
     }
 
@@ -538,6 +542,190 @@ final class ChatService {
         try? modelContext.save()
         launchRunTask(in: thread, run: run)
         return .accepted(runID: run.id, messageID: userMessage.id)
+    }
+
+    /// Replaces a persisted user turn and starts a fresh run from that exact
+    /// transcript boundary. Later transcript output is removed because keeping
+    /// it would make the provider see answers and tool results for text the user
+    /// has just changed. Durable write ledgers and daily usage aggregates remain
+    /// intact; editing conversation text never attempts to undo journal writes.
+    @discardableResult
+    func submitEdit(
+        _ text: String,
+        attachments: [ChatDraftAttachment] = [],
+        replacing message: ChatMessage,
+        in thread: ChatThread
+    ) -> ChatSubmissionResult {
+        let startedAt = Date()
+        let startedTick = monotonicClock.now
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return .rejectedEmpty }
+        guard activeRunTask == nil, activeRunID == nil, !isStreaming else { return .rejectedBusy }
+        guard message.role == .user, message.thread?.id == thread.id else {
+            return .persistenceFailed("Only a user message in this conversation can be edited.")
+        }
+
+        repairMessageOrdering(in: thread)
+        let ordered = thread.safeMessages
+        guard let editedIndex = ordered.firstIndex(where: { $0.id == message.id }) else {
+            return .persistenceFailed("The message is no longer available.")
+        }
+        let previousBoundaryID = editedIndex > 0 ? ordered[editedIndex - 1].id : nil
+        let laterMessages = Array(ordered.dropFirst(editedIndex + 1))
+        let removedMessageIDs = Set(laterMessages.map(\.id) + [message.id])
+        let affectedRunIDs = Set(
+            ([message] + laterMessages).compactMap(\.runID)
+        )
+
+        // Every checkpoint after an edit summarizes the old transcript. Drop
+        // the derived checkpoints while retaining the original earlier turns.
+        for checkpoint in thread.contextCheckpoints ?? [] {
+            modelContext.delete(checkpoint)
+        }
+        thread.contextCheckpoints?.removeAll()
+
+        for source in thread.sourceArtifacts ?? []
+        where source.originatingMessageID.map(removedMessageIDs.contains) == true {
+            modelContext.delete(source)
+        }
+        thread.sourceArtifacts?.removeAll {
+            $0.originatingMessageID.map(removedMessageIDs.contains) == true
+        }
+
+        for later in laterMessages {
+            modelContext.delete(later)
+        }
+        thread.messages?.removeAll { later in
+            laterMessages.contains { $0.id == later.id }
+        }
+
+        // Completed run summaries for the removed branch would otherwise show
+        // beside the replacement answer. Usage/cost stays in daily aggregates.
+        for run in thread.agentRuns ?? [] where affectedRunIDs.contains(run.id) {
+            modelContext.delete(run)
+        }
+        thread.agentRuns?.removeAll { affectedRunIDs.contains($0.id) }
+
+        for attachment in message.safeAttachments {
+            modelContext.delete(attachment)
+        }
+        message.attachments?.removeAll()
+        message.text = trimmed
+        message.providerID = nil
+        message.modelID = nil
+        message.providerRequestID = nil
+        message.reportedInputTokens = nil
+        message.reportedCachedInputTokens = nil
+        message.reportedOutputTokens = nil
+        message.reportedThinkingTokens = nil
+        message.modelTurnID = nil
+        message.modelTurnTextOrdinal = nil
+        message.continuationPayload = nil
+        message.citationPayload = nil
+
+        let config = requestConfigProvider(nil)
+        let run = ChatAgentRun(
+            providerID: config.primary.provider.rawValue,
+            modelID: config.primary.descriptor.deploymentIdentifier
+        )
+        run.baseModelID = config.primary.descriptor.baseModelID
+        run.triggerMessageID = message.id
+        run.lastSafeBoundaryMessageID = previousBoundaryID
+        run.selectedContextLimit = contextBudgetProvider().inputLimit(for: config.primary.descriptor)
+        run.thread = thread
+        message.runID = run.id
+        modelContext.insert(run)
+        thread.agentRuns?.append(run)
+
+        for draft in attachments {
+            let attachment = ChatAttachment(
+                data: draft.data,
+                mimeType: draft.mimeType,
+                filename: draft.filename
+            )
+            attachment.message = message
+            modelContext.insert(attachment)
+            message.attachments?.append(attachment)
+            _ = persistSourceDraft(
+                ChatSourceDraft(
+                    id: UUID(),
+                    kind: .userAttachment,
+                    canonicalURL: nil,
+                    finalURL: nil,
+                    title: draft.filename,
+                    mimeType: draft.mimeType,
+                    contentHash: Self.sha256(draft.data),
+                    extractedText: nil,
+                    rawData: nil,
+                    attachmentID: attachment.id,
+                    providerID: nil,
+                    modelID: nil,
+                    citationStartIndex: nil,
+                    citationEndIndex: nil
+                ),
+                in: thread,
+                originatingMessageID: message.id,
+                toolName: nil
+            )
+        }
+        thread.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+        } catch {
+            return .persistenceFailed(error.localizedDescription)
+        }
+
+        activeRun = run
+        activeRunID = run.id
+        activeThreadID = thread.id
+        activePhase = .queued
+        activeProviderName = config.primary.provider.displayName
+        activeStartedAt = run.createdAt
+        activePhaseStartedAt = run.queuedAt ?? run.createdAt
+        activeRunStartedTick = monotonicClock.now
+        accumulatedApprovalSeconds = 0
+        approvalStartedTick = nil
+        visibleReasoningSummary = ""
+        pendingReportedInputTokens = nil
+        pendingReportedCachedInputTokens = nil
+        isStreaming = true
+        recordDiagnosticSpan(ChatDiagnosticSpan(
+            runID: run.id,
+            threadID: thread.id,
+            kind: "edit_to_run_start",
+            providerID: config.primary.provider.rawValue,
+            baseModelID: config.primary.descriptor.baseModelID,
+            deploymentID: config.primary.descriptor.deploymentIdentifier,
+            startedAt: startedAt,
+            endedAt: Date(),
+            durationMs: Int(max(0, monotonicClock.now - startedTick) * 1_000),
+            outcome: "completed"
+        ))
+        try? modelContext.save()
+        launchRunTask(in: thread, run: run)
+        return .accepted(runID: run.id, messageID: message.id)
+    }
+
+    /// Requests a short provider-generated title without exposing tools or
+    /// attachments. The existing title is retained if regeneration fails.
+    func regenerateTitle(in thread: ChatThread) async {
+        guard !titleGenerationThreadIDs.contains(thread.id) else { return }
+        let previousTitle = thread.title
+        titleGenerationThreadIDs.insert(thread.id)
+        defer { titleGenerationThreadIDs.remove(thread.id) }
+
+        do {
+            thread.title = try await generatedTitle(for: thread)
+            thread.updatedAt = Date()
+            try modelContext.save()
+        } catch {
+            if previousTitle.isEmpty {
+                let opening = thread.safeMessages.first(where: { $0.role == .user })?.text ?? ""
+                thread.title = Self.autoTitle(from: opening)
+                try? modelContext.save()
+            }
+        }
     }
 
     /// Sends a user message (with optional attachments) and runs the agent
@@ -790,6 +978,14 @@ final class ChatService {
             if permissionContinuation != nil {
                 resolvePermission(.denied)
             }
+            if run.state == .completed,
+               thread.title.isEmpty,
+               automaticallyGeneratesTitles {
+                Task { [weak self, weak thread] in
+                    guard let self, let thread else { return }
+                    await self.regenerateTitle(in: thread)
+                }
+            }
         }
 
         guard apiKeyProvider(config.provider) != nil else {
@@ -954,7 +1150,7 @@ final class ChatService {
                 }
             }
 
-            if thread.title.isEmpty {
+            if thread.title.isEmpty && !automaticallyGeneratesTitles {
                 let firstUserText = thread.safeMessages.first(where: { $0.role == .user })?.text ?? ""
                 thread.title = Self.autoTitle(from: firstUserText.isEmpty ? "New Conversation" : firstUserText)
             }
@@ -4125,6 +4321,136 @@ final class ChatService {
     }
 
     // MARK: - Helpers
+
+    private func generatedTitle(for thread: ChatThread) async throws -> String {
+        let config = requestConfigProvider(nil)
+        modelCatalog?.refreshInBackgroundIfNeeded()
+        let selection = modelCatalog?.selectionResolvingRuntimeMetadata(config.primary)
+            ?? config.primary
+        let proxy = try modelProxyFactory(selection)
+        let transcript = thread.safeMessages.compactMap { message -> ChatModelMessage? in
+            guard message.role == .user || message.role == .model else { return nil }
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return ChatModelMessage(
+                role: message.role == .user ? .user : .model,
+                parts: [.text(String(text.prefix(1_500)))]
+            )
+        }
+        guard !transcript.isEmpty else { throw ChatError.emptyResponse }
+
+        let request = ChatModelRequest(
+            systemPrompt: """
+            Create a specific title for this nutrition-assistant conversation.
+            Return only the title: 2 to 6 words, no quotation marks, no markdown,
+            no ending punctuation, and no generic label such as Conversation.
+            """,
+            messages: Array(transcript.prefix(8)),
+            tools: []
+        )
+        let monitor = ChatProviderDeadlineMonitor(clock: monotonicClock)
+        let requestStartedAt = Date()
+        let requestStartedTick = monotonicClock.now
+        let totalDeadline = min(30, deadlinePolicy.modelTurn)
+        let firstEventDeadline = min(totalDeadline, deadlinePolicy.firstProviderEvent)
+
+        let turn = try await withThrowingTaskGroup(of: ChatModelTurn.self) { group in
+            group.addTask { @MainActor in
+                try await proxy.streamTurn(request: request) { event in
+                    monitor.receive(event)
+                }
+            }
+            group.addTask { @MainActor [monotonicClock] in
+                try await monotonicClock.sleep(for: firstEventDeadline)
+                guard monitor.providerEventCount > 0 else {
+                    throw ChatError.timeout(
+                        step: "title_first_provider_event",
+                        seconds: firstEventDeadline
+                    )
+                }
+                try await monotonicClock.sleep(for: max(0, totalDeadline - firstEventDeadline))
+                throw ChatError.timeout(step: "title_generation", seconds: totalDeadline)
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw ChatError.emptyResponse }
+            return first
+        }
+        guard turn.calls.isEmpty else { throw ChatError.invalidResponse }
+        let title = Self.sanitizedGeneratedTitle(turn.text)
+        guard !title.isEmpty else { throw ChatError.emptyResponse }
+
+        modelCatalog?.observeResolvedModel(
+            provider: selection.provider,
+            requestedModelID: selection.descriptor.deploymentIdentifier,
+            resolvedModelID: turn.resolvedModelID
+        )
+        let resolution = modelCatalog?.resolution(
+            for: selection,
+            resolvedModelID: turn.resolvedModelID
+        ) ?? Self.fallbackCatalogResolution(
+            for: selection,
+            resolvedModelID: turn.resolvedModelID
+        )
+        let cost = turn.usage.flatMap { usage in
+            resolution.pricing.map { $0.estimatedCost(for: usage) }
+        }
+        recordUsage(
+            selection: selection,
+            catalogResolution: resolution,
+            usage: turn.usage,
+            grounded: false,
+            succeeded: true,
+            requestKind: "assistant_title_generation"
+        )
+        recordDailyUsage(
+            selection: resolution.selection,
+            catalogVersion: resolution.catalogVersion,
+            verifiedAt: resolution.verifiedAt,
+            usage: turn.usage,
+            cost: cost,
+            retryCount: 0,
+            at: Date()
+        )
+        recordDiagnosticSpan(ChatDiagnosticSpan(
+            runID: UUID(),
+            threadID: thread.id,
+            kind: "title_generation",
+            providerID: selection.provider.rawValue,
+            baseModelID: resolution.resolvedModelID,
+            deploymentID: selection.descriptor.deploymentIdentifier,
+            startedAt: requestStartedAt,
+            endedAt: Date(),
+            durationMs: Int(max(0, monotonicClock.now - requestStartedTick) * 1_000),
+            outcome: "completed",
+            providerRequestID: turn.providerRequestID ?? monitor.requestID
+        ))
+        try? modelContext.save()
+        return title
+    }
+
+    nonisolated static func sanitizedGeneratedTitle(_ raw: String) -> String {
+        var title = raw
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? ""
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`#*"))
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = title.last, ".!?:;,-".contains(last) {
+            title.removeLast()
+            title = title.trimmingCharacters(in: .whitespaces)
+        }
+        guard !title.isEmpty else { return "" }
+        if title.count > 60 {
+            let prefix = title.prefix(60)
+            if let space = prefix.lastIndex(of: " ") {
+                title = String(prefix[..<space])
+            } else {
+                title = String(prefix)
+            }
+        }
+        return title
+    }
 
     /// Derives a short thread title from the opening message.
     private static func autoTitle(from text: String) -> String {

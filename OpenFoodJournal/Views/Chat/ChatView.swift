@@ -20,10 +20,10 @@ struct ChatView: View {
     // Most recently active thread first — the tab always resumes the latest.
     @Query(sort: \ChatThread.updatedAt, order: .reverse)
     private var threads: [ChatThread]
-
     @State private var activeThread: ChatThread?
     @State private var draft = ""
     @State private var showThreadList = false
+    @State private var editingMessageID: UUID?
     @FocusState private var inputFocused: Bool
 
     // Attachment staging
@@ -140,7 +140,10 @@ struct ChatView: View {
                     }
 
                     if let thread = currentThread {
-                        ScopedChatTranscript(thread: thread)
+                        ScopedChatTranscript(
+                            thread: thread,
+                            onEdit: beginEditing
+                        )
                     }
 
                     if chatService.activeThreadID == currentThread?.id,
@@ -188,53 +191,11 @@ struct ChatView: View {
             .onChange(of: chatService.pendingPermission?.id) {
                 scrollToBottom(proxy)
             }
+            .onChange(of: currentThread?.id) {
+                cancelEditing()
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputBar
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func messageView(_ message: ChatMessage) -> some View {
-        switch message.role {
-        case .tool:
-            ToolChipView(message: message)
-        case .user, .model:
-            ChatBubble(message: message)
-                .contextMenu {
-                    bubbleMenu(for: message)
-                }
-        }
-    }
-
-    @ViewBuilder
-    private func bubbleMenu(for message: ChatMessage) -> some View {
-        Button {
-            UIPasteboard.general.string = message.text
-        } label: {
-            Label("Copy", systemImage: "doc.on.doc")
-        }
-
-        // Regeneration applies to the final reply of the thread only.
-        if message.role == .model,
-           message.id == messages.last?.id,
-           !chatService.isStreaming,
-           let thread = currentThread {
-            Divider()
-            Button {
-                Task { await chatService.regenerate(in: thread) }
-            } label: {
-                Label("Regenerate", systemImage: "arrow.clockwise")
-            }
-            Button {
-                Task { await chatService.regenerate(in: thread, using: .fast) }
-            } label: {
-                Label("Regenerate with Fast", systemImage: "hare")
-            }
-            Button {
-                Task { await chatService.regenerate(in: thread, using: .smart) }
-            } label: {
-                Label("Regenerate with Smart", systemImage: "brain")
             }
         }
     }
@@ -505,6 +466,19 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 6) {
+            if editingMessageID != nil {
+                HStack(spacing: OFJSpace.s8) {
+                    Label("Editing message", systemImage: "pencil")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", action: cancelEditing)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.glass)
+                }
+                .accessibilityIdentifier("assistant.editing-message")
+            }
+
             if !pendingAttachments.isEmpty {
                 pendingAttachmentsRow
             }
@@ -513,68 +487,73 @@ struct ChatView: View {
                 contextMeter(usage)
             }
 
-            HStack(alignment: .bottom, spacing: 8) {
-                Menu {
-                    Button {
-                        showCameraPicker = true
-                    } label: {
-                        Label("Take Photo", systemImage: "camera.fill")
-                    }
-                    .disabled(
-                        remainingImageAttachmentSlots == 0
-                            || !UIImagePickerController.isSourceTypeAvailable(.camera)
-                    )
+            GlassEffectContainer(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    Menu {
+                        Button {
+                            showCameraPicker = true
+                        } label: {
+                            Label("Take Photo", systemImage: "camera.fill")
+                        }
+                        .disabled(
+                            remainingImageAttachmentSlots == 0
+                                || !UIImagePickerController.isSourceTypeAvailable(.camera)
+                        )
 
-                    Button {
-                        showPhotoPicker = true
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label("Photo Library", systemImage: "photo.on.rectangle")
+                        }
+                        .disabled(remainingImageAttachmentSlots == 0)
+                        Button {
+                            showFileImporter = true
+                        } label: {
+                            Label("Attach PDF", systemImage: "doc.badge.plus")
+                        }
                     } label: {
-                        Label("Photo Library", systemImage: "photo.on.rectangle")
+                        Image(systemName: "plus")
+                            .font(.body.weight(.semibold))
+                            .frame(width: 48, height: 48)
                     }
-                    .disabled(remainingImageAttachmentSlots == 0)
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("Attach PDF", systemImage: "doc.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
-                }
-                .disabled(chatService.isStreaming)
+                    .buttonStyle(.glass)
+                    .disabled(chatService.isStreaming)
+                    .accessibilityLabel("Add attachment")
 
-                TextField("Ask about your nutrition…", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .focused($inputFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(in: .rect(cornerRadius: 20))
-                    .accessibilityIdentifier("assistant.input")
+                    TextField("Ask about your nutrition…", text: $draft, axis: .vertical)
+                        .lineLimit(1...4)
+                        .focused($inputFocused)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(minHeight: 48)
+                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+                        .accessibilityIdentifier("assistant.input")
 
-                if chatService.isStreaming {
-                    Button {
-                        chatService.cancelCurrentRun()
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 32))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.red)
+                    if chatService.isStreaming {
+                        Button {
+                            chatService.cancelCurrentRun()
+                        } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.red)
+                                .frame(width: 48, height: 48)
+                        }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Stop Assistant")
+                        .accessibilityIdentifier("assistant.stop")
+                    } else {
+                        Button {
+                            sendMessage(draft)
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.body.weight(.bold))
+                                .frame(width: 48, height: 48)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .disabled(sendDisabled)
+                        .opacity(sendDisabled ? 0.5 : 1)
+                        .accessibilityIdentifier("assistant.send")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Stop Assistant")
-                    .accessibilityIdentifier("assistant.stop")
-                } else {
-                    Button {
-                        sendMessage(draft)
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .symbolRenderingMode(.hierarchical)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(sendDisabled)
-                    .opacity(sendDisabled ? 0.5 : 1)
-                    .accessibilityIdentifier("assistant.send")
                 }
             }
 
@@ -768,12 +747,46 @@ struct ChatView: View {
         }
 
         let attachments = pendingAttachments
-        pendingAttachments = []
+        let result: ChatSubmissionResult
+        if let editingMessageID,
+           let message = thread.safeMessages.first(where: { $0.id == editingMessageID }) {
+            result = chatService.submitEdit(
+                trimmed,
+                attachments: attachments,
+                replacing: message,
+                in: thread
+            )
+        } else {
+            result = chatService.submit(trimmed, attachments: attachments, in: thread)
+        }
+
+        if case .accepted = result {
+            pendingAttachments = []
+            draft = ""
+            self.editingMessageID = nil
+        }
+    }
+
+    private func beginEditing(_ message: ChatMessage) {
+        guard message.role == .user, !chatService.isStreaming else { return }
+        editingMessageID = message.id
+        draft = message.text
+        pendingAttachments = message.safeAttachments.map {
+            ChatDraftAttachment(data: $0.data, mimeType: $0.mimeType, filename: $0.filename)
+        }
+        inputFocused = true
+    }
+
+    private func cancelEditing() {
+        guard editingMessageID != nil else { return }
+        editingMessageID = nil
         draft = ""
-        _ = chatService.submit(trimmed, attachments: attachments, in: thread)
+        pendingAttachments = []
+        inputFocused = false
     }
 
     private func startNewThread() {
+        cancelEditing()
         let thread = ChatThread()
         modelContext.insert(thread)
         activeThread = thread
@@ -789,11 +802,13 @@ struct ChatView: View {
 private struct ScopedChatTranscript: View {
     @Environment(ChatService.self) private var chatService
     let thread: ChatThread
+    let onEdit: (ChatMessage) -> Void
 
     @Query private var messages: [ChatMessage]
 
-    init(thread: ChatThread) {
+    init(thread: ChatThread, onEdit: @escaping (ChatMessage) -> Void) {
         self.thread = thread
+        self.onEdit = onEdit
         let threadID = thread.id
         _messages = Query(
             filter: #Predicate<ChatMessage> { message in
@@ -826,14 +841,33 @@ private struct ScopedChatTranscript: View {
                     }
                 }
             } else {
-                ChatBubble(message: message)
-                    .contextMenu { bubbleMenu(for: message) }
+                chatMessageRow(message)
             }
         }
         .onAppear { chatService.repairTranscriptOrdering(in: thread) }
         .onChange(of: messages.map(\.transcriptOrdinal)) {
             chatService.repairTranscriptOrdering(in: thread)
         }
+    }
+
+    private func chatMessageRow(_ message: ChatMessage) -> some View {
+        HStack {
+            if message.role == .user { Spacer(minLength: 40) }
+
+            ChatBubble(message: message)
+                // Attach the menu to the visible bubble, not the full-width
+                // alignment row. The latter made iOS preview an invisible
+                // spacer as a large blank rectangle on long press.
+                .contextMenu {
+                    bubbleMenu(for: message)
+                } preview: {
+                    ChatBubble(message: message)
+                        .frame(maxWidth: 320)
+                }
+
+            if message.role == .model { Spacer(minLength: 40) }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func isFirstToolInGroup(at index: Int) -> Bool {
@@ -862,6 +896,14 @@ private struct ScopedChatTranscript: View {
             UIPasteboard.general.string = message.text
         } label: {
             Label("Copy", systemImage: "doc.on.doc")
+        }
+
+        if message.role == .user, !chatService.isStreaming {
+            Button {
+                onEdit(message)
+            } label: {
+                Label("Edit Message", systemImage: "pencil")
+            }
         }
 
         if message.role == .model,
@@ -959,21 +1001,15 @@ struct ChatBubble: View {
     let message: ChatMessage
 
     var body: some View {
-        HStack {
-            if message.role == .user {
-                Spacer(minLength: 40)
-                bubbleContent
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(.regular.tint(.blue.opacity(0.35)), in: .rect(cornerRadius: 20))
-            } else {
-                bubbleContent
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(in: .rect(cornerRadius: 20))
-                Spacer(minLength: 40)
-            }
-        }
+        bubbleContent
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .glassEffect(
+                message.role == .user
+                    ? .regular.tint(.blue.opacity(0.35))
+                    : .regular,
+                in: .rect(cornerRadius: 20)
+            )
     }
 
     private var bubbleContent: some View {
@@ -1101,11 +1137,17 @@ struct ChatThreadListView: View {
 
     @Query(sort: \ChatThread.updatedAt, order: .reverse)
     private var threads: [ChatThread]
+    @Query(sort: \ChatAttachment.createdAt, order: .reverse)
+    private var attachments: [ChatAttachment]
 
     /// Threads that have at least one message — lazily created empties from
     /// "New Conversation" taps are hidden until used.
     private var visibleThreads: [ChatThread] {
         threads.filter { !($0.messages ?? []).isEmpty }
+    }
+
+    private var libraryAttachments: [ChatAttachment] {
+        attachments.filter { $0.message?.thread != nil }
     }
 
     var body: some View {
@@ -1119,14 +1161,57 @@ struct ChatThreadListView: View {
                     }
                 } else {
                     List {
-                        ForEach(visibleThreads) { thread in
-                            Button {
-                                activeThread = thread
-                                dismiss()
-                            } label: {
-                                threadRow(thread)
+                        if !libraryAttachments.isEmpty {
+                            Section("Images & Files") {
+                                attachmentLibrary
+                                    .listRowInsets(EdgeInsets(
+                                        top: OFJSpace.s6,
+                                        leading: OFJSpace.s16,
+                                        bottom: OFJSpace.s8,
+                                        trailing: OFJSpace.s16
+                                    ))
                             }
-                            .buttonStyle(.plain)
+                        }
+
+                        ForEach(visibleThreads) { thread in
+                            HStack(spacing: OFJSpace.s8) {
+                                Button {
+                                    open(thread)
+                                } label: {
+                                    threadRow(thread)
+                                }
+                                .buttonStyle(.plain)
+
+                                Menu {
+                                    Button {
+                                        Task { await chatService.regenerateTitle(in: thread) }
+                                    } label: {
+                                        Label("Regenerate Title", systemImage: "sparkles")
+                                    }
+                                    .disabled(chatService.titleGenerationThreadIDs.contains(thread.id))
+
+                                    Divider()
+
+                                    Button(role: .destructive) {
+                                        delete(thread)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                } label: {
+                                    Group {
+                                        if chatService.titleGenerationThreadIDs.contains(thread.id) {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "ellipsis")
+                                        }
+                                    }
+                                    .frame(
+                                        minWidth: OFJLayout.minimumHitTarget,
+                                        minHeight: OFJLayout.minimumHitTarget
+                                    )
+                                }
+                                .accessibilityLabel("Conversation actions")
+                            }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
@@ -1145,6 +1230,49 @@ struct ChatThreadListView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var attachmentLibrary: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: OFJSpace.s8) {
+                ForEach(libraryAttachments) { attachment in
+                    Button {
+                        if let thread = attachment.message?.thread {
+                            open(thread)
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: OFJSpace.s4) {
+                            if attachment.isImage,
+                               let image = UIImage(data: attachment.data) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 76, height: 64)
+                                    .clipped()
+                            } else {
+                                Image(systemName: attachment.isPDF ? "doc.richtext.fill" : "doc.fill")
+                                    .font(.title2)
+                                    .frame(width: 76, height: 64)
+                                    .background(Color.secondary.opacity(0.10))
+                            }
+
+                            Text(attachment.isImage ? "Photo" : attachment.filename)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .frame(width: 76, alignment: .leading)
+                        }
+                        .compositingGroup()
+                        .clipShape(.rect(cornerRadius: OFJRadius.badge))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        attachment.isImage
+                            ? "Open conversation containing photo"
+                            : "Open conversation containing \(attachment.filename)"
+                    )
                 }
             }
         }
@@ -1177,5 +1305,10 @@ struct ChatThreadListView: View {
             activeThread = nil
         }
         modelContext.delete(thread)
+    }
+
+    private func open(_ thread: ChatThread) {
+        activeThread = thread
+        dismiss()
     }
 }

@@ -37,6 +37,97 @@ struct ChatFeatureTests {
         #expect((harness.service.contextUsage?.estimatedInputTokens ?? 0) > 120)
     }
 
+    @Test func editingUserMessageReplacesItsBranchAndReplaysEditedAttachments() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread(title: "Old title")
+        let user = harness.insertMessage(.user, text: "Old prompt", into: thread)
+        let oldAttachment = ChatAttachment(
+            data: Data([0x01]),
+            mimeType: "image/jpeg",
+            filename: "old.jpg"
+        )
+        oldAttachment.message = user
+        harness.context.insert(oldAttachment)
+        user.attachments?.append(oldAttachment)
+        _ = harness.insertMessage(.model, text: "Old answer", into: thread)
+        harness.proxy.enqueue(ChatModelTurn(text: "Replacement answer"))
+        let replacement = ChatDraftAttachment(
+            data: Data([0x02, 0x03]),
+            mimeType: "image/jpeg",
+            filename: "replacement.jpg"
+        )
+
+        let result = harness.service.submitEdit(
+            "Edited prompt",
+            attachments: [replacement],
+            replacing: user,
+            in: thread
+        )
+        guard case .accepted(_, let messageID) = result else {
+            Issue.record("Expected edited message to be accepted")
+            return
+        }
+        for _ in 0..<500 where harness.service.isStreaming { await Task.yield() }
+
+        #expect(messageID == user.id)
+        #expect(thread.safeMessages.map(\.role) == [.user, .model])
+        #expect(thread.safeMessages.first?.text == "Edited prompt")
+        #expect(thread.safeMessages.first?.safeAttachments.map(\.filename) == ["replacement.jpg"])
+        #expect(thread.safeMessages.last?.text == "Replacement answer")
+        let request = try #require(harness.proxy.turns.first?.request)
+        #expect(request.messages.first?.parts.contains(.text("Edited prompt")) == true)
+        #expect(request.messages.first?.parts.contains(.attachment(ChatModelAttachment(
+            data: replacement.data,
+            mimeType: replacement.mimeType,
+            filename: replacement.filename
+        ))) == true)
+        #expect(request.messages.description.contains("Old answer") == false)
+    }
+
+    @Test func conversationTitleIsGeneratedByTheConfiguredModel() async throws {
+        let harness = try ChatTestHarness(automaticallyGeneratesTitles: true)
+        harness.proxy.enqueue(ChatModelTurn(text: "Your protein is on track."))
+        harness.proxy.enqueue(ChatModelTurn(
+            text: "**Protein Progress Plan!**",
+            usage: ChatTokenUsage(input: 36, output: 5, thinking: 0),
+            providerRequestID: "title-request"
+        ))
+        let thread = harness.makeThread()
+
+        await harness.service.send("How can I hit my protein goal?", in: thread)
+        for _ in 0..<500 where thread.title.isEmpty { await Task.yield() }
+
+        #expect(thread.title == "Protein Progress Plan")
+        #expect(harness.proxy.turns.count == 2)
+        let titleRequest = harness.proxy.turns[1].request
+        #expect(titleRequest.tools.isEmpty)
+        #expect(titleRequest.systemPrompt.contains("2 to 6 words"))
+        #expect(titleRequest.messages.allSatisfy { message in
+            message.parts.allSatisfy { part in
+                if case .attachment = part { return false }
+                return true
+            }
+        })
+        let aggregate = try #require(
+            harness.context.fetch(FetchDescriptor<ChatUsageDailyAggregate>()).first
+        )
+        #expect(aggregate.requestCount >= 2)
+    }
+
+    @Test func titleRegenerationKeepsOnlyACompactPlainTitle() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread(title: "Previous title")
+        _ = harness.insertMessage(.user, text: "Review my sodium today", into: thread)
+        _ = harness.insertMessage(.model, text: "Your sodium is elevated.", into: thread)
+        harness.proxy.enqueue(ChatModelTurn(text: "\"Daily Sodium Review.\""))
+
+        await harness.service.regenerateTitle(in: thread)
+
+        #expect(thread.title == "Daily Sodium Review")
+        #expect(harness.service.titleGenerationThreadIDs.isEmpty)
+        #expect(ChatService.sanitizedGeneratedTitle("# Weekly Fiber Plan!!!") == "Weekly Fiber Plan")
+    }
+
     @Test func azureUsageAggregatesTokensAndDatedDollarEstimate() async throws {
         let harness = try ChatTestHarness(
             provider: .azureOpenAI,

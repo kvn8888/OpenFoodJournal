@@ -1,6 +1,7 @@
 // OpenFoodJournal — Log Food presentation contracts
 // AGPL-3.0 License
 
+import Foundation
 import Testing
 @testable import OpenFoodJournal
 
@@ -85,6 +86,22 @@ struct LogFoodPresentationTests {
         #expect(
             LogFoodPresentation.decrementedQuantity(0, unit: "serving") == 0
         )
+    }
+
+    @Test("quantity unit chevron appears only when the choices overflow")
+    func quantityUnitOverflowIndicator() {
+        #expect(LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 420,
+            viewportWidth: 280
+        ))
+        #expect(!LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 280,
+            viewportWidth: 280
+        ))
+        #expect(!LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 420,
+            viewportWidth: 0
+        ))
     }
 
     @Test("macro calorie shares use Atwater factors and stay bounded")

@@ -133,6 +133,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 - The large navigation title is the selected month and year, not the static word “Journal.”
 - The Today action moves into the navigation toolbar whenever the selected date is not today.
+- Today and Settings share one stable trailing toolbar subtree. Only Today is conditionally inserted; the Settings `NavigationLink` keeps identity and disables inherited date-change animation so its gear never fades during the glass regrouping.
 - `WeeklyCalendarStrip` remains a horizontally paged Sun–Sat week scroller, but does not draw an outer glass box or a duplicate month header.
 - Every selectable day is a real `Button` with a 44+ pt target. The selected/pressed/hovered day uses a rounded rectangular material highlight.
 - Future days are disabled, dimmed, and retain an empty dashed progress-ring track.
@@ -153,6 +154,8 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 - The Assistant composer attachment menu keeps distinct actions for Take Photo, Photo Library, and Attach PDF.
 - Take Photo uses `AssistantCameraPicker` only as a one-image UIKit camera bridge; the result must pass through the same downscaled JPEG and `ChatDraftAttachment` pipeline as library images.
+- Composer add/send/stop controls use native Liquid Glass and share the prompt pill's 48-point resting height. Editing a user message reloads its text and attachment pills into this same composer; a visible editing state must offer Cancel.
+- Attach context menus to the visible chat bubble rather than its full-width alignment row. Conversation history starts with a horizontal library of persisted chat images/files and exposes a per-thread Regenerate Title action.
 - Camera capture is full-screen, cancels without mutating the draft, and remains disabled on devices without a camera or when the shared four-image staging limit is full.
 
 ### Appearance and Log Food
@@ -162,6 +165,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - `LogFoodSheet` follows a light utility hierarchy: compact identity header, quantity and unit controls, calorie/macronutrient card, always-visible micronutrient table when data exists, factual saved-unit mappings, meal selector, and one sticky primary log action.
 - Keep Log Food content surfaces tonal rather than glass. Native navigation and system controls may retain Liquid Glass. Do not invent food classifications, container state, conversion provenance, or nutrition explanations that are not backed by stored data.
 - Quantity/unit changes must preserve the represented food amount through `ServingConverter`; logging must keep the existing `NutritionStore.log(...)` mutation boundary, linked Food Bank ID, serving values, scaled macros, and scaled micronutrients.
+- Quantity minus/plus icons keep compact visuals but own equal full-height 52-point-wide hit columns. The unit strip shows a noninteractive trailing chevron only when measured choices overflow. `FoodBankView` uses the system minimizable search-toolbar behavior so its root-tab search lives with bottom chrome on iOS 26.
 - Accent selection is user data for backup/mirror purposes, while missing or future values must decode to Blue for backward compatibility.
 
 ### Sheet Management (Enum-Driven)
