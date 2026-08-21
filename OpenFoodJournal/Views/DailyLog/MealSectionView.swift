@@ -67,6 +67,8 @@ struct MealSectionView: View {
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                    } preview: {
+                        EntryContextMenuPreview(entry: entry)
                     }
                 }
             } header: {
@@ -85,6 +87,38 @@ struct MealSectionView: View {
                 }
             }
         }
+    }
+}
+
+/// The default context-menu preview inherited the List row's full proposed
+/// width, including its invisible spacer. A compact explicit preview keeps the
+/// long-press outline attached to the food content the user can actually see.
+private struct EntryContextMenuPreview: View {
+    let entry: NutritionEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: OFJSpace.s8) {
+            if let brand = entry.brand, !brand.isEmpty {
+                Text(brand)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Text(entry.name)
+                .font(OFJType.rowTitle)
+                .lineLimit(2)
+            Text("\(Int(entry.calories)) kcal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            HStack(spacing: OFJSpace.s6) {
+                MacroChip(value: entry.protein, color: OFJColor.protein, label: "P")
+                MacroChip(value: entry.carbs, color: OFJColor.carbohydrates, label: "C")
+                MacroChip(value: entry.fat, color: OFJColor.fat, label: "F")
+            }
+        }
+        .padding(OFJSpace.s16)
+        .frame(width: 280, alignment: .leading)
+        .background(.regularMaterial, in: .rect(cornerRadius: OFJRadius.compactCard))
     }
 }
 

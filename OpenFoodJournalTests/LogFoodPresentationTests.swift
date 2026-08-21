@@ -87,6 +87,22 @@ struct LogFoodPresentationTests {
         )
     }
 
+    @Test("quantity unit chevron appears only when the choices overflow")
+    func quantityUnitOverflowIndicator() {
+        #expect(LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 420,
+            viewportWidth: 280
+        ))
+        #expect(!LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 280,
+            viewportWidth: 280
+        ))
+        #expect(!LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: 420,
+            viewportWidth: 0
+        ))
+    }
+
     @Test("macro calorie shares use Atwater factors and stay bounded")
     func macroCalorieShares() {
         #expect(

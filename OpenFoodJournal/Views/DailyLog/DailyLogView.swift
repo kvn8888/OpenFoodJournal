@@ -41,6 +41,10 @@ struct DailyLogView: View {
         selectedDate.formatted(.dateTime.month(.wide).year())
     }
 
+    private var isShowingToday: Bool {
+        Calendar.current.isDateInToday(selectedDate)
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
@@ -138,19 +142,26 @@ struct DailyLogView: View {
             .navigationTitle(selectedMonthAndYear)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                if !Calendar.current.isDateInToday(selectedDate) {
-                    ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: OFJSpace.s8) {
+                        if !isShowingToday {
                         Button("Today", action: selectToday)
                             .accessibilityIdentifier("journal.today")
-                    }
-                }
+                        }
 
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink(value: JournalRoute.settings) {
-                        Label("Settings", systemImage: "gearshape")
-                            .labelStyle(.iconOnly)
+                        // Keep Settings in one stable toolbar subtree while
+                        // Today is inserted or removed. Previously two toolbar
+                        // items were regrouped by Liquid Glass, which briefly
+                        // removed and recreated the gear during the morph.
+                        NavigationLink(value: JournalRoute.settings) {
+                            Label("Settings", systemImage: "gearshape")
+                                .labelStyle(.iconOnly)
+                        }
+                        .transaction { transaction in
+                            transaction.animation = nil
+                        }
+                        .accessibilityIdentifier("journal.settings")
                     }
-                    .accessibilityIdentifier("journal.settings")
                 }
             }
             .navigationDestination(for: JournalRoute.self) { route in

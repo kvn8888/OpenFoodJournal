@@ -34,6 +34,8 @@ struct LogFoodSheet: View {
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
     @State private var quantityText: String
     @FocusState private var quantityIsFocused: Bool
+    @State private var unitStripContentWidth: CGFloat = 0
+    @State private var unitStripViewportWidth: CGFloat = 0
     // The unit the user has selected for this log (may differ from the food's stored unit)
     @State private var selectedUnit: String
     // Controls the nested Edit Food sheet
@@ -392,20 +394,62 @@ struct LogFoodSheet: View {
 
                 Spacer(minLength: OFJSpace.s8)
 
-                ScrollView(.horizontal) {
-                    HStack(spacing: OFJSpace.s6) {
-                        ForEach(
-                            LogFoodPresentation.orderedUnits(
-                                availableUnits,
-                                baseUnit: converter.baseUnit
-                            ),
-                            id: \.self
-                        ) { unit in
-                            unitButton(unit)
+                ZStack(alignment: .trailing) {
+                    ScrollView(.horizontal) {
+                        HStack(spacing: OFJSpace.s6) {
+                            ForEach(
+                                LogFoodPresentation.orderedUnits(
+                                    availableUnits,
+                                    baseUnit: converter.baseUnit
+                                ),
+                                id: \.self
+                            ) { unit in
+                                unitButton(unit)
+                            }
+                        }
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: UnitStripContentWidthKey.self,
+                                    value: proxy.size.width
+                                )
+                            }
+                        }
+                        .padding(.trailing, showsUnitStripChevron ? OFJSpace.s16 : 0)
+                    }
+                    .scrollIndicators(.hidden)
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: UnitStripViewportWidthKey.self,
+                                value: proxy.size.width
+                            )
                         }
                     }
+
+                    if showsUnitStripChevron {
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.bold))
+                            .foregroundStyle(.secondary)
+                            .padding(.leading, OFJSpace.s16)
+                            .frame(maxHeight: .infinity)
+                            .background(
+                                LinearGradient(
+                                    colors: [.clear, cardColor, cardColor],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                 }
-                .scrollIndicators(.hidden)
+                .onPreferenceChange(UnitStripContentWidthKey.self) {
+                    unitStripContentWidth = $0
+                }
+                .onPreferenceChange(UnitStripViewportWidthKey.self) {
+                    unitStripViewportWidth = $0
+                }
             }
 
             HStack(spacing: OFJSpace.s16) {
@@ -445,7 +489,7 @@ struct LogFoodSheet: View {
                         action: incrementQuantity
                     )
                 }
-                .frame(minHeight: 54)
+                .frame(height: 56)
                 .overlay {
                     RoundedRectangle(cornerRadius: OFJRadius.control)
                         .stroke(Color.secondary.opacity(0.14), lineWidth: 1)
@@ -494,14 +538,23 @@ struct LogFoodSheet: View {
         Button(action: action) {
             Image(systemName: systemImage)
                 .font(.body.weight(.medium))
-                .frame(
-                    minWidth: OFJLayout.minimumHitTarget,
-                    minHeight: OFJLayout.minimumHitTarget
-                )
+                // The symbol remains visually compact while the button owns a
+                // consistent full-height column. This makes the entire area
+                // beside the amount field tappable, not just the glyph.
+                .frame(width: 52, maxHeight: .infinity)
+                .contentShape(Rectangle())
         }
+        .frame(maxHeight: .infinity)
         .buttonStyle(.plain)
         .foregroundStyle(.secondary)
         .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var showsUnitStripChevron: Bool {
+        LogFoodPresentation.shouldShowUnitOverflowIndicator(
+            contentWidth: unitStripContentWidth,
+            viewportWidth: unitStripViewportWidth
+        )
     }
 
     private func selectUnit(_ newUnit: String) {
@@ -798,6 +851,13 @@ enum LogFoodPresentation {
         }
     }
 
+    static func shouldShowUnitOverflowIndicator(
+        contentWidth: CGFloat,
+        viewportWidth: CGFloat
+    ) -> Bool {
+        viewportWidth > 0 && contentWidth > viewportWidth + 1
+    }
+
     static func roundedQuantity(_ value: Double) -> Double {
         (value * 100).rounded() / 100
     }
@@ -859,6 +919,22 @@ enum LogFoodPresentation {
             let rightName = KnownMicronutrients.find(rhs)?.name ?? rhs
             return leftName.localizedCaseInsensitiveCompare(rightName) == .orderedAscending
         }
+    }
+}
+
+private struct UnitStripContentWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct UnitStripViewportWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
