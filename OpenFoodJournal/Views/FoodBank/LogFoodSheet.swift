@@ -541,7 +541,8 @@ struct LogFoodSheet: View {
                 // The symbol remains visually compact while the button owns a
                 // consistent full-height column. This makes the entire area
                 // beside the amount field tappable, not just the glyph.
-                .frame(width: 52, maxHeight: .infinity)
+                .frame(width: 52)
+                .frame(maxHeight: .infinity)
                 .contentShape(Rectangle())
         }
         .frame(maxHeight: .infinity)

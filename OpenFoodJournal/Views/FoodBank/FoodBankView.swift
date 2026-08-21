@@ -139,7 +139,7 @@ struct FoodBankView: View {
             .searchable(text: $searchText, prompt: "Search saved foods")
             // On iOS 26 this lets the system place the Food Bank search affordance
             // in the bottom bar, matching the sheet opened from the Journal FAB.
-            .searchToolbarBehavior(.minimizable)
+            .searchToolbarBehavior(.minimize)
             .toolbar {
                 // "+" menu for adding new foods — to the left of the sort button
                 ToolbarItem(placement: .topBarTrailing) {
