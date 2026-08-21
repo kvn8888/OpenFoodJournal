@@ -1,6 +1,7 @@
 // OpenFoodJournal — Log Food presentation contracts
 // AGPL-3.0 License
 
+import Foundation
 import Testing
 @testable import OpenFoodJournal
 
