@@ -296,6 +296,11 @@ extension View {
 /// Shared geometry for list-backed screens and tappable controls.
 enum OFJLayout {
     static let minimumHitTarget: CGFloat = 44
+    /// One outer resting height for the Assistant's add, prompt, and send/stop
+    /// surfaces. Raw glass draws inside this geometry; glass button styles are
+    /// intentionally avoided because their private control insets make a
+    /// 48-point label render as a taller button.
+    static let assistantComposerRestingHeight: CGFloat = 48
     static let listHorizontalInset = OFJSpace.s16
     static let listVerticalInset = OFJSpace.s8
     static let calendarDayControlHeight: CGFloat = 72

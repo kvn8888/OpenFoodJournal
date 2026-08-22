@@ -58,6 +58,8 @@ struct OFJDesignSystemTests {
         #expect(calendar.trailing == 16)
 
         #expect(OFJLayout.minimumHitTarget >= 44)
+        #expect(OFJLayout.assistantComposerRestingHeight == 48)
+        #expect(OFJLayout.assistantComposerRestingHeight >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.calendarDayControlHeight >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.calendarDayRingSize < OFJLayout.calendarDayControlHeight)
         #expect(OFJLayout.calendarRingLineWidth > 0)

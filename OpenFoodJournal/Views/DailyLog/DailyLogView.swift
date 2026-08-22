@@ -142,26 +142,23 @@ struct DailyLogView: View {
             .navigationTitle(selectedMonthAndYear)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: OFJSpace.s8) {
-                        if !isShowingToday {
+                if !isShowingToday {
+                    ToolbarItem(id: "journal.today", placement: .topBarTrailing) {
                         Button("Today", action: selectToday)
                             .accessibilityIdentifier("journal.today")
-                        }
-
-                        // Keep Settings in one stable toolbar subtree while
-                        // Today is inserted or removed. Previously two toolbar
-                        // items were regrouped by Liquid Glass, which briefly
-                        // removed and recreated the gear during the morph.
-                        NavigationLink(value: JournalRoute.settings) {
-                            Label("Settings", systemImage: "gearshape")
-                                .labelStyle(.iconOnly)
-                        }
-                        .transaction { transaction in
-                            transaction.animation = nil
-                        }
-                        .accessibilityIdentifier("journal.settings")
                     }
+                }
+
+                // Separate, stable toolbar identities let the system animate
+                // the Liquid Glass regrouping while keeping the gear alive.
+                // Wrapping both controls in one conditional HStack makes the
+                // toolbar treat the whole pill as replaceable content.
+                ToolbarItem(id: "journal.settings", placement: .topBarTrailing) {
+                    NavigationLink(value: JournalRoute.settings) {
+                        Label("Settings", systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("journal.settings")
                 }
             }
             .navigationDestination(for: JournalRoute.self) { route in
