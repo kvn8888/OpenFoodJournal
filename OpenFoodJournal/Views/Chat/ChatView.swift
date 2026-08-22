@@ -514,9 +514,14 @@ struct ChatView: View {
                     } label: {
                         Image(systemName: "plus")
                             .font(.body.weight(.semibold))
-                            .frame(width: 48, height: 48)
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.plain)
+                    .frame(
+                        width: OFJLayout.assistantComposerRestingHeight,
+                        height: OFJLayout.assistantComposerRestingHeight
+                    )
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
                     .disabled(chatService.isStreaming)
                     .accessibilityLabel("Add attachment")
 
@@ -525,8 +530,11 @@ struct ChatView: View {
                         .focused($inputFocused)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
-                        .frame(minHeight: 48)
-                        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 24))
+                        .frame(minHeight: OFJLayout.assistantComposerRestingHeight)
+                        .glassEffect(
+                            .regular.interactive(),
+                            in: .rect(cornerRadius: OFJLayout.assistantComposerRestingHeight / 2)
+                        )
                         .accessibilityIdentifier("assistant.input")
 
                     if chatService.isStreaming {
@@ -536,9 +544,14 @@ struct ChatView: View {
                             Image(systemName: "stop.fill")
                                 .font(.body.weight(.semibold))
                                 .foregroundStyle(.red)
-                                .frame(width: 48, height: 48)
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.plain)
+                        .frame(
+                            width: OFJLayout.assistantComposerRestingHeight,
+                            height: OFJLayout.assistantComposerRestingHeight
+                        )
+                        .contentShape(Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
                         .accessibilityLabel("Stop Assistant")
                         .accessibilityIdentifier("assistant.stop")
                     } else {
@@ -547,9 +560,17 @@ struct ChatView: View {
                         } label: {
                             Image(systemName: "arrow.up")
                                 .font(.body.weight(.bold))
-                                .frame(width: 48, height: 48)
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.plain)
+                        .frame(
+                            width: OFJLayout.assistantComposerRestingHeight,
+                            height: OFJLayout.assistantComposerRestingHeight
+                        )
+                        .contentShape(Circle())
+                        .glassEffect(
+                            .regular.tint(Color.accentColor.opacity(0.35)).interactive(),
+                            in: .circle
+                        )
                         .disabled(sendDisabled)
                         .opacity(sendDisabled ? 0.5 : 1)
                         .accessibilityIdentifier("assistant.send")
