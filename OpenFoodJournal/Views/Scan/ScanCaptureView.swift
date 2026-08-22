@@ -5,6 +5,7 @@ import SwiftUI
 import SwiftData
 import AVFoundation
 import Combine
+import ImageIO
 import PhotosUI
 import Vision
 
@@ -42,7 +43,10 @@ struct ScanCaptureView: View {
         ZStack {
             // Live camera preview — full screen (starts loading immediately)
             if camera.isReady {
-                CameraPreviewView(session: camera.session)
+                CameraPreviewView(
+                    session: camera.session,
+                    onVisibleCaptureRectChanged: camera.setVisibleCaptureRect
+                )
                     .ignoresSafeArea()
             } else {
                 Color.black.ignoresSafeArea()
@@ -536,7 +540,13 @@ final class CameraController: NSObject, ObservableObject {
     private var photoOutput = AVCapturePhotoOutput()
     private var currentVideoInput: AVCaptureDeviceInput?
     private var activeDevice: AVCaptureDevice?
-    private var photoContinuation: CheckedContinuation<UIImage?, Never>?
+    private var visibleCaptureCrop = CameraPreviewCrop.fullFrame
+    private var pendingPhotoCapture: PendingPhotoCapture?
+
+    private struct PendingPhotoCapture {
+        let crop: CameraPreviewCrop
+        let continuation: CheckedContinuation<UIImage?, Never>
+    }
 
     func setup() async {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -562,7 +572,15 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     func stop() {
+        if let pendingPhotoCapture {
+            pendingPhotoCapture.continuation.resume(returning: nil)
+            self.pendingPhotoCapture = nil
+        }
         if session.isRunning { session.stopRunning() }
+    }
+
+    func setVisibleCaptureRect(_ rect: CGRect) {
+        visibleCaptureCrop = CameraPreviewCrop(normalizedRect: rect)
     }
 
     func toggleTorch() {
@@ -592,7 +610,15 @@ final class CameraController: NSObject, ObservableObject {
 
     func capturePhoto() async -> UIImage? {
         await withCheckedContinuation { continuation in
-            photoContinuation = continuation
+            guard pendingPhotoCapture == nil else {
+                continuation.resume(returning: nil)
+                return
+            }
+
+            pendingPhotoCapture = PendingPhotoCapture(
+                crop: visibleCaptureCrop,
+                continuation: continuation
+            )
             let settings = AVCapturePhotoSettings()
             photoOutput.capturePhoto(with: settings, delegate: self)
         }
@@ -696,13 +722,51 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
         didFinishProcessingPhoto photo: AVCapturePhoto,
         error: Error?
     ) {
-        guard let data = photo.fileDataRepresentation(),
-              let image = UIImage(data: data)
-        else {
-            Task { @MainActor in photoContinuation?.resume(returning: nil) }
-            return
+        let capturedImage = error == nil ? photo.cgImageRepresentation() : nil
+        let orientationValue = (
+            photo.metadata[String(kCGImagePropertyOrientation)] as? NSNumber
+        )?.uint32Value ?? 1
+
+        Task { @MainActor [weak self] in
+            guard let self, let pendingPhotoCapture = self.pendingPhotoCapture else {
+                return
+            }
+            self.pendingPhotoCapture = nil
+
+            guard let capturedImage,
+                  let pixelRect = pendingPhotoCapture.crop.pixelRect(
+                    forWidth: capturedImage.width,
+                    height: capturedImage.height
+                  ),
+                  let croppedImage = capturedImage.cropping(to: pixelRect)
+            else {
+                pendingPhotoCapture.continuation.resume(returning: nil)
+                return
+            }
+
+            let image = UIImage(
+                cgImage: croppedImage,
+                scale: 1,
+                orientation: UIImage.Orientation(exifOrientation: orientationValue)
+            )
+            pendingPhotoCapture.continuation.resume(returning: image)
         }
-        Task { @MainActor in photoContinuation?.resume(returning: image) }
+    }
+}
+
+private extension UIImage.Orientation {
+    /// EXIF orientation values do not share UIKit's raw-value ordering.
+    init(exifOrientation: UInt32) {
+        switch exifOrientation {
+        case 2: self = .upMirrored
+        case 3: self = .down
+        case 4: self = .downMirrored
+        case 5: self = .leftMirrored
+        case 6: self = .right
+        case 7: self = .rightMirrored
+        case 8: self = .left
+        default: self = .up
+        }
     }
 }
 
