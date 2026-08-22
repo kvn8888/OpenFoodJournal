@@ -98,6 +98,30 @@ struct OFJDesignSystemTests {
         #expect(configuration.isAdjustable)
     }
 
+    @Test("camera preview crop maps normalized viewfinder geometry to photo pixels")
+    func cameraPreviewCropPixelMapping() throws {
+        let crop = CameraPreviewCrop(
+            normalizedRect: CGRect(x: 0.25, y: 0.125, width: 0.5, height: 0.75)
+        )
+        let pixelRect = try #require(crop.pixelRect(forWidth: 4_000, height: 3_000))
+
+        #expect(pixelRect == CGRect(x: 1_000, y: 375, width: 2_000, height: 2_250))
+    }
+
+    @Test("camera preview crop clamps to the sensor and rejects unusable dimensions")
+    func cameraPreviewCropBounds() {
+        let bounded = CameraPreviewCrop(
+            normalizedRect: CGRect(x: -0.25, y: 0.25, width: 1, height: 0.5)
+        )
+        let invalid = CameraPreviewCrop(
+            normalizedRect: CGRect(x: 2, y: 2, width: 0.25, height: 0.25)
+        )
+
+        #expect(bounded.normalizedRect == CGRect(x: 0, y: 0.25, width: 0.75, height: 0.5))
+        #expect(invalid == .fullFrame)
+        #expect(invalid.pixelRect(forWidth: 0, height: 3_000) == nil)
+    }
+
     @Test(
         "Journal calorie state uses black below goal, existing greens near goal, and red above goal",
         arguments: [

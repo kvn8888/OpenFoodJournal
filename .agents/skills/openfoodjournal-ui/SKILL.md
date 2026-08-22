@@ -148,6 +148,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - Place circular torch and photo-library controls to the left and right of the centered shutter.
 - The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
 - Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. The native zoom slider is the deliberate exception and has no custom glass container. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
+- The full-screen preview uses `.resizeAspectFill`, so it must publish its normalized visible camera rectangle through `metadataOutputRectConverted(fromLayerRect:)`. Snapshot that rectangle at shutter time and crop the still before review, barcode detection, or AI submission; never show or analyze uncropped sensor content that was outside the viewfinder.
 - `ScanCameraModeDescriptor.supported` is the executable order/label contract; `OFJLayout` owns camera control geometry.
 
 ### Assistant Attachments
