@@ -77,8 +77,8 @@ struct ManualEntryView: View {
 
     let defaultDate: Date
 
-    /// Optional food data to pre-fill the form with. OFF search and AI Search
-    /// both use this so users can review/edit before saving.
+    /// Optional food data to pre-fill the form with. OFF search and future
+    /// providers use this so users can review/edit before saving.
     let prefill: ManualEntryPrefill?
 
     // Form state
@@ -122,7 +122,7 @@ struct ManualEntryView: View {
         self.prefill = ManualEntryPrefill(product: prefillProduct)
     }
 
-    /// Initializer with a general prefill value for AI Search or future sources.
+    /// Initializer with a general prefill value for provider-backed or future sources.
     init(defaultDate: Date, prefill: ManualEntryPrefill) {
         self.defaultDate = defaultDate
         self.prefill = prefill

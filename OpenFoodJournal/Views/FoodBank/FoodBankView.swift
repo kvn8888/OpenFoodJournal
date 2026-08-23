@@ -178,8 +178,6 @@ struct FoodBankView: View {
             // Sheets launched from the "+" menu.
             .sheet(item: $addSheet) { sheet in
                 switch sheet {
-                case .aiSearch:
-                    AIFoodSearchView(logDate: logDate)
                 case .compositeFood:
                     CompositeFoodBuilderView()
                 case .nutritionCalculator:
@@ -331,14 +329,6 @@ struct FoodBankView: View {
                 }
             }
 
-            if food.hasGeneratedFoodIconImage {
-                Button {
-                    pixelPassFoodIcon(for: food)
-                } label: {
-                    Label("Pixel Pass", systemImage: "wand.and.sparkles")
-                }
-            }
-
             if food.isArchivedInFoodBank {
                 Button {
                     restore(food)
@@ -429,13 +419,6 @@ struct FoodBankView: View {
     /// scan a label, enter manually, or search the Open Food Facts database.
     private var addMenu: some View {
         Menu {
-            // AI Search — selected AI provider with web grounding
-            Button {
-                addSheet = .aiSearch
-            } label: {
-                Label("AI Search", systemImage: "sparkles")
-            }
-
             // Composite Food — build a saved food from snapshot copies of Food Bank items
             Button {
                 addSheet = .compositeFood
@@ -495,12 +478,6 @@ struct FoodBankView: View {
             } else {
                 await scanService.refreshFoodEmoji(for: food)
             }
-        }
-    }
-
-    private func pixelPassFoodIcon(for food: SavedFood) {
-        Task {
-            await scanService.pixelPassFoodIconImage(for: food)
         }
     }
 
@@ -730,8 +707,7 @@ private struct ShelfSuggestionRow: View {
     }
 }
 
-private enum FoodBankAddSheet: Identifiable {
-    case aiSearch
+enum FoodBankAddSheet: String, Identifiable, CaseIterable {
     case compositeFood
     case nutritionCalculator
     case openFoodFacts
@@ -739,17 +715,7 @@ private enum FoodBankAddSheet: Identifiable {
     case archive
     case brandManager
 
-    var id: String {
-        switch self {
-        case .aiSearch: "aiSearch"
-        case .compositeFood: "compositeFood"
-        case .nutritionCalculator: "nutritionCalculator"
-        case .openFoodFacts: "openFoodFacts"
-        case .manualEntry: "manualEntry"
-        case .archive: "archive"
-        case .brandManager: "brandManager"
-        }
-    }
+    var id: String { rawValue }
 }
 
 // MARK: - Sort Order

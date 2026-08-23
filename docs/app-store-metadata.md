@@ -85,7 +85,7 @@ HISTORY & CHARTS
 Review your nutrition history with interactive charts. See trends in your calorie and macro intake over time.
 
 EXPORT AND BACK UP
-Export spreadsheet CSVs for analysis, save full JSON backups for restore-grade imports, and export the last 30 days of Gemini diagnostics when troubleshooting scan or AI Search behavior.
+Export spreadsheet CSVs for analysis, save full JSON backups for restore-grade imports, and export recent AI diagnostics when troubleshooting scans or Assistant behavior.
 
 PRIVACY FIRST
 • No accounts or sign-ups
@@ -135,10 +135,10 @@ This app requires a Google Gemini API key for the food scanning feature. The key
 For your convenience, here is a test API key you can use for review:
 [PASTE A DEDICATED REVIEW KEY IN APP STORE CONNECT BEFORE SUBMISSION]
 
-The app works fully offline for manual food entry, Food Bank browsing, container tracking, history, CSV export, and JSON backup/export. The API key is only needed for AI-powered label/photo scanning, Food Bank AI Search, nutrition-calculator OCR import, and optional Food Bank emoji generation.
+The app works fully offline for manual food entry, Food Bank browsing, container tracking, history, CSV export, and JSON backup/export. The API key is only needed for AI-powered label/photo scanning, nutrition-calculator OCR import, optional generated Food Bank icons, and the Assistant.
 
 New in version 1.3:
-- Food Bank adds AI Search, Composite Food, Nutrition Calculator, Archive, brand organization, and optional emoji generation.
+- Food Bank adds Composite Food, Nutrition Calculator, Open Food Facts search, Archive, brand organization, and optional generated icons.
 - Label and food-photo scanning can use multiple photos and show clearer Gemini progress while the scan is running.
 - Apple Health sync writes more nutrients, replaces OpenFoodJournal-owned samples idempotently, and includes repair actions for older OpenFoodJournal Health samples.
 - Data tools now include restore-grade JSON backup/import, CSV export, Gemini diagnostic export, and a local Gemini usage/cost total.
@@ -156,14 +156,14 @@ The app provides nutrition citations and a full health disclaimer under Settings
 ## Promotional Text (170 chars max, editable anytime — no review needed)
 
 ```
-New Food Bank tools, AI Search, better scans, safer Apple Health sync, full backups, and Gemini diagnostics. Free, open-source, no account required.
+New Food Bank tools, better scans, safer Apple Health sync, full backups, and AI diagnostics. Free, open-source, no account required.
 ```
 
 (148 chars)
 
 **Seasonal alternatives:**
 - New Year: `Start 2026 right — scan your meals, track your macros, own your data. Free AI-powered nutrition tracking with no subscriptions or accounts.`
-- Feature launch: `NEW: Composite foods, AI Search, nutrition calculators, safer Apple Health sync, and full backups. Free, open-source, no account needed.`
+- Feature launch: `NEW: Composite foods, nutrition calculators, safer Apple Health sync, and full backups. Free, open-source, no account needed.`
 
 ---
 
@@ -172,7 +172,7 @@ New Food Bank tools, AI Search, better scans, safer Apple Health sync, full back
 ```
 Version 1.3 focuses on better logging workflows, safer Apple Health sync, and a more capable Food Bank.
 
-• Food Bank now supports AI Search, Composite Foods, Nutrition Calculators, Archive, brand organization, and optional food emojis.
+• Food Bank now supports Composite Foods, Nutrition Calculators, Open Food Facts search, Archive, brand organization, and optional food icons.
 • Scans support multiple photos and clearer Gemini progress while results are prepared.
 • Apple Health sync now writes more nutrients, avoids duplicate OpenFoodJournal samples, and includes repair tools for older entries.
 • Added configurable local meal times, full JSON backup/import, improved CSV export, Gemini diagnostic export, and a local Gemini usage/cost total.
@@ -228,7 +228,7 @@ Apple requires screenshots for each device size. Focus on iPhone 6.7" (iPhone 15
 1. **Scan in action** — camera pointed at a nutrition label with the ScanResultCard showing parsed macros
 2. **Daily journal** — DailyLogView with macro rings filled, a few meal entries visible
 3. **Food Bank** — list of saved foods with serving info
-4. **Food Bank + menu** — AI Search, Composite Food, Nutrition Calculator, Open Food Facts, Manual Entry, Archive
+4. **Food Bank + menu** — Composite Food, Nutrition Calculator, Open Food Facts, Manual Entry, Archive, Manage Brands
 5. **Nutrition detail** — NutrientBreakdownView showing all 30+ micronutrients
 6. **History chart** — MacroChartView with a week of data
 

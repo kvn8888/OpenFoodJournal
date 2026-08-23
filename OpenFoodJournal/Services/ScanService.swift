@@ -88,16 +88,19 @@ private struct GeminiFoodEmojiResponse: Codable {
 private struct FoodIconImagePrompt: Encodable {
     let brand: String?
     let item: String
+    let backgroundPolicy = "automatic opposite luminance"
 
     enum CodingKeys: String, CodingKey {
         case brand = "Brand"
         case item
+        case backgroundPolicy = "background_policy"
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(item, forKey: .item)
         try container.encodeIfPresent(brand, forKey: .brand)
+        try container.encode(backgroundPolicy, forKey: .backgroundPolicy)
     }
 }
 
@@ -547,6 +550,8 @@ private struct GeminiGeneratedFoodIconLogMetadata: Codable {
     let originalGeneratedImageBytes: Int
     let storedImageBytes: Int
     let storedImageMimeType: String
+    let foregroundMaskMethod: String
+    let foregroundMaskApplied: Bool
     let storageMaxPixelDimension: Int
     let storageJPEGQuality: Double
     let promptJSON: String
@@ -961,7 +966,17 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     // Image generation currently uses this concrete Gemini image endpoint; the
     // "latest alias only" rule above still applies to text scan/emoji models.
     static let foodIconImageModel = "models/gemini-3.1-flash-lite-image"
-    private static let foodIconImageSystemInstruction = "Pure White background. 3d emoji. Simple. Center the food object. No text on the food items"
+    static let foodIconImageSystemInstruction = """
+    Create one simple centered 3D emoji-style food icon with no text.
+
+    Judge the dominant food object's brightness before rendering:
+    - For a dark food, use a uniform warm off-white background.
+    - For a light food, use a uniform charcoal background.
+
+    Use exactly one flat background color. No gradient, texture, horizon,
+    vignette, props, plate, outline, reflection, ambient glow, or cast shadow.
+    Keep clear margin around the complete food silhouette.
+    """
     // Public Gemini API Standard paid-tier pricing checked 2026-06-30. AI Studio
     // may show a lower studio/free estimate; persisted app estimates use the
     // documented paid API rates so the Settings total stays auditable.
@@ -985,7 +1000,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     private static let foodEmojiFailureCacheStorageKey = "foodBank.foodEmojiGenerationFailures"
     private static let foodIconImageFailureCacheStorageKey = "foodBank.foodIconImageGenerationFailures"
     private static let foodEmojiGenerationCacheVersion = "food-emoji-v1"
-    private static let foodIconImageGenerationCacheVersion = "food-icon-image-v3-high-response-format-160"
+    private static let foodIconImageGenerationCacheVersion = "food-icon-image-v4-adaptive-vision-mask-160"
 
     // MARK: State
 
@@ -1015,6 +1030,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
     @ObservationIgnored private let tursoMirror: TursoMirrorService?
     @ObservationIgnored private let diagnosticSink: (any AIDiagnosticWriting)?
     @ObservationIgnored private let modelCatalog: RuntimeModelCatalog?
+    @ObservationIgnored private let foodIconForegroundMasker: any FoodIconForegroundMasking
     @ObservationIgnored private var foodIconGenerationQueue = FoodIconGenerationQueue()
     @ObservationIgnored private var foodIconGenerationWorker: Task<Void, Never>?
 
@@ -1022,12 +1038,14 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         modelContext: ModelContext? = nil,
         tursoMirror: TursoMirrorService? = nil,
         diagnosticSink: (any AIDiagnosticWriting)? = nil,
-        modelCatalog: RuntimeModelCatalog? = nil
+        modelCatalog: RuntimeModelCatalog? = nil,
+        foodIconForegroundMasker: any FoodIconForegroundMasking = VisionFoodIconForegroundMasker()
     ) {
         self.modelContext = modelContext
         self.tursoMirror = tursoMirror
         self.diagnosticSink = diagnosticSink ?? tursoMirror
         self.modelCatalog = modelCatalog
+        self.foodIconForegroundMasker = foodIconForegroundMasker
     }
 
     // MARK: Configuration
@@ -2049,35 +2067,6 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
     }
 
-    func pixelPassFoodIconImage(for food: SavedFood) async {
-        guard let modelContext else { return }
-        guard let data = food.generatedIconImageData, !data.isEmpty else {
-            foodEmojiProgressMessage = "Generate a food image before running Pixel Pass."
-            return
-        }
-
-        let currentIcon = GeminiGeneratedFoodIconPayload(
-            data: data,
-            mimeType: food.generatedIconImageMimeType ?? "image/*"
-        )
-        guard let pixelPassedIcon = Self.pixelPassedTransparentFoodIconImage(from: currentIcon) else {
-            foodEmojiProgressMessage = "Pixel Pass could not process this image."
-            return
-        }
-
-        food.generatedIconImageData = pixelPassedIcon.data
-        food.generatedIconImageMimeType = pixelPassedIcon.mimeType
-        food.generatedIconImageUpdatedAt = .now
-
-        do {
-            try modelContext.save()
-            tursoMirror?.scheduleMirror(reason: "food_icon_image_pixel_pass")
-            foodEmojiProgressMessage = "Pixel Pass applied."
-        } catch {
-            foodEmojiProgressMessage = "Pixel Pass failed to save."
-        }
-    }
-
     private func apply(_ icon: GeminiGeneratedFoodIconPayload, to food: SavedFood) {
         food.generatedIconImageData = icon.data
         food.generatedIconImageMimeType = icon.mimeType
@@ -2435,7 +2424,15 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             let rawText = String(data: data, encoding: .utf8) ?? "<binary response>"
             try fail(ScanError.invalidGeneratedImageResponse(Self.clippedForLog(rawText)), stage: "image_parse")
         }
-        let icon = Self.optimizedStoredFoodIconImage(from: generatedIcon) ?? generatedIcon
+        let semanticMaskData = await foodIconForegroundMasker.transparentPNG(
+            from: generatedIcon.data,
+            maximumPixelDimension: Self.foodIconStoredMaxPixelDimension
+        )
+        let semanticMaskApplied = semanticMaskData != nil
+        let icon = Self.storedFoodIconPayload(
+            from: generatedIcon,
+            semanticMaskData: semanticMaskData
+        )
 
         let imagePricing = applyFoodIconImagePricing(from: data, to: &attempt)
         attempt.rawResponseJSON = encodedJSONString(
@@ -2443,6 +2440,8 @@ final class ScanService: SavedFoodImageGenerationQueuing {
                 originalGeneratedImageBytes: generatedIcon.data.count,
                 storedImageBytes: icon.data.count,
                 storedImageMimeType: icon.mimeType,
+                foregroundMaskMethod: "vision_foreground_instance",
+                foregroundMaskApplied: semanticMaskApplied,
                 storageMaxPixelDimension: Int(Self.foodIconStoredMaxPixelDimension),
                 storageJPEGQuality: Self.foodIconStoredJPEGQuality,
                 promptJSON: prompt,
@@ -2465,6 +2464,22 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         #endif
 
         return icon
+    }
+
+    /// Vision failure must never discard a successfully generated icon or cause
+    /// another billable request. A semantic PNG wins; otherwise the compact
+    /// opaque contrast image remains a truthful, usable fallback.
+    static func storedFoodIconPayload(
+        from generatedIcon: GeminiGeneratedFoodIconPayload,
+        semanticMaskData: Data?
+    ) -> GeminiGeneratedFoodIconPayload {
+        if let semanticMaskData, !semanticMaskData.isEmpty {
+            return GeminiGeneratedFoodIconPayload(
+                data: semanticMaskData,
+                mimeType: foodIconTransparentMimeType
+            )
+        }
+        return optimizedStoredFoodIconImage(from: generatedIcon) ?? generatedIcon
     }
 
     /// Builds the exact production payload used by both the app and the live
@@ -2491,129 +2506,25 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
     private static func optimizedStoredFoodIconImage(from icon: GeminiGeneratedFoodIconPayload) -> GeminiGeneratedFoodIconPayload? {
         guard let image = UIImage(data: icon.data) else { return nil }
-        guard let resized = resizedFoodIconImage(from: image, opaque: true, fillColor: .white) else {
+        let preservesTransparency = imageHasAlpha(image)
+        guard let resized = resizedFoodIconImage(
+            from: image,
+            opaque: !preservesTransparency,
+            fillColor: preservesTransparency ? nil : .white
+        ) else {
             return nil
         }
 
+        if preservesTransparency, let data = resized.pngData() {
+            return GeminiGeneratedFoodIconPayload(
+                data: data,
+                mimeType: foodIconTransparentMimeType
+            )
+        }
         guard let data = resized.jpegData(compressionQuality: foodIconStoredJPEGQuality) else {
             return nil
         }
         return GeminiGeneratedFoodIconPayload(data: data, mimeType: foodIconStoredMimeType)
-    }
-
-    private static func pixelPassedTransparentFoodIconImage(from icon: GeminiGeneratedFoodIconPayload) -> GeminiGeneratedFoodIconPayload? {
-        guard let image = UIImage(data: icon.data),
-              let resized = resizedFoodIconImage(from: image, opaque: false, fillColor: nil),
-              let cgImage = resized.cgImage else {
-            return nil
-        }
-
-        let width = cgImage.width
-        let height = cgImage.height
-        guard width > 0, height > 0 else { return nil }
-
-        let bytesPerPixel = 4
-        let bytesPerRow = width * bytesPerPixel
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
-        var pixels = [UInt8](repeating: 0, count: height * bytesPerRow)
-
-        let didDrawImage = pixels.withUnsafeMutableBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress,
-                  let context = CGContext(
-                      data: baseAddress,
-                      width: width,
-                      height: height,
-                      bitsPerComponent: 8,
-                      bytesPerRow: bytesPerRow,
-                      space: colorSpace,
-                      bitmapInfo: bitmapInfo.rawValue
-                  ) else {
-                return false
-            }
-
-            context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
-            return true
-        }
-        guard didDrawImage else {
-            return nil
-        }
-
-        var visited = [Bool](repeating: false, count: width * height)
-        var queue: [Int] = []
-        queue.reserveCapacity(width * height)
-
-        func enqueue(_ x: Int, _ y: Int) {
-            guard x >= 0, x < width, y >= 0, y < height else { return }
-            let pixelIndex = y * width + x
-            guard !visited[pixelIndex] else { return }
-
-            if pixelPassBackgroundAlpha(pixels, byteIndex: pixelIndex * bytesPerPixel) != nil {
-                visited[pixelIndex] = true
-                queue.append(pixelIndex)
-            }
-        }
-
-        for x in 0..<width {
-            enqueue(x, 0)
-            enqueue(x, height - 1)
-        }
-        for y in 0..<height {
-            enqueue(0, y)
-            enqueue(width - 1, y)
-        }
-
-        var head = 0
-        while head < queue.count {
-            let pixelIndex = queue[head]
-            head += 1
-
-            let x = pixelIndex % width
-            let y = pixelIndex / width
-            enqueue(x + 1, y)
-            enqueue(x - 1, y)
-            enqueue(x, y + 1)
-            enqueue(x, y - 1)
-        }
-
-        var softShadowPixelCount = 0
-        for pixelIndex in queue {
-            let byteIndex = pixelIndex * bytesPerPixel
-            let outputAlpha = pixelPassBackgroundAlpha(pixels, byteIndex: byteIndex) ?? 0
-            if outputAlpha > 0 {
-                softShadowPixelCount += 1
-            }
-
-            pixels[byteIndex] = 0
-            pixels[byteIndex + 1] = 0
-            pixels[byteIndex + 2] = 0
-            pixels[byteIndex + 3] = outputAlpha
-        }
-
-        let outputData = Data(pixels)
-        guard let provider = CGDataProvider(data: outputData as CFData),
-              let outputImage = CGImage(
-                  width: width,
-                  height: height,
-                  bitsPerComponent: 8,
-                  bitsPerPixel: 32,
-                  bytesPerRow: bytesPerRow,
-                  space: colorSpace,
-                  bitmapInfo: bitmapInfo,
-                  provider: provider,
-                  decode: nil,
-                  shouldInterpolate: true,
-                  intent: .defaultIntent
-              ),
-              let pngData = UIImage(cgImage: outputImage, scale: 1, orientation: .up).pngData() else {
-            return nil
-        }
-
-        #if DEBUG
-        print("🧪 Food icon Pixel Pass backgroundPixels=\(queue.count)/\(width * height) softShadowPixels=\(softShadowPixelCount) bytes=\(icon.data.count)->\(pngData.count)")
-        #endif
-
-        return GeminiGeneratedFoodIconPayload(data: pngData, mimeType: foodIconTransparentMimeType)
     }
 
     private static func resizedFoodIconImage(from image: UIImage, opaque: Bool, fillColor: UIColor?) -> UIImage? {
@@ -2641,29 +2552,16 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
     }
 
-    private static func pixelPassBackgroundAlpha(_ pixels: [UInt8], byteIndex: Int) -> UInt8? {
-        let alpha = Int(pixels[byteIndex + 3])
-        guard alpha >= 12 else { return 0 }
-
-        let red = Int(pixels[byteIndex])
-        let green = Int(pixels[byteIndex + 1])
-        let blue = Int(pixels[byteIndex + 2])
-        let darkestChannel = min(red, green, blue)
-        let brightestChannel = max(red, green, blue)
-        let distanceFromWhite = max(255 - red, 255 - green, 255 - blue)
-
-        guard darkestChannel >= 185,
-              brightestChannel - darkestChannel <= 44 else {
-            return nil
+    private static func imageHasAlpha(_ image: UIImage) -> Bool {
+        guard let alphaInfo = image.cgImage?.alphaInfo else { return false }
+        switch alphaInfo {
+        case .first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly:
+            return true
+        case .none, .noneSkipFirst, .noneSkipLast:
+            return false
+        @unknown default:
+            return false
         }
-
-        let transparentDistance = 5
-        guard distanceFromWhite > transparentDistance else { return 0 }
-
-        let rampDistance = 82.0
-        let ramp = min(1, Double(distanceFromWhite - transparentDistance) / rampDistance)
-        let eased = ramp * ramp * (3 - 2 * ramp)
-        return UInt8((eased * 96).rounded())
     }
 
     nonisolated static func extractFoodEmoji(from raw: String) -> String? {

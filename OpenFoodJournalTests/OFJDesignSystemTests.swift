@@ -13,6 +13,20 @@ struct OFJDesignSystemTests {
         #expect(JournalRoute.allCases == [.settings])
     }
 
+    @Test("Food Bank add menu excludes retired AI Search")
+    func foodBankAddMenu() {
+        #expect(
+            FoodBankAddSheet.allCases == [
+                .compositeFood,
+                .nutritionCalculator,
+                .openFoodFacts,
+                .manualEntry,
+                .archive,
+                .brandManager,
+            ]
+        )
+    }
+
     @Test("shape hierarchy remains concentric")
     func radiiAreOrdered() {
         #expect(OFJRadius.card > OFJRadius.compactCard)
