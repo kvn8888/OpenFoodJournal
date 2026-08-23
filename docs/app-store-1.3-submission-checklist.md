@@ -33,7 +33,7 @@ xcodebuild -project OpenFoodJournal.xcodeproj \
 
 1. Open the app and enter the reviewer Gemini API key during onboarding or in Settings.
 2. Add a manual food without using Gemini.
-3. Use Food Bank `+` to verify AI Search, Composite Food, Nutrition Calculator, Open Food Facts, Manual Entry, and Archive are reachable.
+3. Use Food Bank `+` to verify Composite Food, Nutrition Calculator, Open Food Facts, Manual Entry, Archive, and Manage Brands are reachable.
 4. Scan one nutrition label photo and confirm the editable result screen appears before saving.
 5. In Settings, verify Sources & Disclaimers, backup/export, Gemini diagnostics, and Apple Health controls are reachable.
 

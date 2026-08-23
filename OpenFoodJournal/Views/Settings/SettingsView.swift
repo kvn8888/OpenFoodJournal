@@ -210,7 +210,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Scan Provider")
                 } footer: {
-                    Text("Used for food scans, AI Search, OCR, and generated food icons. API keys stay in Keychain and are never exported.")
+                    Text("Used for food scans, OCR, and generated food icons. API keys stay in Keychain and are never exported.")
                 }
 
                 // MARK: Scanning
@@ -221,7 +221,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Scanning")
                 } footer: {
-                    Text("When enabled, food photo scans, AI Search, and calculator OCR use the provider's Pro model. Lite mode is faster and uses less quota.")
+                    Text("When enabled, food photo scans and calculator OCR use the provider's Pro model. Lite mode is faster and uses less quota.")
                 }
 
                 // MARK: Assistant
@@ -548,7 +548,7 @@ struct SettingsView: View {
                                     value: geminiGroundedSearchPrompts
                                 )
                         } label: {
-                            Text("AI Search Grounding")
+                            Text("Legacy Grounded Searches")
                         }
                     }
 
@@ -655,7 +655,7 @@ struct SettingsView: View {
                     .alert("No AI logs", isPresented: $showNoGeminiLogsAlert) {
                         Button("OK", role: .cancel) {}
                     } message: {
-                        Text("Enable Turso diagnostics, then use AI Scan, AI Search, or the Assistant. The export contains the last 14 days stored in your Turso database.")
+                        Text("Enable Turso diagnostics, then use AI Scan or the Assistant. The export contains the last 14 days stored in your Turso database.")
                     }
 
                     Button(role: .destructive) {

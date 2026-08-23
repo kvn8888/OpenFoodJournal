@@ -118,8 +118,9 @@ func searchNutrition(query: String, useProModel: Bool = false) async throws -> N
 func extractCalculatorIngredient(named name: String, from images: [UIImage], useProModel: Bool = false) async throws -> CalculatorIngredientDraft
 ```
 - Encodes 1-4 resized JPEG photos as Gemini `inline_data` parts for label/food scans
-- Uses Gemini `google_search` grounding for Food Bank AI Search
+- Retains legacy Food Bank AI Search request/diagnostic decoding only for backward compatibility; no user-facing view or menu entry remains
 - Extracts portions for one user-named restaurant/brand calculator ingredient from images; the typed ingredient name anchors Gemini so it does not invent a whole calculator structure
+- Generated Food Bank images request an opposite-luminance matte, then `VisionFoodIconForegroundMasker` performs on-device semantic subject lifting and stores a 160 px transparent PNG; Vision failures retain the compact opaque contrast JPEG without another provider call
 - Parses `GeminiNutritionResponse` (Codable) into `NutritionEntry`
 - Streams Gemini thought-summary parts into `thinkingTrace`
 - Emits redacted `AIDiagnosticEvent` success/failure telemetry through the configured Turso sink and updates the local `GeminiCostAccumulator` from response `usageMetadata`; it does not insert new detailed logs into SwiftData/CloudKit
