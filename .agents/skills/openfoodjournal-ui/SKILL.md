@@ -169,6 +169,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - Quantity minus/plus icons keep compact visuals but own equal full-height 52-point-wide hit columns. The unit strip shows a noninteractive trailing chevron only when measured choices overflow. `FoodBankView` uses default system `.searchable` behavior; do not add `searchToolbarBehavior` unless a separately reviewed navigation change requires it.
 - The Food Bank `+` menu contains Composite Food, Nutrition Calculator, Search Open Food Facts, Manual Entry, Archive, and Manage Brands. AI Search is intentionally retired and must not be reintroduced through another sheet or menu alias.
 - Generated food icons use adaptive opposite-luminance matte backgrounds and Apple Vision semantic subject lifting. Successful masks are transparent PNGs; masking failures keep the opaque contrast JPEG. Do not add RGB thresholding, border flood fill, or a manual Pixel Pass action.
+- Every expanded Shelf Suggestion row has a trailing native swipe action labeled Remove from Shelf. It explicitly sets `isOnShelf` to false, saves SwiftData, and schedules the Turso mirror; never implement it by toggling, because a repeated gesture must not put the item back on the shelf.
 - Accent selection is user data for backup/mirror purposes, while missing or future values must decode to Blue for backward compatibility.
 
 ### Sheet Management (Enum-Driven)
