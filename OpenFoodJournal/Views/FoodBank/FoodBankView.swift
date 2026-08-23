@@ -227,6 +227,14 @@ struct FoodBankView: View {
                                     (recommendation.hasIncompleteNutrition ? " Nutrition incomplete." : "")
                                 )
                                 .accessibilityHint("Opens an editable food log with the recommended quantity.")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button {
+                                        removeFromShelf(food)
+                                    } label: {
+                                        Label("Remove from Shelf", systemImage: "cabinet")
+                                    }
+                                    .tint(.orange)
+                                }
                             }
                         }
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -589,6 +597,13 @@ struct FoodBankView: View {
         food.isOnShelf.toggle()
         try? modelContext.save()
         tursoMirror.scheduleMirror(reason: "food_bank_shelf_changed")
+    }
+
+    private func removeFromShelf(_ food: SavedFood) {
+        guard food.isOnShelf else { return }
+        food.isOnShelf = false
+        try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "food_bank_shelf_removed_from_suggestion")
     }
 
     private func shelfConfiguration(_ preferences: Preferences) -> ShelfRecommendationConfiguration {
