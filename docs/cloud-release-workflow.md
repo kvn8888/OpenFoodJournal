@@ -36,7 +36,7 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 | Source branch | `app-store` was development, TestFlight, and App Store release state | `testflight` is integration/beta; `app-store` is production promotion |
 | Pull requests | Local compile verification was performed when requested | Every PR to either protected branch runs cloud compile and non-UI tests |
 | Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Pinned GitHub `xcode-27` preview image |
-| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5218g` and fails on drift |
+| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5228h` and fails on drift |
 | DerivedData | Accumulated under local `.asc` or other local paths | Created under `RUNNER_TEMP` and destroyed after the job |
 | Unit tests | Often compile-only because the local simulator store is unreliable | Executed on a hosted iPhone simulator through the unit-test-only scheme |
 | UI tests | Not required | UI-test execution remains excluded |
@@ -64,7 +64,7 @@ Triggers on:
 It:
 
 1. Uses the pinned `xcode-27` image.
-2. Confirms Xcode 27.0 build `27A5218g`.
+2. Confirms Xcode 27.0 build `27A5228h`.
 3. Runs the release-note and promotion-manifest contract tests.
 4. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
 5. Selects an available hosted iPhone simulator.
@@ -124,9 +124,31 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
     "requiresHumanApproval": true
   },
   "version": "1.4",
-  "xcodeBuild": "27A5218g"
+  "xcodeBuild": "27A5228h"
 }
 ```
+
+### `.github/workflows/testflight-external.yml`
+
+Runs only by manual dispatch from the default `app-store` branch. The owner must
+provide an exact immutable `testflight/<version>-<build>` tag and explicitly
+confirm external promotion.
+
+It:
+
+1. Downloads the selected schema-2 manifest without Apple credentials.
+2. Verifies the tag, manifest commit, app ID, version, build number, human-approval marker, and configured external group.
+3. Publishes a reviewable plan and pauses at the protected `app-store-production` environment.
+4. Re-verifies the approved manifest after secrets become available.
+5. Confirms the existing App Store Connect build remains `VALID`, unexpired, and exactly matches the manifest.
+6. Confirms the destination is the configured public-link external group and is different from the internal group.
+7. Assigns the existing build without rebuilding or re-uploading it.
+8. Submits Beta App Review when the build is ready, or exits idempotently when it is already awaiting review or externally testing.
+9. Verifies group assignment and reports the resulting external state and existing public link.
+
+This workflow intentionally reuses the `app-store-production` reviewer gate and
+credentials. Internal TestFlight remains automatic; expanding a build to anyone
+with the public link requires a separate owner-approved action.
 
 ### `.github/workflows/app-store.yml`
 
