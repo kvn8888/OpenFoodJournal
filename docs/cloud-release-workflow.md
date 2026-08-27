@@ -128,6 +128,28 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
 }
 ```
 
+### `.github/workflows/testflight-external.yml`
+
+Runs only by manual dispatch from the default `app-store` branch. The owner must
+provide an exact immutable `testflight/<version>-<build>` tag and explicitly
+confirm external promotion.
+
+It:
+
+1. Downloads the selected schema-2 manifest without Apple credentials.
+2. Verifies the tag, manifest commit, app ID, version, build number, human-approval marker, and configured external group.
+3. Publishes a reviewable plan and pauses at the protected `app-store-production` environment.
+4. Re-verifies the approved manifest after secrets become available.
+5. Confirms the existing App Store Connect build remains `VALID`, unexpired, and exactly matches the manifest.
+6. Confirms the destination is the configured public-link external group and is different from the internal group.
+7. Assigns the existing build without rebuilding or re-uploading it.
+8. Submits Beta App Review when the build is ready, or exits idempotently when it is already awaiting review or externally testing.
+9. Verifies group assignment and reports the resulting external state and existing public link.
+
+This workflow intentionally reuses the `app-store-production` reviewer gate and
+credentials. Internal TestFlight remains automatic; expanding a build to anyone
+with the public link requires a separate owner-approved action.
+
 ### `.github/workflows/app-store.yml`
 
 Triggers on pushes to `app-store` or manual dispatch. The promotion job runs only when `ENABLE_APP_STORE_AUTOMATION` equals `true`.

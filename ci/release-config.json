@@ -6,6 +6,7 @@
   "teamID": "83B48K23H4",
   "signingCertificateName": "iPhone Distribution",
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
+  "externalTestFlightGroupID": "fb9250ee-ab00-43bd-943e-b73e4639cb8a",
   "primaryLocale": "en-US",
   "xcodeRunner": "xcode-27",
   "requiredXcodeVersion": "Xcode 27.0",

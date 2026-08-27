@@ -13,6 +13,28 @@ while IFS= read -r checkout_ref; do
   fi
 done < <(grep -Rho 'actions/checkout@[^ ]*' .github/workflows)
 
+if [[ ! -f .github/workflows/testflight-external.yml ]]; then
+  echo "External TestFlight promotion workflow is missing." >&2
+  exit 1
+fi
+for required_text in \
+  'environment: app-store-production' \
+  'verify-external-testflight.sh' \
+  'asc builds add-groups' \
+  '--submit' \
+  'confirm_external_promotion'; do
+  if ! grep -Fq -- "${required_text}" .github/workflows/testflight-external.yml; then
+    echo "External TestFlight workflow is missing contract: ${required_text}" >&2
+    exit 1
+  fi
+done
+internal_group_id="$(jq -r '.testFlightGroupID // empty' ci/release-config.json)"
+external_group_id="$(jq -r '.externalTestFlightGroupID // empty' ci/release-config.json)"
+if [[ -z "${external_group_id}" || "${external_group_id}" == "${internal_group_id}" ]]; then
+  echo "External TestFlight group must exist and differ from the internal group." >&2
+  exit 1
+fi
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
@@ -63,10 +85,11 @@ mkdir -p \
   "${promotion_repo}/ci"
 cp .github/scripts/validate-release-notes.sh "${promotion_repo}/.github/scripts/"
 cp .github/scripts/verify-promotion.sh "${promotion_repo}/.github/scripts/"
+cp .github/scripts/verify-external-testflight.sh "${promotion_repo}/.github/scripts/"
 cp .github/scripts/prepare-github-app-store-release.sh "${promotion_repo}/.github/scripts/"
 cp .github/scripts/verify-public-release-candidate.sh "${promotion_repo}/.github/scripts/"
 printf '%s\n' \
-  '{"appStoreAppID":"6761086648","publicReleaseTagPrefix":"v","testFlightTagPrefix":"testflight/"}' \
+  '{"appStoreAppID":"6761086648","publicReleaseTagPrefix":"v","testFlightTagPrefix":"testflight/","testFlightGroupID":"internal-group","externalTestFlightGroupID":"external-group"}' \
   > "${promotion_repo}/ci/release-config.json"
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal/App.swift"
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal.xcodeproj/project.pbxproj"
@@ -145,6 +168,29 @@ grep -qx "${fixture_whats_new}#whats-new.txt" "${fake_gh_capture}"
     "${fixture_manifest}" \
     "${fixture_whats_new}" >/dev/null
 )
+
+(
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-external-testflight.sh \
+    testflight/1.4-11 \
+    "${fixture_manifest}" >/dev/null
+)
+
+jq '.externalTestFlightGroupID = .testFlightGroupID' \
+  "${promotion_repo}/ci/release-config.json" \
+  > "${promotion_repo}/ci/release-config.invalid.json"
+mv "${promotion_repo}/ci/release-config.json" "${promotion_repo}/ci/release-config.valid.json"
+mv "${promotion_repo}/ci/release-config.invalid.json" "${promotion_repo}/ci/release-config.json"
+if (
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-external-testflight.sh \
+    testflight/1.4-11 \
+    "${fixture_manifest}" >/dev/null 2>&1
+); then
+  echo "Internal group unexpectedly passed as the external TestFlight group." >&2
+  exit 1
+fi
+mv "${promotion_repo}/ci/release-config.valid.json" "${promotion_repo}/ci/release-config.json"
 
 jq '.schemaVersion = 1' "${fixture_manifest}" > "${fixture_manifest}.invalid"
 if (

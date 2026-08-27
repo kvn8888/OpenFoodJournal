@@ -1,0 +1,281 @@
+name: External TestFlight Promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      testflight_tag:
+        description: Immutable TestFlight tag to promote, for example testflight/1.4-27
+        required: true
+        type: string
+      confirm_external_promotion:
+        description: Assign this exact build to the public group and submit Beta App Review
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openfoodjournal-external-testflight-promotion
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare external promotion plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    outputs:
+      build_id: ${{ steps.plan.outputs.build_id }}
+      build_number: ${{ steps.plan.outputs.build_number }}
+      tag: ${{ steps.plan.outputs.tag }}
+      version: ${{ steps.plan.outputs.version }}
+
+    steps:
+      - name: Require explicit external-promotion confirmation
+        run: |
+          if [[ "${{ inputs.confirm_external_promotion }}" != "true" ]]; then
+            echo "External TestFlight promotion requires explicit confirmation." >&2
+            exit 1
+          fi
+
+      - name: Check out default release source and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and verify immutable TestFlight build
+        id: plan
+        run: |
+          testflight_tag="${{ inputs.testflight_tag }}"
+          tag_prefix="$(jq -r '.testFlightTagPrefix' ci/release-config.json)"
+          if [[ -z "${testflight_tag}" || "${testflight_tag}" != "${tag_prefix}"* ]]; then
+            echo "Tag must begin with ${tag_prefix}." >&2
+            exit 1
+          fi
+
+          release_json="$(gh release view "${testflight_tag}" --json tagName,isDraft,isPrerelease,targetCommitish)"
+          if [[ "$(jq -r '.isDraft' <<< "${release_json}")" != "false" || \
+                "$(jq -r '.isPrerelease' <<< "${release_json}")" != "true" ]]; then
+            echo "${testflight_tag} is not a published immutable TestFlight prerelease." >&2
+            exit 1
+          fi
+
+          plan_dir="${RUNNER_TEMP}/external-testflight-plan"
+          mkdir -p "${plan_dir}"
+          gh release download "${testflight_tag}" \
+            --pattern 'release-manifest.json' \
+            --dir "${plan_dir}"
+          manifest="${plan_dir}/release-manifest.json"
+          bash .github/scripts/verify-external-testflight.sh \
+            "${testflight_tag}" \
+            "${manifest}"
+
+          printf 'build_id=%s\n' "$(jq -r '.buildID' "${manifest}")" >> "${GITHUB_OUTPUT}"
+          printf 'build_number=%s\n' "$(jq -r '.buildNumber' "${manifest}")" >> "${GITHUB_OUTPUT}"
+          printf 'tag=%s\n' "${testflight_tag}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "$(jq -r '.version' "${manifest}")" >> "${GITHUB_OUTPUT}"
+
+      - name: Retain reviewed external promotion plan
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: external-testflight-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/external-testflight-plan
+          retention-days: 14
+
+      - name: Write protected-approval summary
+        run: |
+          {
+            echo "## External TestFlight promotion awaiting approval"
+            echo
+            echo "- Version: ${{ steps.plan.outputs.version }}"
+            echo "- Build: ${{ steps.plan.outputs.build_number }}"
+            echo "- Immutable source: \`${{ steps.plan.outputs.tag }}\`"
+            echo "- Exact existing binary: yes; no rebuild or upload"
+            echo "- Destination: public-link external TestFlight group"
+            echo "- Requested mutation: assign build and submit Beta App Review"
+            echo
+            echo "Approve the protected \`app-store-production\` environment only if this exact build should become public-link eligible."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  promote:
+    name: Promote existing build externally
+    needs: prepare
+    runs-on: xcode-27
+    timeout-minutes: 20
+    environment: app-store-production
+
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+
+    steps:
+      - name: Check out approved release source and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download approved external promotion plan
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: external-testflight-plan-${{ github.run_id }}
+          path: ${{ runner.temp }}/external-testflight-plan
+
+      - name: Reverify approved build provenance
+        run: |
+          bash .github/scripts/verify-external-testflight.sh \
+            "${{ needs.prepare.outputs.tag }}" \
+            "${RUNNER_TEMP}/external-testflight-plan/release-manifest.json"
+
+      - name: Install pinned App Store Connect CLI
+        run: bash .github/scripts/install-asc.sh
+
+      - name: Verify build and public-link group
+        id: state
+        run: |
+          build_id="${{ needs.prepare.outputs.build_id }}"
+          external_group_id="$(jq -r '.externalTestFlightGroupID' ci/release-config.json)"
+
+          asc builds info \
+            --build-id "${build_id}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/build-info.json"
+          processing_state="$(jq -r '.data.attributes.processingState // empty' "${RUNNER_TEMP}/build-info.json")"
+          build_number="$(jq -r '.data.attributes.version // empty' "${RUNNER_TEMP}/build-info.json")"
+          marketing_version="$(jq -r '[.included[]? | select(.type == "preReleaseVersions")][0].attributes.version // empty' "${RUNNER_TEMP}/build-info.json")"
+          expired="$(jq -r '.data.attributes.expired // false' "${RUNNER_TEMP}/build-info.json")"
+          if [[ "${processing_state}" != "VALID" || "${expired}" == "true" ]]; then
+            echo "Build is not a current VALID App Store Connect build." >&2
+            exit 1
+          fi
+          if [[ "${build_number}" != "${{ needs.prepare.outputs.build_number }}" || \
+                "${marketing_version}" != "${{ needs.prepare.outputs.version }}" ]]; then
+            echo "App Store Connect build ${marketing_version} (${build_number}) does not match the manifest." >&2
+            exit 1
+          fi
+
+          asc testflight groups view \
+            --id "${external_group_id}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/external-group.json"
+          is_internal="$(jq -r '.data.attributes.isInternalGroup // false' "${RUNNER_TEMP}/external-group.json")"
+          public_link_enabled="$(jq -r '.data.attributes.publicLinkEnabled // false' "${RUNNER_TEMP}/external-group.json")"
+          if [[ "${is_internal}" == "true" || "${public_link_enabled}" != "true" ]]; then
+            echo "Configured destination is not a public-link external TestFlight group." >&2
+            exit 1
+          fi
+
+          asc testflight groups links view \
+            --group-id "${external_group_id}" \
+            --type builds \
+            --paginate \
+            --output json > "${RUNNER_TEMP}/external-group-builds.json"
+          if jq -e --arg build_id "${build_id}" '.data[]? | select(.id == $build_id)' \
+            "${RUNNER_TEMP}/external-group-builds.json" >/dev/null; then
+            assigned="true"
+          else
+            assigned="false"
+          fi
+
+          asc builds build-beta-detail view \
+            --build-id "${build_id}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/beta-detail-before.json"
+          external_state="$(jq -r '.data.attributes.externalBuildState // empty' "${RUNNER_TEMP}/beta-detail-before.json")"
+          printf 'assigned=%s\n' "${assigned}" >> "${GITHUB_OUTPUT}"
+          printf 'external_state=%s\n' "${external_state}" >> "${GITHUB_OUTPUT}"
+          printf 'external_group_id=%s\n' "${external_group_id}" >> "${GITHUB_OUTPUT}"
+
+      - name: Assign and submit external Beta App Review
+        run: |
+          build_id="${{ needs.prepare.outputs.build_id }}"
+          external_group_id="${{ steps.state.outputs.external_group_id }}"
+          assigned="${{ steps.state.outputs.assigned }}"
+          external_state="${{ steps.state.outputs.external_state }}"
+
+          case "${external_state}" in
+            IN_BETA_TESTING)
+              if [[ "${assigned}" != "true" ]]; then
+                asc builds add-groups \
+                  --build-id "${build_id}" \
+                  --group "${external_group_id}" \
+                  --output json \
+                  --pretty
+              fi
+              ;;
+            READY_FOR_BETA_SUBMISSION)
+              if [[ "${assigned}" == "true" ]]; then
+                asc testflight review submit \
+                  --build-id "${build_id}" \
+                  --confirm \
+                  --output json \
+                  --pretty
+              else
+                asc builds add-groups \
+                  --build-id "${build_id}" \
+                  --group "${external_group_id}" \
+                  --submit \
+                  --confirm \
+                  --output json \
+                  --pretty
+              fi
+              ;;
+            WAITING_FOR_BETA_REVIEW|IN_BETA_REVIEW)
+              if [[ "${assigned}" != "true" ]]; then
+                asc builds add-groups \
+                  --build-id "${build_id}" \
+                  --group "${external_group_id}" \
+                  --output json \
+                  --pretty
+              fi
+              ;;
+            *)
+              echo "Build external state ${external_state:-unknown} is not safely promotable." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Verify submitted external state
+        run: |
+          sleep 5
+          build_id="${{ needs.prepare.outputs.build_id }}"
+          external_group_id="${{ steps.state.outputs.external_group_id }}"
+          asc testflight groups links view \
+            --group-id "${external_group_id}" \
+            --type builds \
+            --paginate \
+            --output json > "${RUNNER_TEMP}/external-group-builds-after.json"
+          if ! jq -e --arg build_id "${build_id}" '.data[]? | select(.id == $build_id)' \
+            "${RUNNER_TEMP}/external-group-builds-after.json" >/dev/null; then
+            echo "Build was not assigned to the public-link group." >&2
+            exit 1
+          fi
+
+          asc builds build-beta-detail view \
+            --build-id "${build_id}" \
+            --output json \
+            --pretty > "${RUNNER_TEMP}/beta-detail-after.json"
+          external_state="$(jq -r '.data.attributes.externalBuildState // empty' "${RUNNER_TEMP}/beta-detail-after.json")"
+          case "${external_state}" in
+            READY_FOR_BETA_SUBMISSION|WAITING_FOR_BETA_REVIEW|IN_BETA_REVIEW|IN_BETA_TESTING) ;;
+            *)
+              echo "Unexpected post-submission external state: ${external_state:-unknown}." >&2
+              exit 1
+              ;;
+          esac
+
+          public_link="$(jq -r '.data.attributes.publicLink // empty' "${RUNNER_TEMP}/external-group.json")"
+          {
+            echo "## External TestFlight promotion submitted"
+            echo
+            echo "- Version: ${{ needs.prepare.outputs.version }}"
+            echo "- Build: ${{ needs.prepare.outputs.build_number }}"
+            echo "- Immutable source: \`${{ needs.prepare.outputs.tag }}\`"
+            echo "- External state: \`${external_state}\`"
+            echo "- Public link: ${public_link}"
+            echo "- Binary rebuilt or re-uploaded: no"
+          } >> "${GITHUB_STEP_SUMMARY}"
