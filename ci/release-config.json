@@ -10,7 +10,7 @@
   "primaryLocale": "en-US",
   "xcodeRunner": "xcode-27",
   "requiredXcodeVersion": "Xcode 27.0",
-  "requiredXcodeBuild": "27A5218g",
+  "requiredXcodeBuild": "27A5228h",
   "ascVersion": "3.1.1",
   "releaseNotesModel": "openai/gpt-4.1",
   "ascSHA256": {

@@ -36,7 +36,7 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 | Source branch | `app-store` was development, TestFlight, and App Store release state | `testflight` is integration/beta; `app-store` is production promotion |
 | Pull requests | Local compile verification was performed when requested | Every PR to either protected branch runs cloud compile and non-UI tests |
 | Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Pinned GitHub `xcode-27` preview image |
-| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5218g` and fails on drift |
+| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5228h` and fails on drift |
 | DerivedData | Accumulated under local `.asc` or other local paths | Created under `RUNNER_TEMP` and destroyed after the job |
 | Unit tests | Often compile-only because the local simulator store is unreliable | Executed on a hosted iPhone simulator through the unit-test-only scheme |
 | UI tests | Not required | UI-test execution remains excluded |
@@ -64,7 +64,7 @@ Triggers on:
 It:
 
 1. Uses the pinned `xcode-27` image.
-2. Confirms Xcode 27.0 build `27A5218g`.
+2. Confirms Xcode 27.0 build `27A5228h`.
 3. Runs the release-note and promotion-manifest contract tests.
 4. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
 5. Selects an available hosted iPhone simulator.
@@ -124,7 +124,7 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
     "requiresHumanApproval": true
   },
   "version": "1.4",
-  "xcodeBuild": "27A5218g"
+  "xcodeBuild": "27A5228h"
 }
 ```
 
