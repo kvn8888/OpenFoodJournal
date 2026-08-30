@@ -16,7 +16,7 @@ enum JournalStyle {
     static let rowVerticalPadding: CGFloat = 12
     // Overlapping glass entry chips; separate from the large nutrient rings.
     static let entryMacroDiameter: CGFloat = 40
-    static let entryMacroOverlap: CGFloat = 14
+    static let entryMacroOverlap: CGFloat = 3
     static let entryMacroGlassTintOpacity: Double = 0.7
     static let entryMacroNumberSize: CGFloat = 13
     static let entryMacroUnitSize: CGFloat = 12
@@ -31,7 +31,7 @@ enum JournalStyle {
     static let dayRingSize: CGFloat = 40
     static let dayRingStroke: CGFloat = 3
     static let nutrientRingSize: CGFloat = 56
-    static let nutrientRingStroke: CGFloat = 5
+    static let nutrientRingStroke: CGFloat = 4.3
     static let toolbarButtonSize: CGFloat = 44
     static let plusSize: CGFloat = 64
     static let tabBarHeight: CGFloat = 68
@@ -42,7 +42,7 @@ enum JournalStyle {
     static func calendarColor(progress: Double) -> Color {
         switch progress {
         case ..<0.80: .primary
-        case ..<0.95: .green.opacity(0.6)
+        case ..<0.95: .green.opacity(0.5)
         case ..<1.05: .green
         default: overGoal
         }
@@ -52,7 +52,7 @@ enum JournalStyle {
         switch progress {
         case ..<0.95: [.yellow.opacity(0.13), .orange.opacity(0.08), .clear]
         case ..<1.05: [.green.opacity(0.14), .green.opacity(0.05), .clear]
-        default: [.orange.opacity(0.15), overGoal.opacity(0.06), .clear]
+        default: [.orange.opacity(0.15), overGoal.opacity(0.10), .clear]
         }
     }
 }
@@ -293,17 +293,20 @@ private struct JournalNutrientRing: View {
     private var isOver: Bool { nutrient.value > nutrient.goal }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 7) {
             ZStack {
-                Circle().stroke(nutrient.color.opacity(0.2), lineWidth: JournalStyle.nutrientRingStroke)
+                Circle().stroke(nutrient.color.opacity(0.1), lineWidth: JournalStyle.nutrientRingStroke)
                 Circle().trim(from: 0, to: min(nutrient.value / nutrient.goal, 1))
-                    .stroke(isOver ? .orange : nutrient.color,
+                    .stroke(isOver ? JournalStyle.overGoal : nutrient.color,
                             style: StrokeStyle(lineWidth: JournalStyle.nutrientRingStroke, lineCap: .round))
                     .rotationEffect(.degrees(-90))
-                VStack(spacing: 0) {
+                VStack(spacing: -2) {
                     Text(nutrient.value, format: .number.precision(.fractionLength(0)))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(isOver ? Color.orange : Color.primary)
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isOver ? JournalStyle.overGoal : Color.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                        .frame(width: JournalStyle.nutrientRingSize - 16)
                         .modifier(DesignNumber(value: nutrient.value))
                     Text(nutrient.unit).font(.system(size: 8)).foregroundStyle(.secondary)
                 }
@@ -552,8 +555,8 @@ private struct SampleDay {
             .init(name: "Protein", value: Double(foods.reduce(0) { $0 + $1.protein }), goal: 150, unit: "g", color: .blue),
             .init(name: "Carbs", value: Double(foods.reduce(0) { $0 + $1.carbs }), goal: 250, unit: "g", color: .green),
             .init(name: "Fat", value: Double(foods.reduce(0) { $0 + $1.fat }), goal: 70, unit: "g", color: .yellow),
-            .init(name: "Dietary Fiber", value: calories == 0 ? 0 : 16, goal: 28, unit: "g", color: .teal),
-            .init(name: "Sodium", value: calories == 0 ? 0 : 2980, goal: 2300, unit: "mg", color: .orange)
+            .init(name: "Dietary Fiber", value: calories == 0 ? 0 : 16, goal: 28, unit: "g", color: .black),
+            .init(name: "Sodium", value: calories == 0 ? 0 : 2980, goal: 2300, unit: "mg", color: .black)
         ]
     }
 
