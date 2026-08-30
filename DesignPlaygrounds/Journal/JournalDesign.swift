@@ -14,9 +14,10 @@ enum JournalStyle {
     static let calorieSize: CGFloat = 32
     static let foodNameSize: CGFloat = 17
     static let rowVerticalPadding: CGFloat = 12
-    // Overlapping, solid entry chips; separate from the large nutrient rings.
+    // Overlapping glass entry chips; separate from the large nutrient rings.
     static let entryMacroDiameter: CGFloat = 40
     static let entryMacroOverlap: CGFloat = 14
+    static let entryMacroGlassTintOpacity: Double = 0.7
     static let entryMacroNumberSize: CGFloat = 13
     static let entryMacroUnitSize: CGFloat = 12
     static let entryProteinColor = Color(red: 0.54, green: 0.58, blue: 1.0)
@@ -372,12 +373,18 @@ private struct JournalMacroChipGroup: View {
 
     var body: some View {
         ZStack {
-            // Paint every circle first, then all labels above them. A later
-            // overlapping circle must never cover an earlier chip's digits.
-            HStack(spacing: -JournalStyle.entryMacroOverlap) {
-                ForEach(macros, id: \.name) { macro in
-                    Circle().fill(macro.color)
-                        .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
+            // The glass circles share one sampling region. Keep every label
+            // above all glass so refraction/overlap cannot obscure its digits.
+            GlassEffectContainer(spacing: 0) {
+                HStack(spacing: -JournalStyle.entryMacroOverlap) {
+                    ForEach(macros, id: \.name) { macro in
+                        Circle().fill(.clear)
+                            .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
+                            .glassEffect(
+                                .regular.tint(macro.color.opacity(JournalStyle.entryMacroGlassTintOpacity)),
+                                in: .circle
+                            )
+                    }
                 }
             }
             HStack(spacing: -JournalStyle.entryMacroOverlap) {
