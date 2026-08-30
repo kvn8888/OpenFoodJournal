@@ -383,19 +383,22 @@ private struct JournalRadialMenu: View {
     var body: some View {
         GlassEffectContainer(spacing: 20) {
             ZStack {
-                ForEach(actions, id: \.id) { item in
-                    VStack(spacing: 6) {
-                        Button { toggle() } label: {
-                            Image(systemName: item.symbol).font(.system(size: 22))
-                                .foregroundStyle(item.color).frame(width: 52, height: 52)
-                                .glassEffect(.regular.interactive(), in: .circle)
+                // Remove collapsed glass from the hierarchy: opacity alone can
+                // leave native glass content visible over the central button.
+                if isExpanded {
+                    ForEach(actions, id: \.id) { item in
+                        VStack(spacing: 6) {
+                            Button { toggle() } label: {
+                                Image(systemName: item.symbol).font(.system(size: 22))
+                                    .foregroundStyle(item.color).frame(width: 52, height: 52)
+                                    .glassEffect(.regular.interactive(), in: .circle)
+                            }
+                            .buttonStyle(.plain).accessibilityLabel("\(item.title) mock action")
+                            Text(item.title).font(.system(size: 11, weight: .medium))
                         }
-                        .buttonStyle(.plain).accessibilityLabel("\(item.title) mock action")
-                        Text(item.title).font(.system(size: 11, weight: .medium))
+                        .offset(x: item.x, y: item.y)
+                        .transition(.opacity.combined(with: .scale(scale: 0.5)))
                     }
-                    .offset(x: isExpanded ? item.x : 0, y: isExpanded ? item.y : 0)
-                    .opacity(isExpanded ? 1 : 0).scaleEffect(isExpanded ? 1 : 0.5)
-                    .allowsHitTesting(isExpanded).accessibilityHidden(!isExpanded)
                 }
                 Button(action: toggle) {
                     Image(systemName: "plus").font(.system(size: 32, weight: .medium))
@@ -567,12 +570,15 @@ struct JournalWorkbench: View {
             }
             .padding(12)
             Divider()
-            ScrollView([.horizontal, .vertical]) {
-                JournalDesign(scenario: scenario)
-                    .preferredColorScheme(dark ? .dark : .light)
-                    .scaleEffect(zoom)
-                    .frame(width: JournalStyle.phoneWidth * zoom, height: JournalStyle.phoneHeight * zoom)
-                    .padding(24)
+            GeometryReader { viewport in
+                ScrollView([.horizontal, .vertical]) {
+                    JournalDesign(scenario: scenario)
+                        .preferredColorScheme(dark ? .dark : .light)
+                        .scaleEffect(zoom)
+                        .frame(width: JournalStyle.phoneWidth * zoom, height: JournalStyle.phoneHeight * zoom)
+                        .padding(24)
+                        .frame(minWidth: viewport.size.width, minHeight: viewport.size.height, alignment: .top)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(.black.opacity(0.06))
