@@ -115,6 +115,8 @@ an iOS destination, and it never archives/uploads anything to TestFlight.
 - Native arm64 Mac Debug build passed with Xcode 27 beta; all four `#Preview`
   declarations compile. Only `JournalPlaygroundApp.swift` and `JournalDesign.swift`
   are in its source build phase; there are no target/package dependencies.
+- Opened this project in Xcode, selected `JournalDesign.swift`, and resumed
+  Canvas on **My Mac**. The Journal rendered live beside its editable source.
 - Opened the resulting Mac window and inspected the actual rendering. Checked
   sample weekday selection, Today return, dark mode, and expanded radial menu.
 - Verified the executable has only app-sandbox/debug entitlements, not CloudKit,
