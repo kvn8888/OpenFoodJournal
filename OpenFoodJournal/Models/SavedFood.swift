@@ -215,6 +215,39 @@ struct CalculatorSelection: Identifiable, Codable, Hashable, Sendable {
     }
 }
 
+/// Reusable choices, not a frozen nutrition total. Loading uses the calculator's
+/// current portion values; already logged journal entries remain snapshots.
+struct CalculatorCustomization: Identifiable, Codable, Hashable, Sendable {
+    var id: UUID = UUID()
+    var name: String
+    var selections: [CalculatorSelection]
+    var summary: String
+    var lastUsedAt: Date
+
+    static func canUse(_ selections: [CalculatorSelection], in ingredients: [CalculatorIngredient]) -> Bool {
+        !selections.isEmpty
+            && Set(selections.map(\.ingredientID)).count == selections.count
+            && selections.allSatisfy { $0.quantity.isFinite && (0.25...20).contains($0.quantity) }
+            && SavedFood.missingCalculatorSelectionCount(for: ingredients, selections: selections) == 0
+    }
+
+    func canUse(in ingredients: [CalculatorIngredient]) -> Bool {
+        Self.canUse(selections, in: ingredients)
+    }
+
+    func matches(name: String, selections: [CalculatorSelection]) -> Bool {
+        struct Choice: Hashable {
+            let ingredientID: UUID
+            let portionID: UUID
+            let quantity: Double
+        }
+        func choices(_ values: [CalculatorSelection]) -> Set<Choice> {
+            Set(values.map { Choice(ingredientID: $0.ingredientID, portionID: $0.portionID, quantity: $0.quantity) })
+        }
+        return self.name == name && choices(self.selections) == choices(selections)
+    }
+}
+
 /// A saved food template in the user's "Personal Food Bank".
 /// Users can save any scanned or manually entered food here for quick re-logging.
 /// Unlike NutritionEntry (which belongs to a DailyLog), SavedFood is standalone —
@@ -272,6 +305,10 @@ final class SavedFood {
     var kind: SavedFoodKind = SavedFoodKind.single
     var compositeIngredients: [CompositeIngredientSnapshot] = []
     var calculatorIngredients: [CalculatorIngredient] = []
+    var calculatorCustomizations: [CalculatorCustomization] = []
+    /// Makes repeated Journal → Food Bank saves idempotent without replacing
+    /// the journal entry's original saved-food/calculator provenance.
+    var sourceJournalEntryID: UUID? = nil
 
     init(
         id: UUID = UUID(),
@@ -299,7 +336,9 @@ final class SavedFood {
         isOnShelf: Bool = false,
         kind: SavedFoodKind = SavedFoodKind.single,
         compositeIngredients: [CompositeIngredientSnapshot] = [],
-        calculatorIngredients: [CalculatorIngredient] = []
+        calculatorIngredients: [CalculatorIngredient] = [],
+        calculatorCustomizations: [CalculatorCustomization] = [],
+        sourceJournalEntryID: UUID? = nil
     ) {
         self.id = id
         self.name = name
@@ -328,6 +367,8 @@ final class SavedFood {
         self.kind = kind
         self.compositeIngredients = compositeIngredients
         self.calculatorIngredients = calculatorIngredients
+        self.calculatorCustomizations = calculatorCustomizations
+        self.sourceJournalEntryID = sourceJournalEntryID
     }
 }
 
@@ -477,6 +518,30 @@ extension SavedFood {
         selections: [CalculatorSelection]
     ) -> Int {
         selections.filter { resolve($0, in: ingredients) == nil }.count
+    }
+
+    @discardableResult
+    func rememberCalculatorCustomization(
+        name: String,
+        selections: [CalculatorSelection],
+        now: Date = .now
+    ) -> Bool {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard kind == .calculator, !name.isEmpty,
+              CalculatorCustomization.canUse(selections, in: calculatorIngredients) else { return false }
+        let summary = Self.calculatorSelectionSummary(for: calculatorIngredients, selections: selections)
+        if let index = calculatorCustomizations.firstIndex(where: { $0.matches(name: name, selections: selections) }) {
+            var updated = calculatorCustomizations[index]
+            updated.lastUsedAt = now
+            updated.summary = summary
+            updated.selections = selections
+            calculatorCustomizations[index] = updated
+        } else {
+            calculatorCustomizations.append(CalculatorCustomization(
+                name: name, selections: selections, summary: summary, lastUsedAt: now
+            ))
+        }
+        return true
     }
 
     private static func resolve(
