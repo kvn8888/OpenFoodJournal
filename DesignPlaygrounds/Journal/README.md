@@ -6,7 +6,10 @@ It intentionally duplicates presentation. It does not import the iPhone app.
 
 ## Open and edit
 
-1. Open **JournalPlayground.xcodeproj**, not the main OpenFoodJournal project.
+1. This checkout is already prepared. On a fresh checkout, first run
+   `bash DesignPlaygrounds/Journal/build.sh prepare` from the repo root to put
+   Xcode's per-user preview cache on DevDisk. Then open **JournalPlayground.xcodeproj**,
+   not the main OpenFoodJournal project.
 2. Select **JournalPlayground → My Mac** in Xcode's scheme/destination selector.
 3. Open **JournalDesign.swift** and turn on **Editor → Canvas**.
 4. Resume the preview. Choose Light, Dark, Empty, or Over Goal along the Canvas.
@@ -75,12 +78,13 @@ calendar. There is no scan/HealthKit/LLM/data logic to preserve in this project.
 - The project and source live on DevDisk under `DesignPlaygrounds/Journal`.
 - CLI builds explicitly use `.build/DerivedData` here. Compiler module caches
   are also redirected into `.build`; generated files are ignored by Git.
-- The checked-in Xcode workspace settings put Canvas/build DerivedData at
+- The build helper installs the checked-in workspace template as this project's
+  **per-user** Xcode settings. Xcode 27 ignores the shared location alone.
+  Both are configured to put Canvas/build DerivedData at
   `/Volumes/DevDisk/ActiveProjects/OpenFoodJournal/DesignPlaygrounds/Journal/.build/DerivedData`.
-  This absolute path is intentional for this machine. If you move the checkout,
-  update it in **File → Project Settings → Derived Data** before using Canvas.
-  A user-specific Xcode override can supersede shared settings; confirm the
-  effective location there if you have one.
+  Xcode may append a project-name/hash subdirectory inside that folder.
+  If you move the checkout, rerun `bash build.sh prepare` from this folder before
+  using Canvas. You can confirm the path in **File → Project Settings → Derived Data**.
 - Xcode/macOS can still keep small app preferences, logs, and system caches in
   your user Library. This does not promise zero internal writes or zero build
   storage; it avoids installing a multi-GB iOS runtime and keeps project caches
@@ -105,3 +109,16 @@ bash DesignPlaygrounds/Journal/build.sh run
 The helper defaults to Xcode beta on DevDisk if present. Set `DEVELOPER_DIR`
 explicitly to use a different Xcode. It never downloads dependencies or selects
 an iOS destination, and it never archives/uploads anything to TestFlight.
+
+## Verification (2026-08-30)
+
+- Native arm64 Mac Debug build passed with Xcode 27 beta; all four `#Preview`
+  declarations compile. Only `JournalPlaygroundApp.swift` and `JournalDesign.swift`
+  are in its source build phase; there are no target/package dependencies.
+- Opened the resulting Mac window and inspected the actual rendering. Checked
+  sample weekday selection, Today return, dark mode, and expanded radial menu.
+- Verified the executable has only app-sandbox/debug entitlements, not CloudKit,
+  HealthKit, camera, or network access entitlements.
+- Verified Xcode's effective build paths without an explicit `-derivedDataPath`
+  point inside this playground on DevDisk after local workspace preparation.
+- No shipping-app build, iPhone installation, simulator test, or TestFlight upload.
