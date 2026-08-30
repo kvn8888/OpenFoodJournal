@@ -380,16 +380,13 @@ private struct JournalMacroChipGroup: View {
                     ForEach(macros, id: \.name) { macro in
                         Circle().fill(.clear)
                             .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
-                            .glassEffect(
-                                .regular.tint(macro.color.opacity(JournalStyle.entryMacroGlassTintOpacity)),
-                                in: .circle
-                            )
+                            .glassEffect(.regular, in: .circle)
                     }
                 }
             }
             HStack(spacing: -JournalStyle.entryMacroOverlap) {
                 ForEach(macros, id: \.name) { macro in
-                    JournalMacroChip(label: macro.name, value: macro.value)
+                    JournalMacroChip(label: macro.name, value: macro.value, color: macro.color)
                 }
             }
         }
@@ -400,6 +397,7 @@ private struct JournalMacroChipGroup: View {
 private struct JournalMacroChip: View {
     let label: String
     let value: Int
+    let color: Color
 
     var body: some View {
         VStack(spacing: -1) {
@@ -411,7 +409,7 @@ private struct JournalMacroChip: View {
             Text("G")
                 .font(.system(size: JournalStyle.entryMacroUnitSize, weight: .bold))
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(color)
         // Reserve a readable text column even when adjacent circles overlap.
         .frame(width: JournalStyle.entryMacroDiameter - JournalStyle.entryMacroOverlap)
         .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
