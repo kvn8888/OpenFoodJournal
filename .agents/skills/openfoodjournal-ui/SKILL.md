@@ -138,6 +138,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 - Every selectable day is a real `Button` with a 44+ pt target. The selected/pressed/hovered day uses a rounded rectangular material highlight.
 - Future days are disabled, dimmed, and retain an empty dashed progress-ring track.
 - Ring and background states come from `OFJColor.JournalCalorieState`; do not duplicate threshold or hex logic in the view.
+- Calendar progress is required value input from `DailyLogView`'s shared query-backed `JournalDayTotals`, also used by the macro bar. Do not add per-cell store fetches, `@State` total caches, or `.id` refresh hacks. Animate only the ring's progress/color on data changes, respect Reduce Motion, and preserve the nonanimated date-number weight transition.
 
 ### Scan Camera
 
