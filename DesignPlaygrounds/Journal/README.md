@@ -1,0 +1,107 @@
+# Journal design playground
+
+A disposable **native macOS SwiftUI mock** for fine-tuning the Journal like CSS.
+The layout, styling, sample food, and previews live in **JournalDesign.swift**.
+It intentionally duplicates presentation. It does not import the iPhone app.
+
+## Open and edit
+
+1. Open **JournalPlayground.xcodeproj**, not the main OpenFoodJournal project.
+2. Select **JournalPlayground → My Mac** in Xcode's scheme/destination selector.
+3. Open **JournalDesign.swift** and turn on **Editor → Canvas**.
+4. Resume the preview. Choose Light, Dark, Empty, or Over Goal along the Canvas.
+5. Edit the `JournalStyle` values at the top or the SwiftUI modifiers below.
+   If Canvas is paused, resume it. If it keeps an old compiled value, build again.
+
+You can also press **⌘R** to run a normal Mac window. Its small workbench offers
+a sample-state picker, dark-mode switch, and zoom slider. The running window
+requires another build/run after source edits; Xcode Canvas is the live-edit path.
+Close the playground window to quit this single-window app.
+
+Requires macOS 26+ and Xcode 26+ for real SwiftUI Liquid Glass. Kevin's installed
+macOS 27/Xcode 27 beta meets this requirement. No iOS simulator runtime, iPhone,
+iPhone device support download, package manager, or third-party library needed.
+
+## Where to make changes
+
+Use Xcode's jump bar or search `MARK:` to find a section:
+
+| Section | Tweak here | Real app destination later |
+| --- | --- | --- |
+| `JournalStyle` | Fonts, padding, ring sizes, colors, radii | `Views/Shared/OFJDesignSystem.swift` or the owning view |
+| `JournalDesign` | Overall spacing, background, composition | `Views/DailyLog/DailyLogView.swift` |
+| `JournalHeader` | Month title and Today/gear appearance | `DailyLogView` toolbar (native implementation) |
+| `JournalCalendar` / `JournalDayCell` | Date cells and their states | `Views/DailyLog/WeeklyCalendarStrip.swift` |
+| `JournalMacroCard` / `JournalNutrientRing` | Calories and nutrients | `MacroSummaryBar.swift` / `Shared/MacroRingView.swift` |
+| `JournalMealSection` / `JournalFoodRow` | Meal headers, rows, chips | `MealSectionView.swift` / `EntryRowView.swift` |
+| `JournalRadialMenu` / `JournalTabBar` | Floating menu and tab appearance | `Shared/RadialMenuButton.swift` / `ContentView.swift` |
+| `SampleDay` | Mock meals and amounts | Nowhere — this data is fictional |
+
+Example:
+
+```swift
+static let pageInset: CGFloat = 20      // left/right space
+static let titleSize: CGFloat = 32      // month heading
+static let rowVerticalPadding: CGFloat = 10
+static let cardRadius: CGFloat = 24
+```
+
+All sizes are **points**. Workbench zoom only changes viewing scale, not layout.
+The default phone-sized artboard is 393 × 852 points. For another width, edit
+`phoneWidth`; text truncation, ring spacing, and rows respond to that width.
+
+Tap a weekday to change the sample totals and gradient. Friday August 21, 2026
+is always the mock "today", so screenshots stay reproducible. Saturday is
+disabled with a dashed ring. Tap + to expand the menu. Mock destination buttons
+do not open the real app. Tab buttons only change selection styling.
+
+## Move a finished design back
+
+Tell Codex which sections to bring back, or provide a screenshot and the edited
+file. Port only the chosen visual values/layout into the existing app views;
+retain real observation, navigation, persistence, accessibility, and actions.
+Never replace the shipping Journal with this mock or import its fixtures into
+production. The sandbox does not need to remain in sync with the app.
+
+This is **visual exploration, not iPhone regression testing**. iOS navigation/
+status/tab bars are hand-drawn approximations. macOS glass, font metrics, mouse
+interaction, and scroll behavior can differ. The mock uses a ScrollView instead
+of the production swipeable List; real swipe actions/sticky headers aren't tested.
+One sample week is sufficient for tuning date cells; it isn't the real year-long
+calendar. There is no scan/HealthKit/LLM/data logic to preserve in this project.
+
+## Storage and isolation
+
+- The project and source live on DevDisk under `DesignPlaygrounds/Journal`.
+- CLI builds explicitly use `.build/DerivedData` here. Compiler module caches
+  are also redirected into `.build`; generated files are ignored by Git.
+- The checked-in Xcode workspace settings put Canvas/build DerivedData at
+  `/Volumes/DevDisk/ActiveProjects/OpenFoodJournal/DesignPlaygrounds/Journal/.build/DerivedData`.
+  This absolute path is intentional for this machine. If you move the checkout,
+  update it in **File → Project Settings → Derived Data** before using Canvas.
+  A user-specific Xcode override can supersede shared settings; confirm the
+  effective location there if you have one.
+- Xcode/macOS can still keep small app preferences, logs, and system caches in
+  your user Library. This does not promise zero internal writes or zero build
+  storage; it avoids installing a multi-GB iOS runtime and keeps project caches
+  on the external disk. The first compile prepares Apple SDK modules; later
+  incremental builds reuse them.
+- No databases, credentials, production app sources, provisioning profiles,
+  CloudKit containers, or network permissions are included. The bundle ID is
+  `dev.openfoodjournal.JournalDesignPlayground`, with local ad-hoc signing.
+- Deleting **only this playground's `.build` folder** after closing it/Xcode
+  removes its disposable build products. Do not delete the main app's data or
+  shared DerivedData. The next preview will rebuild the cache.
+
+## Optional terminal build
+
+From the repository root:
+
+```sh
+bash DesignPlaygrounds/Journal/build.sh build
+bash DesignPlaygrounds/Journal/build.sh run
+```
+
+The helper defaults to Xcode beta on DevDisk if present. Set `DEVELOPER_DIR`
+explicitly to use a different Xcode. It never downloads dependencies or selects
+an iOS destination, and it never archives/uploads anything to TestFlight.
