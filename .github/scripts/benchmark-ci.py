@@ -16,7 +16,7 @@ import time
 
 
 mode = sys.argv[1]
-if mode not in {"baseline-validation", "baseline-canary", "early-boot-reuse"}:
+if mode not in {"baseline-validation", "baseline-canary", "early-boot-reuse", "reuse-only"}:
     raise SystemExit(f"Unknown benchmark mode: {mode}")
 
 root = Path(os.environ["RUNNER_TEMP"]) / "ci-benchmark"
@@ -140,7 +140,7 @@ try:
             "CODE_SIGNING_ALLOWED=NO", "build-for-testing"])
 
         bundle = Path(os.environ["RUNNER_TEMP"]) / "UnitTests.xcresult"
-        if mode == "baseline-validation":
+        if mode in {"baseline-validation", "reuse-only"}:
             simulator = select_simulator()
             log = run("simulator-build-and-test", unit_command(simulator, "test", bundle))
         else:
@@ -153,7 +153,7 @@ try:
 
         validate_units(log)
         export_summary("unit-summary", bundle)
-        if mode == "early-boot-reuse":
+        if mode in {"early-boot-reuse", "reuse-only"}:
             canary_probe(simulator, "test-without-building")
     metrics["complete"] = True
 except Exception as error:
