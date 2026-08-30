@@ -579,7 +579,8 @@ extension SavedFood {
             servingQuantity: entry.servingQuantity,
             servingUnit: entry.servingUnit,
             servingMappings: entry.servingMappings,
-            originalScanMode: entry.scanMode
+            originalScanMode: entry.scanMode,
+            sourceJournalEntryID: entry.id
         )
     }
 
