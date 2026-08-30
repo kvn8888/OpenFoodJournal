@@ -94,6 +94,16 @@ struct JournalAppearanceTests {
         #expect(JournalFoodImageLookup.food(in: [unrelated, empty], entryID: entryID, savedFoodID: empty.id) == nil)
     }
 
+    @Test func newlySavedScanOrManualFoodRetainsImageProvenance() {
+        let entry = NutritionEntry(name: "New scan", calories: 200, protein: 10, carbs: 20, fat: 5)
+        let saved = SavedFood(from: entry)
+        #expect(saved.sourceJournalEntryID == entry.id)
+        #expect(entry.savedFoodID == nil)
+        #expect(saved.calories == entry.calories)
+        saved.generatedIconImageData = Data([1])
+        #expect(JournalFoodImageLookup.food(in: [saved], entryID: entry.id, savedFoodID: nil)?.id == saved.id)
+    }
+
     @Test func scopedPredicateAndNewImageDataAreVisibleWithoutReopening() throws {
         let container = try ModelContainer(for: SavedFood.self, configurations: ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none))
         let context = container.mainContext
