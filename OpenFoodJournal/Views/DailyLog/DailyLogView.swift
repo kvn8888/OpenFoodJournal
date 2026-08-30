@@ -13,6 +13,8 @@ struct DailyLogView: View {
     @Environment(ScanService.self) private var scanService
     @Environment(UserGoals.self) private var goals
 
+    @Query private var journalLogs: [DailyLog]
+
     @State private var selectedDate: Date = .now
     @State private var presentedSheet: DailyLogSheet?
     @State private var selectedEntry: NutritionEntry?
@@ -20,21 +22,8 @@ struct DailyLogView: View {
     // so the result is logged to the correct day even if the calendar changes.
     @State private var scanDate: Date = .now
 
-    private var log: DailyLog? {
-        // Reading changeCount ensures SwiftUI re-evaluates this property
-        // after any NutritionStore write (e.g. entry moved to a different day)
-        _ = nutritionStore.changeCount
-        return nutritionStore.fetchLog(for: selectedDate)
-    }
-
-    private var selectedCalorieRatio: Double {
-        guard goals.dailyCalories > 0 else { return 0 }
-        let calories = log?.safeEntries.reduce(0.0) { $0 + $1.calories } ?? 0
-        return calories / goals.dailyCalories
-    }
-
-    private var selectedCalorieState: OFJColor.JournalCalorieState {
-        OFJColor.journalCalorieState(for: selectedCalorieRatio)
+    init() {
+        _journalLogs = Query(JournalDayData.fetchDescriptor())
     }
 
     private var selectedMonthAndYear: String {
@@ -46,6 +35,20 @@ struct DailyLogView: View {
     }
 
     var body: some View {
+        // Query observes collection membership (including a formerly empty
+        // day). Reading each selected log's entry values here also observes
+        // edits and relationship moves, including changes outside NutritionStore.
+        // Derive once per render, then give both components the same values.
+        let logsByDate = JournalDayData.preferredLogs(from: journalLogs)
+        let totalsByDate = JournalDayData.totalsByDate(from: logsByDate)
+        let selectedDay = Calendar.current.startOfDay(for: selectedDate)
+        let log = logsByDate[selectedDay]
+        let totals = totalsByDate[selectedDay] ?? .zero
+        let progressByDate = totalsByDate.mapValues { $0.calorieProgress(goal: goals.dailyCalories) }
+        let selectedCalorieState = OFJColor.journalCalorieState(
+            for: totals.calorieProgress(goal: goals.dailyCalories)
+        )
+
         NavigationStack {
             ZStack(alignment: .bottom) {
                 JournalCalorieBackground(state: selectedCalorieState)
@@ -55,13 +58,16 @@ struct DailyLogView: View {
                 // List-only modifier in SwiftUI and is silently ignored in a LazyVStack.
                 List {
                     // Calendar strip — clear background, no separator, matches original padding
-                    WeeklyCalendarStrip(selectedDate: $selectedDate)
+                    WeeklyCalendarStrip(
+                        selectedDate: $selectedDate,
+                        calorieProgressByDate: progressByDate
+                    )
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(OFJLayout.calendarListRowInsets)
 
                     // Macro summary card — tap to view full nutrition details
-                    MacroSummaryBar(log: log, goals: goals)
+                    MacroSummaryBar(totals: totals, goals: goals)
                         .background {
                             NavigationLink("", destination: NutritionDetailView())
                                 .opacity(0)
