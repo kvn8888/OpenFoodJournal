@@ -70,7 +70,7 @@ enum JournalChipAppearance: String, CaseIterable, Identifiable {
 }
 
 extension EnvironmentValues {
-    @Entry var journalChipAppearance: JournalChipAppearance = .rgbGlass
+    @Entry var journalChipAppearance: JournalChipAppearance = .savedNeutral
 }
 
 // MARK: - 2. Journal screen composition
@@ -630,7 +630,7 @@ private struct SampleDay {
 
 struct JournalWorkbench: View {
     @State private var scenario: JournalScenario = .typical
-    @State private var chipAppearance: JournalChipAppearance = .rgbGlass
+    @State private var chipAppearance: JournalChipAppearance = .savedNeutral
     @State private var dark = false
     @State private var zoom = 0.85
 
