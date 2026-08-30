@@ -84,7 +84,7 @@ if len(sys.argv) > 2:
         changed = subprocess.check_output(["git", "diff", "--name-only", records[0]["commit"], job["commit"]], text=True)
         if not set(changed.splitlines()).issubset(allowed_changes):
             raise SystemExit("Follow-up changed files outside the experiment harness")
-        if job["unit_tests"]["passed"] != records[0].get("unit_tests", {}).get("passed", 217):
+        if job["unit_tests"]["passed"] != indexed[("baseline-validation", "1")]["unit_tests"]["passed"]:
             raise SystemExit("Follow-up unit test count differs")
         if job["image_version"] != records[0]["image_version"] or job["simulator"] != records[0]["simulator"]:
             raise SystemExit("Follow-up runner or simulator differs")
