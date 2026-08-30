@@ -14,6 +14,9 @@ enum JournalStyle {
     static let calorieSize: CGFloat = 32
     static let foodNameSize: CGFloat = 17
     static let rowVerticalPadding: CGFloat = 12
+    // Match SavedFoodRowView.FoodIconMetrics without importing the app/UIImage.
+    static let entryFoodIconSize: CGFloat = 51
+    static let entryFoodIconColumnWidth: CGFloat = 58
     // Saved circle geometry: 40 pt diameter, 5 pt overlap (2026-08-30).
     // The pill retains the same 110 × 40 pt footprint and 35 pt label pitch.
     static let entryMacroDiameter: CGFloat = 40
@@ -382,6 +385,7 @@ private struct JournalFoodRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            JournalFoodImagePlaceholder()
             VStack(alignment: .leading, spacing: 2) {
                 Text(food.brand).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                 Text(food.name).font(.system(size: JournalStyle.foodNameSize, weight: .medium)).lineLimit(1)
@@ -393,6 +397,23 @@ private struct JournalFoodRow: View {
         }
         .padding(.vertical, JournalStyle.rowVerticalPadding)
         .accessibilityElement(children: .combine)
+    }
+}
+
+// Layout-only stand-in for a future Gemini food image. No images are generated,
+// loaded, or fetched by the playground, and the placeholder is decorative.
+private struct JournalFoodImagePlaceholder: View {
+    var body: some View {
+        Circle()
+            .fill(.secondary.opacity(0.08))
+            .overlay {
+                Image(systemName: "photo")
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(.secondary)
+            }
+            .frame(width: JournalStyle.entryFoodIconSize, height: JournalStyle.entryFoodIconSize)
+            .frame(width: JournalStyle.entryFoodIconColumnWidth)
+            .accessibilityHidden(true)
     }
 }
 
