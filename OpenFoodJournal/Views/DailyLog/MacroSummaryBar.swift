@@ -162,7 +162,8 @@ struct MacroSummaryBar: View {
                 goal: goal,
                 color: macroID.color,
                 label: macroID.label,
-                unit: macroID.unit
+                unit: macroID.unit,
+                usesJournalStyle: true
             )
         } else if let nutrient = KnownMicronutrients.nutrient(forID: slotID) {
             let value = totals.micronutrients[nutrient.id] ?? 0
@@ -171,7 +172,8 @@ struct MacroSummaryBar: View {
                 goal: nutrient.dailyValue,
                 color: colorForSlot(slotIndex),
                 label: nutrient.name,
-                unit: nutrient.unit
+                unit: nutrient.unit,
+                usesJournalStyle: true
             )
         } else {
             // Empty slot — show + button
@@ -214,7 +216,7 @@ struct MacroSummaryBar: View {
 
     /// Assigns a color to a slot based on its position (for micro slots only)
     private func colorForSlot(_ index: Int) -> Color {
-        let colors: [Color] = [.blue, .green, .yellow, .mint, .indigo]
+        let colors: [Color] = [.blue, .green, .yellow, .primary, .primary]
         return colors[(index - 1) % colors.count]
     }
 
