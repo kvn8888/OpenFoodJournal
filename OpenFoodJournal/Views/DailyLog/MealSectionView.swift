@@ -4,6 +4,8 @@
 import SwiftUI
 
 struct MealSectionView: View {
+    @Environment(NutritionStore.self) private var nutritionStore
+    @State private var foodBankMessage: String?
     let mealType: MealType
     let entries: [NutritionEntry]
     let onSelect: (NutritionEntry) -> Void
@@ -41,6 +43,12 @@ struct MealSectionView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         .tint(.blue)
+                        Button {
+                            saveToFoodBank(entry)
+                        } label: {
+                            Label("Save to Food Bank", systemImage: "tray.and.arrow.down")
+                        }
+                        .tint(.green)
                     }
                     // Swipe left (trailing) — Delete, already defined in EntryRowView,
                     // rendered here because DailyLogView now uses a List (where
@@ -51,6 +59,12 @@ struct MealSectionView: View {
                             onSelect(entry)
                         } label: {
                             Label("Edit", systemImage: "pencil")
+                        }
+
+                        Button {
+                            saveToFoodBank(entry)
+                        } label: {
+                            Label("Save to Food Bank", systemImage: "tray.and.arrow.down")
                         }
 
                         // Quick info — shows macros inline
@@ -86,6 +100,25 @@ struct MealSectionView: View {
                         .ofjNumericTextTransition(value: totalCalories)
                 }
             }
+            .alert("Food Bank", isPresented: Binding(
+                get: { foodBankMessage != nil },
+                set: { if !$0 { foodBankMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { foodBankMessage = nil }
+            } message: {
+                Text(foodBankMessage ?? "")
+            }
+        }
+    }
+
+    private func saveToFoodBank(_ entry: NutritionEntry) {
+        switch nutritionStore.saveJournalEntryToFoodBank(entry) {
+        case .saved(let food):
+            foodBankMessage = "Saved \(food.name) as a reusable copy of this logged portion. The journal entry is unchanged."
+        case .alreadySaved(let food):
+            foodBankMessage = "This entry is already saved as \(food.name). No duplicate was created."
+        case .failed:
+            foodBankMessage = "Could not save this food. Please try again."
         }
     }
 }
