@@ -4,6 +4,7 @@
 import json
 from pathlib import Path
 import statistics
+import subprocess
 import sys
 
 
@@ -48,7 +49,7 @@ for repetition in ["1", "2"]:
 
 baseline_mean = statistics.mean(pair["baseline_combined_seconds"] for pair in pairs)
 optimized_mean = statistics.mean(pair["optimized_combined_seconds"] for pair in pairs)
-print(json.dumps({
+report = {
     "benchmark_commit": records[0]["commit"],
     "runner_image_version": records[0]["image_version"],
     "simulator": records[0]["simulator"],
@@ -68,4 +69,36 @@ print(json.dumps({
         "reduction_percent": round((baseline_mean - optimized_mean) / baseline_mean * 100, 2),
     },
     "jobs": records,
-}, indent=2))
+}
+
+if len(sys.argv) > 2:
+    followup = [json.loads(path.read_text()) for path in sorted(Path(sys.argv[2]).glob("*/metrics.json"))]
+    if len(followup) != 2 or not all(job["complete"] and job["mode"] == "reuse-only" for job in followup):
+        raise SystemExit("Expected two successful reuse-only artifacts")
+    allowed_changes = {
+        ".github/scripts/benchmark-ci.py",
+        ".github/scripts/summarize-ci-benchmark.py",
+        ".github/workflows/ci-reuse-only-experiment.yml",
+    }
+    for job in followup:
+        changed = subprocess.check_output(["git", "diff", "--name-only", records[0]["commit"], job["commit"]], text=True)
+        if not set(changed.splitlines()).issubset(allowed_changes):
+            raise SystemExit("Follow-up changed files outside the experiment harness")
+        if job["unit_tests"]["passed"] != records[0].get("unit_tests", {}).get("passed", 217):
+            raise SystemExit("Follow-up unit test count differs")
+        if job["image_version"] != records[0]["image_version"] or job["simulator"] != records[0]["simulator"]:
+            raise SystemExit("Follow-up runner or simulator differs")
+        if not job["canary_probe"]["environment_forwarded"]:
+            raise SystemExit("Follow-up did not verify test environment forwarding")
+    reuse_mean = statistics.mean(job["total_seconds"] for job in followup)
+    report["reuse_only_followup"] = {
+        "source_equivalence": "git diff confirms only experiment harness files changed",
+        "mean_seconds": round(reuse_mean, 3),
+        "saved_vs_baseline_seconds": round(baseline_mean - reuse_mean, 3),
+        "reduction_vs_baseline_percent": round((baseline_mean - reuse_mean) / baseline_mean * 100, 2),
+        "saved_vs_early_boot_seconds": round(optimized_mean - reuse_mean, 3),
+        "jobs": followup,
+        "limitation": "Follow-up ran later on fresh runners, not simultaneously with baseline",
+    }
+
+print(json.dumps(report, indent=2))
