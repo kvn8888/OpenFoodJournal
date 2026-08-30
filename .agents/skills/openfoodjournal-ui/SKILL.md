@@ -131,6 +131,9 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 ### Journal Calendar/Header
 
+- Owner-approved playground transfer: Journal and Food Bank food rows use the shared `FoodMacroPill` (110×40pt at standard text size, lavender/green/amber stacked values/G on neutral glass). Do not restore separate row chips or port the RGB/overlapping-circle experiments. Journal food-image slots use Food Bank's 51pt image/58pt column and a separate Settings toggle; hiding them removes their layout space. Missing images are placeholders, not generation triggers. At accessibility text sizes the pill moves below row content.
+- MacroSummaryBar rings use 4.3pt strokes, 0.1 track opacity, 16pt values fitted to 40pt, 7pt ring-label gap, and D86669 overage. Micro slots 4/5 use adaptive primary color. Keep all configured nutrients and real user goals.
+- Background gradient stops: 0, 0.25, 1; radial range 16–800pt. Light below/near: yellow .13/orange .08; met: green .14/.05; over: orange .15/red .10. Dark below/near: yellow .20/orange .20; met: green .20/.10; over: orange .20/red .15. Dark base RGB .035/.035/.04. These are independent tuning values, not a blanket opacity applied to the screen.
 - The large navigation title is the selected month and year, not the static word “Journal.”
 - The Today action moves into the navigation toolbar whenever the selected date is not today.
 - Today and Settings are separate native trailing `ToolbarItem`s with stable string IDs. Only Today is conditionally inserted; Settings remains alive while iOS animates the surrounding Liquid Glass regrouping. Do not wrap them in one hand-built `HStack` or disable the Settings transaction animation.
