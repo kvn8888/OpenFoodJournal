@@ -462,7 +462,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 - **File creation**: Build large files in small chunks to avoid network errors.
 - **Retrospectives**: Live in `docs/`. Update when later fixes change the story.
 - **Skills**: This file is the project skill. Update it when architecture or requirements change.
-- **Commits**: Descriptive messages. Push after every significant change.
+- **Commits (Kevin, 2026-08-30)**: Commit previously completed work before beginning a new change. Prefer frequent local checkpoint commits after each agent-owned file edit, with descriptive messages; intermediate checkpoints may be incomplete until the final verified commit. Stage only the intended file/hunks, never secrets or another session's unapproved work. This preference does not authorize pushing or releasing without an explicit request.
 
 **DailyLogView container**: Uses a `List` (not ScrollView+LazyVStack) with `.listStyle(.plain)` + `.scrollContentBackground(.hidden)`. `WeeklyCalendarStrip` and `MacroSummaryBar` are plain List rows with `listRowBackground(Color.clear)` + `listRowSeparator(.hidden)`. Meal sections use `MealSectionView` which returns a `Section{}` that becomes a proper sticky List section header in a List context. All swipe actions are on the `MealSectionView` Button wrapper (not on `EntryRowView`).
 
