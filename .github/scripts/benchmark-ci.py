@@ -16,7 +16,8 @@ import time
 
 
 mode = sys.argv[1]
-if mode not in {"baseline-validation", "baseline-canary", "early-boot-reuse", "reuse-only"}:
+if mode not in {"baseline-validation", "baseline-canary", "early-boot-reuse", "reuse-only",
+                "parallel-device", "parallel-simulator"}:
     raise SystemExit(f"Unknown benchmark mode: {mode}")
 
 root = Path(os.environ["RUNNER_TEMP"]) / "ci-benchmark"
@@ -124,7 +125,7 @@ try:
         simulator = select_simulator()
         canary_probe(simulator, "test")
     else:
-        if mode == "early-boot-reuse":
+        if mode in {"early-boot-reuse", "parallel-simulator"}:
             simulator = select_simulator()
             run("request-simulator-boot", ["xcrun", "simctl", "boot", simulator])
             boot_log = (root / "simulator-boot.log").open("w")
@@ -132,29 +133,31 @@ try:
                                     stdout=boot_log, stderr=subprocess.STDOUT)
             metrics["boot_requested_at_seconds"] = round(time.monotonic() - started, 3)
 
-        run("release-contracts", ["bash", ".github/scripts/test-release-workflow.sh"])
-        run("isolation-contracts", ["bash", ".github/scripts/test-debug-isolation.sh"])
-        run("generic-device-build", base + ["-scheme", "OpenFoodJournal", "-destination",
-            "generic/platform=iOS", "-derivedDataPath",
-            str(Path(os.environ["RUNNER_TEMP"]) / "DerivedData-benchmark-generic"),
-            "CODE_SIGNING_ALLOWED=NO", "build-for-testing"])
+        if mode != "parallel-simulator":
+            run("release-contracts", ["bash", ".github/scripts/test-release-workflow.sh"])
+            run("isolation-contracts", ["bash", ".github/scripts/test-debug-isolation.sh"])
+            run("generic-device-build", base + ["-scheme", "OpenFoodJournal", "-destination",
+                "generic/platform=iOS", "-derivedDataPath",
+                str(Path(os.environ["RUNNER_TEMP"]) / "DerivedData-benchmark-generic"),
+                "CODE_SIGNING_ALLOWED=NO", "build-for-testing"])
 
-        bundle = Path(os.environ["RUNNER_TEMP"]) / "UnitTests.xcresult"
-        if mode in {"baseline-validation", "reuse-only"}:
-            simulator = select_simulator()
-            log = run("simulator-build-and-test", unit_command(simulator, "test", bundle))
-        else:
-            run("simulator-build", unit_command(simulator, "build-for-testing"))
-            boot_wait_start = time.monotonic()
-            if boot.wait(timeout=300):
-                raise RuntimeError("Simulator boot failed")
-            metrics["remaining_boot_wait_seconds"] = round(time.monotonic() - boot_wait_start, 3)
-            log = run("simulator-test-without-building", unit_command(simulator, "test-without-building", bundle))
+        if mode != "parallel-device":
+            bundle = Path(os.environ["RUNNER_TEMP"]) / "UnitTests.xcresult"
+            if mode in {"baseline-validation", "reuse-only"}:
+                simulator = select_simulator()
+                log = run("simulator-build-and-test", unit_command(simulator, "test", bundle))
+            else:
+                run("simulator-build", unit_command(simulator, "build-for-testing"))
+                boot_wait_start = time.monotonic()
+                if boot.wait(timeout=300):
+                    raise RuntimeError("Simulator boot failed")
+                metrics["remaining_boot_wait_seconds"] = round(time.monotonic() - boot_wait_start, 3)
+                log = run("simulator-test-without-building", unit_command(simulator, "test-without-building", bundle))
 
-        validate_units(log)
-        export_summary("unit-summary", bundle)
-        if mode in {"early-boot-reuse", "reuse-only"}:
-            canary_probe(simulator, "test-without-building")
+            validate_units(log)
+            export_summary("unit-summary", bundle)
+            if mode in {"early-boot-reuse", "reuse-only", "parallel-simulator"}:
+                canary_probe(simulator, "test-without-building")
     metrics["complete"] = True
 except Exception as error:
     metrics["error"] = str(error)
