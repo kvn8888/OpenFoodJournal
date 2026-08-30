@@ -18,7 +18,6 @@
 //   3. Future                — dimmed text, empty dashed progress ring
 
 import SwiftUI
-import SwiftData
 
 // MARK: - Day Cell State
 
@@ -104,29 +103,24 @@ struct WeeklyCalendarStrip: View {
     /// The currently selected date — bound to the parent's state.
     @Binding var selectedDate: Date
 
-    /// Optional deterministic progress values for previews and snapshot tests.
-    /// Production callers omit this and continue reading from NutritionStore.
-    private let calorieProgressByDate: [Date: Double]?
-
-    /// NutritionStore is used to look up whether past days have logged entries.
-    @Environment(NutritionStore.self) private var nutritionStore
-
-    /// UserGoals determines the calorie threshold for the "goal met" state.
-    @Environment(UserGoals.self) private var goals
+    /// Required live input from the Journal's shared query-backed totals.
+    /// No cell-level fetches: fetching an empty day once does not subscribe to
+    /// the DailyLog that may later be created by a local write or CloudKit.
+    private let calorieProgressByDate: [Date: Double]
 
     /// Calendar used for all date math
     private let calendar = Calendar.current
 
     init(
         selectedDate: Binding<Date>,
-        calorieProgressByDate: [Date: Double]? = nil
+        calorieProgressByDate: [Date: Double]
     ) {
         _selectedDate = selectedDate
         self.calorieProgressByDate = calorieProgressByDate
     }
 
     /// Number of weeks of history to make scrollable
-    private let weeksOfHistory = 52
+    private let weeksOfHistory = JournalDayData.weeksOfHistory
 
     /// Pre-computed array of WeekIDs from ~1 year ago to the current week.
     /// Each entry represents one Sunday–Saturday week.
@@ -237,16 +231,7 @@ struct WeeklyCalendarStrip: View {
             return .future
         }
 
-        // Calculate calorie progress for this day
-        let progress: Double
-        if let calorieProgressByDate {
-            progress = calorieProgressByDate[startOfDate] ?? 0
-        } else if let log = nutritionStore.fetchLog(for: date), goals.dailyCalories > 0 {
-            let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
-            progress = totalCalories / goals.dailyCalories
-        } else {
-            progress = 0
-        }
+        let progress = calorieProgressByDate[startOfDate] ?? 0
 
         let startOfSelected = calendar.startOfDay(for: selectedDate)
         if startOfDate == startOfSelected {
@@ -347,6 +332,7 @@ private struct CalendarDayButtonStyle: ButtonStyle {
 /// A single day cell showing a day abbreviation and a date number inside
 /// a progress ring. Used in the week strip rows.
 private struct DayCellView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let date: Date
     let state: DayCellState
 
@@ -397,6 +383,9 @@ private struct DayCellView: View {
                             )
                         )
                         .rotationEffect(.degrees(-90))
+                        // Data updates animate only the arc/color, without
+                        // restarting selection or cross-fading date glyphs.
+                        .animation(reduceMotion ? nil : .easeInOut, value: state.progress)
                 }
 
                 // The date number text.
@@ -442,12 +431,10 @@ private struct DayCellView: View {
 
 // MARK: - Preview
 
-/// A simple wrapper view that provides the required environment objects for previewing.
+/// The preview supplies the same value input as production, without a database.
 @MainActor
 private struct CalendarStripPreview: View {
     @State private var date = Date.now
-    private let container: ModelContainer
-    private let nutritionStore: NutritionStore
 
     private var calorieProgressByDate: [Date: Double] {
         guard let weekStart = Calendar.current.dateInterval(
@@ -464,21 +451,12 @@ private struct CalendarStripPreview: View {
         })
     }
 
-    init() {
-        let container = ModelContainer.calendarPreview
-        self.container = container
-        self.nutritionStore = NutritionStore(modelContext: container.mainContext)
-    }
-
     var body: some View {
         WeeklyCalendarStrip(
             selectedDate: $date,
             calorieProgressByDate: calorieProgressByDate
         )
             .padding()
-            .modelContainer(container)
-            .environment(nutritionStore)
-            .environment(UserGoals())
     }
 }
 
