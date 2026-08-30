@@ -75,9 +75,9 @@ enum JournalStyle {
     // DARK MODE — same starting values, but changes here affect only dark mode.
     static func darkGradient(progress: Double) -> [Color] {
         switch progress {
-        case ..<0.95: [.yellow.opacity(0.13), .orange.opacity(0.08), .clear]
-        case ..<1.05: [.green.opacity(0.14), .green.opacity(0.05), .clear]
-        default: [.orange.opacity(0.15), overGoal.opacity(0.10), .clear]
+        case ..<0.95: [.yellow.opacity(0.2), .orange.opacity(0.2), .clear]
+        case ..<1.05: [.green.opacity(0.20), .green.opacity(0.10), .clear]
+        default: [.orange.opacity(0.20), overGoal.opacity(0.15), .clear]
         }
     }
 }
@@ -109,9 +109,20 @@ struct JournalDesign: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             (colorScheme == .dark ? JournalStyle.darkBackground : Color.white)
+            let colors = JournalStyle.gradient(
+                progress: day.progress,
+                colorScheme: colorScheme
+            )
+
             RadialGradient(
-                colors: JournalStyle.gradient(progress: day.progress, colorScheme: colorScheme),
-                center: .top, startRadius: 16, endRadius: 640
+                stops: [
+                    .init(color: colors[0], location: 0.0),
+                    .init(color: colors[1], location: 0.25),
+                    .init(color: colors[2], location: 1.0)
+                ],
+                center: .top,
+                startRadius: 16,
+                endRadius: 800
             )
 
             VStack(spacing: 0) {
@@ -623,8 +634,8 @@ private struct SampleDay {
             .init(name: "Protein", value: Double(foods.reduce(0) { $0 + $1.protein }), goal: 150, unit: "g", color: .blue),
             .init(name: "Carbs", value: Double(foods.reduce(0) { $0 + $1.carbs }), goal: 250, unit: "g", color: .green),
             .init(name: "Fat", value: Double(foods.reduce(0) { $0 + $1.fat }), goal: 70, unit: "g", color: .yellow),
-            .init(name: "Dietary Fiber", value: calories == 0 ? 0 : 16, goal: 28, unit: "g", color: .black),
-            .init(name: "Sodium", value: calories == 0 ? 0 : 2980, goal: 2300, unit: "mg", color: .black)
+            .init(name: "Dietary Fiber", value: calories == 0 ? 0 : 16, goal: 28, unit: "g", color: .primary),
+            .init(name: "Sodium", value: calories == 0 ? 0 : 2980, goal: 2300, unit: "mg", color: .primary)
         ]
     }
 
@@ -664,7 +675,7 @@ private struct SampleDay {
                 food("Roasted Vegetables", "Homemade", 354, 10, 50, 13, "7:12 PM")
             ]),
             .init(name: "Snack", symbol: "leaf", foods: [
-                food("Greek Yogurt", "Plain", 260, 23, 18, 10, "8:20 PM")
+                food("Greek Yogurt", "Plain", 260, 230, 18, 10, "8:20 PM")
             ])
         ]
         return .init(calories: Double(meals.flatMap(\.foods).reduce(0) { $0 + $1.calories }), meals: meals)
