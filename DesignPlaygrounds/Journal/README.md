@@ -60,17 +60,25 @@ do not open the real app. Tab buttons only change selection styling.
 
 ### Entry chip variants
 
+- **Neutral pill** (default): one smooth, untinted Liquid Glass capsule with
+  lavender/green/amber numbers and units. No scalloped circle boundaries.
 - **RGB glass** (optional experiment): blue protein, green carbs, red fat glass with white
   stacked numbers/units. Tint inputs are exact sRGB primaries, not system colors.
-- **Saved Neutral** (default): the untinted-glass design with its original
+- **Saved Neutral** (circles): the untinted-glass design with its original
   lavender/green/amber text. Available in the two `Chips · Saved Neutral` Canvas
   previews, or through the **Entry chips** selector in the running Mac window.
 - The complete neutral Journal, including Kevin's refinements, is preserved in
   commit `a7c743b`. Switching variants shares current layout; the commit preserves
   the exact earlier file if later geometry experiments need to be compared.
 
+Circle geometry recorded before the pill experiment: **40 pt diameter, 5 pt
+overlap**, giving a **110 × 40 pt** group (`3 × 40 − 2 × 5`) and **35 pt**
+between text-column centers. The pill preserves that footprint and label
+positioning; `entryMacroPillWidth` is derived from the same values. The circle
+variants remain selectable with these settings.
+
 `entryMacroGlassTintOpacity` affects RGB glass only. `entryMacroOverlap` and the
-size/font values affect both variants. Apple documents glass tinting and shape
+size/font values affect all variants. Apple documents glass tinting and shape
 merging, not a guaranteed additive RGB or subtractive pigment mixing operation.
 Pure RGB inputs therefore don't guarantee cyan/yellow/white overlap results.
 See [Apple's Liquid Glass guide](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views).
