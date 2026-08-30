@@ -1,0 +1,484 @@
+{
+  "workflow_run": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089",
+  "benchmark_commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+  "comparisons": [
+    {
+      "repetition": "1",
+      "sequential_seconds": 771.619,
+      "device_seconds": 85.59,
+      "simulator_seconds": 570.49,
+      "parallel_work_seconds": 570.49,
+      "observed_parallel_window_seconds": 570.49,
+      "overlap_seconds": 85.59,
+      "parallel_total_machine_seconds": 656.08,
+      "saved_observed_seconds": 201.129,
+      "passed_unit_tests": 217
+    },
+    {
+      "repetition": "2",
+      "sequential_seconds": 460.769,
+      "device_seconds": 72.765,
+      "simulator_seconds": 314.156,
+      "parallel_work_seconds": 314.156,
+      "observed_parallel_window_seconds": 314.156,
+      "overlap_seconds": 72.765,
+      "parallel_total_machine_seconds": 386.921,
+      "saved_observed_seconds": 146.613,
+      "passed_unit_tests": 217
+    }
+  ],
+  "mean": {
+    "sequential_seconds": 616.194,
+    "parallel_seconds": 442.323,
+    "saved_seconds": 173.871,
+    "reduction_percent": 28.22,
+    "parallel_machine_seconds": 521.5
+  },
+  "limitations": [
+    "Two repetitions per approach; hosted-runner timing varies",
+    "Parallel elapsed time runs from the first component's harness start until both finish",
+    "Initial runner queue, checkout, artifact transfer, and downstream gate setup are excluded",
+    "All canary probes intentionally stop at the missing-key guard; no live Gemini API call",
+    "No signing, Release archive, upload, Apple processing, or approval waits were tested"
+  ],
+  "jobs": [
+    {
+      "mode": "parallel-device",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:27:22.112207+00:00",
+      "phases": [
+        {
+          "name": "release-contracts",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 0.666
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 0.666,
+          "exit_code": 0,
+          "duration_seconds": 9.936
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 10.602,
+          "exit_code": 0,
+          "duration_seconds": 74.985
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "total_seconds": 85.59
+    },
+    {
+      "mode": "parallel-device",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:25:58.559247+00:00",
+      "phases": [
+        {
+          "name": "release-contracts",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 0.614
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 0.615,
+          "exit_code": 0,
+          "duration_seconds": 6.917
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 7.533,
+          "exit_code": 0,
+          "duration_seconds": 65.226
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "total_seconds": 72.765
+    },
+    {
+      "mode": "parallel-simulator",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:26:00.126742+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 45.572
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 45.575,
+          "exit_code": 0,
+          "duration_seconds": 2.785
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 49.463,
+          "exit_code": 0,
+          "duration_seconds": 418.059
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 467.565,
+          "exit_code": 0,
+          "duration_seconds": 70.903
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 538.505,
+          "exit_code": 0,
+          "duration_seconds": 5.458
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 543.965,
+          "exit_code": 0,
+          "duration_seconds": 26.257
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 570.227,
+          "exit_code": 0,
+          "duration_seconds": 0.262
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 49.463,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 6.908
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 570.49
+    },
+    {
+      "mode": "parallel-simulator",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:25:58.461661+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.235
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 12.236,
+          "exit_code": 0,
+          "duration_seconds": 1.86
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 14.858,
+          "exit_code": 0,
+          "duration_seconds": 228.662
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 243.531,
+          "exit_code": 0,
+          "duration_seconds": 40.357
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 283.912,
+          "exit_code": 0,
+          "duration_seconds": 2.294
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 286.207,
+          "exit_code": 0,
+          "duration_seconds": 27.768
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 313.976,
+          "exit_code": 0,
+          "duration_seconds": 0.18
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 14.858,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 4.97
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 314.156
+    },
+    {
+      "mode": "early-boot-reuse",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:26:01.080043+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 13.002
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 13.004,
+          "exit_code": 0,
+          "duration_seconds": 3.21
+        },
+        {
+          "name": "release-contracts",
+          "start_seconds": 17.299,
+          "exit_code": 0,
+          "duration_seconds": 58.647
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 75.951,
+          "exit_code": 0,
+          "duration_seconds": 156.191
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 232.156,
+          "exit_code": 0,
+          "duration_seconds": 273.742
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 505.917,
+          "exit_code": 0,
+          "duration_seconds": 148.223
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 654.154,
+          "exit_code": 0,
+          "duration_seconds": 85.651
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 739.832,
+          "exit_code": 0,
+          "duration_seconds": 3.4
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 743.233,
+          "exit_code": 0,
+          "duration_seconds": 27.791
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 771.027,
+          "exit_code": 0,
+          "duration_seconds": 0.591
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 17.299,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 11.945
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 771.619
+    },
+    {
+      "mode": "early-boot-reuse",
+      "commit": "385480cc72f0c26c33c9015b4085824b65f01b85",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:26:00.298982+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.684
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 12.685,
+          "exit_code": 0,
+          "duration_seconds": 2.316
+        },
+        {
+          "name": "release-contracts",
+          "start_seconds": 15.993,
+          "exit_code": 0,
+          "duration_seconds": 42.494
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 58.499,
+          "exit_code": 0,
+          "duration_seconds": 65.816
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 124.325,
+          "exit_code": 0,
+          "duration_seconds": 164.829
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 289.174,
+          "exit_code": 0,
+          "duration_seconds": 101.876
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 391.063,
+          "exit_code": 0,
+          "duration_seconds": 44.036
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 435.115,
+          "exit_code": 0,
+          "duration_seconds": 2.733
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 437.849,
+          "exit_code": 0,
+          "duration_seconds": 22.583
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 460.435,
+          "exit_code": 0,
+          "duration_seconds": 0.333
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 15.993,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 5.227
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 460.769
+    }
+  ],
+  "github_run": {
+    "conclusion": "success",
+    "createdAt": "2026-08-30T22:25:51Z",
+    "jobs": [
+      {
+        "completedAt": "2026-08-30T22:34:02Z",
+        "conclusion": "success",
+        "name": "Sequential control (2)",
+        "startedAt": "2026-08-30T22:25:55Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331404610"
+      },
+      {
+        "completedAt": "2026-08-30T22:39:22Z",
+        "conclusion": "success",
+        "name": "Sequential control (1)",
+        "startedAt": "2026-08-30T22:25:56Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331404670"
+      },
+      {
+        "completedAt": "2026-08-30T22:31:24Z",
+        "conclusion": "success",
+        "name": "Parallel simulator (2)",
+        "startedAt": "2026-08-30T22:25:55Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331404686"
+      },
+      {
+        "completedAt": "2026-08-30T22:35:50Z",
+        "conclusion": "success",
+        "name": "Parallel simulator (1)",
+        "startedAt": "2026-08-30T22:25:55Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331404693"
+      },
+      {
+        "completedAt": "2026-08-30T22:27:15Z",
+        "conclusion": "success",
+        "name": "Parallel device (2)",
+        "startedAt": "2026-08-30T22:25:55Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331404745"
+      },
+      {
+        "completedAt": "2026-08-30T22:28:53Z",
+        "conclusion": "success",
+        "name": "Parallel device (1)",
+        "startedAt": "2026-08-30T22:27:18Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99331405247"
+      },
+      {
+        "completedAt": "2026-08-30T22:35:59Z",
+        "conclusion": "success",
+        "name": "Require both parallel checks",
+        "startedAt": "2026-08-30T22:35:54Z",
+        "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33339128089/job/99332636843"
+      }
+    ],
+    "updatedAt": "2026-08-30T22:39:23Z"
+  },
+  "production_workflows_modified": false,
+  "app_source_commit": "d0e0ca7da7f887226b39071d1f1572a65d797395"
+}
