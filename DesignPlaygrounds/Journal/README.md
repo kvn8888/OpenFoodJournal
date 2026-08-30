@@ -60,9 +60,9 @@ do not open the real app. Tab buttons only change selection styling.
 
 ### Entry chip variants
 
-- **RGB glass** (default): blue protein, green carbs, red fat glass with white
+- **RGB glass** (optional experiment): blue protein, green carbs, red fat glass with white
   stacked numbers/units. Tint inputs are exact sRGB primaries, not system colors.
-- **Saved Neutral**: the previous untinted-glass design with its original
+- **Saved Neutral** (default): the untinted-glass design with its original
   lavender/green/amber text. Available in the two `Chips · Saved Neutral` Canvas
   previews, or through the **Entry chips** selector in the running Mac window.
 - The complete neutral Journal, including Kevin's refinements, is preserved in
