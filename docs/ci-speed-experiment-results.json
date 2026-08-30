@@ -1,0 +1,601 @@
+{
+  "benchmark_commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+  "runner_image_version": "20260728.0273.1",
+  "simulator": {
+    "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+    "name": "iPhone 17 Pro",
+    "initial_state": "Shutdown"
+  },
+  "comparison": "Sum of measured phase execution, excluding runner queues and artifact transfer",
+  "limitations": [
+    "Two repetitions per variant; runner startup times remain variable",
+    "Both canary probes intentionally skip at the missing-key guard; no Gemini request was made",
+    "Signing, Release archive, upload, Apple processing, and approval waits were not benchmarked",
+    "Baseline matrix dependency waits for both validations; compare measured work, not whole workflow wall time",
+    "Early boot and reuse are bundled, so this does not isolate each change's individual contribution"
+  ],
+  "pairs": [
+    {
+      "repetition": "1",
+      "baseline_validation_seconds": 504.03,
+      "baseline_cold_canary_seconds": 304.744,
+      "baseline_combined_seconds": 808.774,
+      "optimized_combined_seconds": 452.268,
+      "saved_seconds": 356.506,
+      "reduction_percent": 44.08,
+      "passed_unit_tests": 217,
+      "baseline_canary_probe_seconds": 286.604,
+      "reused_canary_probe_seconds": 17.744,
+      "remaining_boot_wait_seconds": 0.0
+    },
+    {
+      "repetition": "2",
+      "baseline_validation_seconds": 398.169,
+      "baseline_cold_canary_seconds": 258.112,
+      "baseline_combined_seconds": 656.281,
+      "optimized_combined_seconds": 499.879,
+      "saved_seconds": 156.402,
+      "reduction_percent": 23.83,
+      "passed_unit_tests": 217,
+      "baseline_canary_probe_seconds": 240.755,
+      "reused_canary_probe_seconds": 22.45,
+      "remaining_boot_wait_seconds": 0.0
+    }
+  ],
+  "mean": {
+    "baseline_seconds": 732.527,
+    "optimized_seconds": 476.073,
+    "saved_seconds": 256.454,
+    "reduction_percent": 35.01
+  },
+  "jobs": [
+    {
+      "mode": "baseline-canary",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:04:36.350292+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.958
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 12.96,
+          "exit_code": 0,
+          "duration_seconds": 286.604
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 299.639,
+          "exit_code": 0,
+          "duration_seconds": 5.103
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 304.744
+    },
+    {
+      "mode": "baseline-canary",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T22:04:36.391655+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.759
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 12.76,
+          "exit_code": 0,
+          "duration_seconds": 240.755
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 253.534,
+          "exit_code": 0,
+          "duration_seconds": 4.577
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 258.112
+    },
+    {
+      "mode": "baseline-validation",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T21:55:54.035111+00:00",
+      "phases": [
+        {
+          "name": "release-contracts",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 0.57
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 0.57,
+          "exit_code": 0,
+          "duration_seconds": 8.69
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 9.261,
+          "exit_code": 0,
+          "duration_seconds": 62.291
+        },
+        {
+          "name": "select-simulator",
+          "start_seconds": 71.557,
+          "exit_code": 0,
+          "duration_seconds": 2.116
+        },
+        {
+          "name": "simulator-build-and-test",
+          "start_seconds": 73.673,
+          "exit_code": 0,
+          "duration_seconds": 426.929
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 500.62,
+          "exit_code": 0,
+          "duration_seconds": 3.408
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 18.038
+      },
+      "total_seconds": 504.03
+    },
+    {
+      "mode": "baseline-validation",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T21:55:55.771265+00:00",
+      "phases": [
+        {
+          "name": "release-contracts",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 1.062
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 1.063,
+          "exit_code": 0,
+          "duration_seconds": 19.272
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 20.338,
+          "exit_code": 0,
+          "duration_seconds": 112.316
+        },
+        {
+          "name": "select-simulator",
+          "start_seconds": 132.681,
+          "exit_code": 0,
+          "duration_seconds": 2.855
+        },
+        {
+          "name": "simulator-build-and-test",
+          "start_seconds": 135.538,
+          "exit_code": 0,
+          "duration_seconds": 257.575
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 393.146,
+          "exit_code": 0,
+          "duration_seconds": 5.018
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 8.11
+      },
+      "total_seconds": 398.169
+    },
+    {
+      "mode": "early-boot-reuse",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "1",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T21:55:55.002302+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.456
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 12.457,
+          "exit_code": 0,
+          "duration_seconds": 2.123
+        },
+        {
+          "name": "release-contracts",
+          "start_seconds": 15.465,
+          "exit_code": 0,
+          "duration_seconds": 47.37
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 62.852,
+          "exit_code": 0,
+          "duration_seconds": 65.804
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 128.666,
+          "exit_code": 0,
+          "duration_seconds": 92.369
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 221.046,
+          "exit_code": 0,
+          "duration_seconds": 159.685
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 380.743,
+          "exit_code": 0,
+          "duration_seconds": 50.037
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 430.823,
+          "exit_code": 0,
+          "duration_seconds": 3.451
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 434.275,
+          "exit_code": 0,
+          "duration_seconds": 17.744
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 452.022,
+          "exit_code": 0,
+          "duration_seconds": 0.245
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 15.465,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 5.546
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 452.268
+    },
+    {
+      "mode": "early-boot-reuse",
+      "commit": "0b6b46f293215c20a70beb0456c5df23a672fe74",
+      "repetition": "2",
+      "image_version": "20260728.0273.1",
+      "started_at": "2026-08-30T21:55:55.705359+00:00",
+      "phases": [
+        {
+          "name": "select-simulator",
+          "start_seconds": 0.0,
+          "exit_code": 0,
+          "duration_seconds": 12.414
+        },
+        {
+          "name": "request-simulator-boot",
+          "start_seconds": 12.416,
+          "exit_code": 0,
+          "duration_seconds": 4.12
+        },
+        {
+          "name": "release-contracts",
+          "start_seconds": 17.431,
+          "exit_code": 0,
+          "duration_seconds": 102.601
+        },
+        {
+          "name": "isolation-contracts",
+          "start_seconds": 120.092,
+          "exit_code": 0,
+          "duration_seconds": 48.117
+        },
+        {
+          "name": "generic-device-build",
+          "start_seconds": 168.221,
+          "exit_code": 0,
+          "duration_seconds": 120.265
+        },
+        {
+          "name": "simulator-build",
+          "start_seconds": 288.497,
+          "exit_code": 0,
+          "duration_seconds": 119.843
+        },
+        {
+          "name": "simulator-test-without-building",
+          "start_seconds": 408.378,
+          "exit_code": 0,
+          "duration_seconds": 66.003
+        },
+        {
+          "name": "unit-summary",
+          "start_seconds": 474.425,
+          "exit_code": 0,
+          "duration_seconds": 2.791
+        },
+        {
+          "name": "canary-probe",
+          "start_seconds": 477.217,
+          "exit_code": 0,
+          "duration_seconds": 22.45
+        },
+        {
+          "name": "canary-summary",
+          "start_seconds": 499.67,
+          "exit_code": 0,
+          "duration_seconds": 0.209
+        }
+      ],
+      "complete": true,
+      "live_api_called": false,
+      "simulator": {
+        "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+        "name": "iPhone 17 Pro",
+        "initial_state": "Shutdown"
+      },
+      "boot_requested_at_seconds": 17.431,
+      "remaining_boot_wait_seconds": 0.0,
+      "unit_tests": {
+        "passed": 217,
+        "suites": 17,
+        "execution_seconds": 5.58
+      },
+      "canary_probe": {
+        "environment_forwarded": true,
+        "expected_skipped_tests": 1,
+        "live_api_validated": false
+      },
+      "total_seconds": 499.879
+    }
+  ],
+  "reuse_only_followup": {
+    "source_equivalence": "git diff confirms only experiment harness files changed",
+    "mean_seconds": 539.686,
+    "saved_vs_baseline_seconds": 192.842,
+    "reduction_vs_baseline_percent": 26.33,
+    "saved_vs_early_boot_seconds": -63.612,
+    "jobs": [
+      {
+        "mode": "reuse-only",
+        "commit": "57d1acb114f475b114889c6e06fbe2bdcf039122",
+        "repetition": "1",
+        "image_version": "20260728.0273.1",
+        "started_at": "2026-08-30T22:05:40.594296+00:00",
+        "phases": [
+          {
+            "name": "release-contracts",
+            "start_seconds": 0.0,
+            "exit_code": 0,
+            "duration_seconds": 0.522
+          },
+          {
+            "name": "isolation-contracts",
+            "start_seconds": 0.522,
+            "exit_code": 0,
+            "duration_seconds": 9.687
+          },
+          {
+            "name": "generic-device-build",
+            "start_seconds": 10.215,
+            "exit_code": 0,
+            "duration_seconds": 83.816
+          },
+          {
+            "name": "select-simulator",
+            "start_seconds": 94.034,
+            "exit_code": 0,
+            "duration_seconds": 3.048
+          },
+          {
+            "name": "simulator-build-and-test",
+            "start_seconds": 97.083,
+            "exit_code": 0,
+            "duration_seconds": 394.451
+          },
+          {
+            "name": "unit-summary",
+            "start_seconds": 491.584,
+            "exit_code": 0,
+            "duration_seconds": 5.314
+          },
+          {
+            "name": "canary-probe",
+            "start_seconds": 496.904,
+            "exit_code": 0,
+            "duration_seconds": 91.085
+          },
+          {
+            "name": "canary-summary",
+            "start_seconds": 588.005,
+            "exit_code": 0,
+            "duration_seconds": 0.648
+          }
+        ],
+        "complete": true,
+        "live_api_called": false,
+        "simulator": {
+          "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+          "name": "iPhone 17 Pro",
+          "initial_state": "Shutdown"
+        },
+        "unit_tests": {
+          "passed": 217,
+          "suites": 17,
+          "execution_seconds": 9.809
+        },
+        "canary_probe": {
+          "environment_forwarded": true,
+          "expected_skipped_tests": 1,
+          "live_api_validated": false
+        },
+        "total_seconds": 588.654
+      },
+      {
+        "mode": "reuse-only",
+        "commit": "57d1acb114f475b114889c6e06fbe2bdcf039122",
+        "repetition": "2",
+        "image_version": "20260728.0273.1",
+        "started_at": "2026-08-30T22:05:43.533818+00:00",
+        "phases": [
+          {
+            "name": "release-contracts",
+            "start_seconds": 0.0,
+            "exit_code": 0,
+            "duration_seconds": 0.874
+          },
+          {
+            "name": "isolation-contracts",
+            "start_seconds": 0.875,
+            "exit_code": 0,
+            "duration_seconds": 13.092
+          },
+          {
+            "name": "generic-device-build",
+            "start_seconds": 13.969,
+            "exit_code": 0,
+            "duration_seconds": 75.929
+          },
+          {
+            "name": "select-simulator",
+            "start_seconds": 89.904,
+            "exit_code": 0,
+            "duration_seconds": 2.616
+          },
+          {
+            "name": "simulator-build-and-test",
+            "start_seconds": 92.521,
+            "exit_code": 0,
+            "duration_seconds": 250.191
+          },
+          {
+            "name": "unit-summary",
+            "start_seconds": 342.75,
+            "exit_code": 0,
+            "duration_seconds": 3.103
+          },
+          {
+            "name": "canary-probe",
+            "start_seconds": 345.854,
+            "exit_code": 0,
+            "duration_seconds": 144.373
+          },
+          {
+            "name": "canary-summary",
+            "start_seconds": 490.237,
+            "exit_code": 0,
+            "duration_seconds": 0.48
+          }
+        ],
+        "complete": true,
+        "live_api_called": false,
+        "simulator": {
+          "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+          "name": "iPhone 17 Pro",
+          "initial_state": "Shutdown"
+        },
+        "unit_tests": {
+          "passed": 217,
+          "suites": 17,
+          "execution_seconds": 9.586
+        },
+        "canary_probe": {
+          "environment_forwarded": true,
+          "expected_skipped_tests": 1,
+          "live_api_validated": false
+        },
+        "total_seconds": 490.717
+      }
+    ],
+    "limitation": "Follow-up ran later on fresh runners, not simultaneously with baseline"
+  },
+  "workflow_runs": [
+    {
+      "id": 33337743508,
+      "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33337743508",
+      "conclusion": "success"
+    },
+    {
+      "id": 33338184058,
+      "url": "https://github.com/kvn8888/OpenFoodJournal/actions/runs/33338184058",
+      "conclusion": "success"
+    }
+  ],
+  "source_tested": "d0e0ca7da7f887226b39071d1f1572a65d797395",
+  "production_workflows_modified": false
+}
