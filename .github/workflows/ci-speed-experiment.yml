@@ -1,0 +1,89 @@
+name: CI Speed Experiment
+
+on:
+  push:
+    branches: [codex/ci-speed-experiment]
+    paths:
+      - .github/workflows/ci-speed-experiment.yml
+      - .github/scripts/benchmark-ci.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-speed-experiment-${{ github.ref }}
+  cancel-in-progress: true
+
+# Deliberately no protected environments or secrets. These jobs cannot sign,
+# upload, allocate build numbers, publish notes, or call Gemini.
+jobs:
+  baseline-validation:
+    name: Baseline validation (${{ matrix.repetition }})
+    runs-on: macos-26
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        repetition: [1, 2]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      BENCHMARK_REPETITION: ${{ matrix.repetition }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash .github/scripts/verify-xcode.sh
+      - run: python3 .github/scripts/benchmark-ci.py baseline-validation
+      - name: Retain small benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: baseline-validation-${{ matrix.repetition }}
+          path: ${{ runner.temp }}/ci-benchmark
+          retention-days: 3
+
+  baseline-canary:
+    name: Baseline cold canary (${{ matrix.repetition }})
+    needs: baseline-validation
+    runs-on: macos-26
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        repetition: [1, 2]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      BENCHMARK_REPETITION: ${{ matrix.repetition }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash .github/scripts/verify-xcode.sh
+      - run: python3 .github/scripts/benchmark-ci.py baseline-canary
+      - name: Retain small benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: baseline-canary-${{ matrix.repetition }}
+          path: ${{ runner.temp }}/ci-benchmark
+          retention-days: 3
+
+  early-boot-reuse:
+    name: Early boot and reuse (${{ matrix.repetition }})
+    runs-on: macos-26
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        repetition: [1, 2]
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      BENCHMARK_REPETITION: ${{ matrix.repetition }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash .github/scripts/verify-xcode.sh
+      - run: python3 .github/scripts/benchmark-ci.py early-boot-reuse
+      - name: Retain small benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: early-boot-reuse-${{ matrix.repetition }}
+          path: ${{ runner.temp }}/ci-benchmark
+          retention-days: 3
