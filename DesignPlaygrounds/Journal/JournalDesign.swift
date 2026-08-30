@@ -14,9 +14,11 @@ enum JournalStyle {
     static let calorieSize: CGFloat = 32
     static let foodNameSize: CGFloat = 17
     static let rowVerticalPadding: CGFloat = 12
-    // Overlapping glass entry chips; separate from the large nutrient rings.
+    // Saved circle geometry: 40 pt diameter, 5 pt overlap (2026-08-30).
+    // The pill retains the same 110 × 40 pt footprint and 35 pt label pitch.
     static let entryMacroDiameter: CGFloat = 40
     static let entryMacroOverlap: CGFloat = 5
+    static let entryMacroPillWidth = 3 * entryMacroDiameter - 2 * entryMacroOverlap
     static let entryMacroGlassTintOpacity: Double = 0.7
     static let entryMacroNumberSize: CGFloat = 13
     static let entryMacroUnitSize: CGFloat = 12
@@ -64,13 +66,14 @@ enum JournalStyle {
 }
 
 enum JournalChipAppearance: String, CaseIterable, Identifiable {
+    case neutralPill = "Neutral pill"
     case rgbGlass = "RGB glass"
     case savedNeutral = "Saved neutral"
     var id: String { rawValue }
 }
 
 extension EnvironmentValues {
-    @Entry var journalChipAppearance: JournalChipAppearance = .savedNeutral
+    @Entry var journalChipAppearance: JournalChipAppearance = .neutralPill
 }
 
 // MARK: - 2. Journal screen composition
@@ -385,27 +388,34 @@ private struct JournalMacroChipGroup: View {
 
     private var macros: [(name: String, value: Int, color: Color)] {
         [
-            ("Protein", food.protein, appearance == .savedNeutral ? JournalStyle.savedNeutralProteinColor : JournalStyle.entryProteinColor),
-            ("Carbohydrates", food.carbs, appearance == .savedNeutral ? JournalStyle.savedNeutralCarbColor : JournalStyle.entryCarbColor),
-            ("Fat", food.fat, appearance == .savedNeutral ? JournalStyle.savedNeutralFatColor : JournalStyle.entryFatColor)
+            ("Protein", food.protein, appearance != .rgbGlass ? JournalStyle.savedNeutralProteinColor : JournalStyle.entryProteinColor),
+            ("Carbohydrates", food.carbs, appearance != .rgbGlass ? JournalStyle.savedNeutralCarbColor : JournalStyle.entryCarbColor),
+            ("Fat", food.fat, appearance != .rgbGlass ? JournalStyle.savedNeutralFatColor : JournalStyle.entryFatColor)
         ]
     }
 
     var body: some View {
         ZStack {
-            // The glass circles share one sampling region. Keep every label
-            // above all glass so refraction/overlap cannot obscure its digits.
-            GlassEffectContainer(spacing: 0) {
-                HStack(spacing: -JournalStyle.entryMacroOverlap) {
-                    ForEach(macros, id: \.name) { macro in
-                        Circle().fill(.clear)
-                            .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
-                            .glassEffect(
-                                appearance == .rgbGlass
-                                    ? .regular.tint(macro.color.opacity(JournalStyle.entryMacroGlassTintOpacity))
-                                    : .regular,
-                                in: .circle
-                            )
+            if appearance == .neutralPill {
+                // One native glass surface, not three circles merged at rest.
+                // Labels keep their original centers, so food-row layout stays put.
+                Capsule().fill(.clear)
+                    .frame(width: JournalStyle.entryMacroPillWidth, height: JournalStyle.entryMacroDiameter)
+                    .glassEffect(.regular, in: .capsule)
+            } else {
+                // Saved circle variants keep one shared glass sampling region.
+                GlassEffectContainer(spacing: 0) {
+                    HStack(spacing: -JournalStyle.entryMacroOverlap) {
+                        ForEach(macros, id: \.name) { macro in
+                            Circle().fill(.clear)
+                                .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
+                                .glassEffect(
+                                    appearance == .rgbGlass
+                                        ? .regular.tint(macro.color.opacity(JournalStyle.entryMacroGlassTintOpacity))
+                                        : .regular,
+                                    in: .circle
+                                )
+                        }
                     }
                 }
             }
@@ -630,7 +640,7 @@ private struct SampleDay {
 
 struct JournalWorkbench: View {
     @State private var scenario: JournalScenario = .typical
-    @State private var chipAppearance: JournalChipAppearance = .savedNeutral
+    @State private var chipAppearance: JournalChipAppearance = .neutralPill
     @State private var dark = false
     @State private var zoom = 0.85
 
