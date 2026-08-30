@@ -16,7 +16,7 @@ enum JournalStyle {
     static let rowVerticalPadding: CGFloat = 12
     // Overlapping glass entry chips; separate from the large nutrient rings.
     static let entryMacroDiameter: CGFloat = 40
-    static let entryMacroOverlap: CGFloat = 3
+    static let entryMacroOverlap: CGFloat = 5
     static let entryMacroGlassTintOpacity: Double = 0.7
     static let entryMacroNumberSize: CGFloat = 13
     static let entryMacroUnitSize: CGFloat = 12
