@@ -220,6 +220,8 @@ struct SavedFoodRecord: Codable {
     var kind: SavedFoodKind
     var compositeIngredients: [CompositeIngredientSnapshot]
     var calculatorIngredients: [CalculatorIngredient]
+    var calculatorCustomizations: [CalculatorCustomization]
+    var sourceJournalEntryID: UUID?
 
     init(_ food: SavedFood) {
         id = food.id
@@ -249,6 +251,8 @@ struct SavedFoodRecord: Codable {
         kind = food.kind
         compositeIngredients = food.compositeIngredients
         calculatorIngredients = food.calculatorIngredients
+        calculatorCustomizations = food.calculatorCustomizations
+        sourceJournalEntryID = food.sourceJournalEntryID
     }
 
     enum CodingKeys: String, CodingKey {
@@ -279,6 +283,8 @@ struct SavedFoodRecord: Codable {
         case kind
         case compositeIngredients
         case calculatorIngredients
+        case calculatorCustomizations
+        case sourceJournalEntryID
     }
 
     init(from decoder: Decoder) throws {
@@ -329,6 +335,10 @@ struct SavedFoodRecord: Codable {
             [CalculatorIngredient].self,
             forKey: .calculatorIngredients
         ) ?? []
+        calculatorCustomizations = try container.decodeIfPresent(
+            [CalculatorCustomization].self, forKey: .calculatorCustomizations
+        ) ?? []
+        sourceJournalEntryID = try container.decodeIfPresent(UUID.self, forKey: .sourceJournalEntryID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -360,6 +370,8 @@ struct SavedFoodRecord: Codable {
         try container.encode(kind, forKey: .kind)
         try container.encode(compositeIngredients, forKey: .compositeIngredients)
         try container.encode(calculatorIngredients, forKey: .calculatorIngredients)
+        try container.encode(calculatorCustomizations, forKey: .calculatorCustomizations)
+        try container.encodeIfPresent(sourceJournalEntryID, forKey: .sourceJournalEntryID)
     }
 
     func makeModel() -> SavedFood {
@@ -389,7 +401,9 @@ struct SavedFoodRecord: Codable {
             isOnShelf: isOnShelf,
             kind: kind,
             compositeIngredients: compositeIngredients,
-            calculatorIngredients: calculatorIngredients
+            calculatorIngredients: calculatorIngredients,
+            calculatorCustomizations: calculatorCustomizations,
+            sourceJournalEntryID: sourceJournalEntryID
         )
         food.lastUsedAt = lastUsedAt
         food.refreshCompositeNutrition()
@@ -424,6 +438,8 @@ struct SavedFoodRecord: Codable {
         food.kind = kind
         food.compositeIngredients = compositeIngredients
         food.calculatorIngredients = calculatorIngredients
+        food.calculatorCustomizations = calculatorCustomizations
+        food.sourceJournalEntryID = sourceJournalEntryID
         food.refreshCompositeNutrition()
         food.refreshCalculatorNutrition()
     }
