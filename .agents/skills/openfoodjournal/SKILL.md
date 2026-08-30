@@ -458,6 +458,7 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 
 ## Conventions
 
+- **Journal design playground (Kevin, 2026-08-30)**: `DesignPlaygrounds/Journal/JournalPlayground.xcodeproj` is an intentionally isolated native macOS visual scratchpad, not a port of the app. Edit `JournalDesign.swift` like CSS, preview with `JournalPlayground → My Mac`, then port only explicitly chosen visual changes back. Duplicated presentation and fictional sample meals are intentional; do not introduce app services, SwiftData/CloudKit/Turso, credentials, camera dependencies, or shared production target membership. No iOS simulator/runtime is needed. `build.sh prepare` installs project-local per-user Xcode settings keeping Canvas DerivedData under the playground's ignored `.build` on DevDisk; Xcode 27 ignores a shared DerivedData location alone. CLI build/run also prepare these prefs and explicitly route caches externally. iOS system chrome is approximate; this sandbox does not prove iPhone behavior. See its README for setup/storage caveats. Do not build or install the shipping app to verify this playground.
 - **Comments**: Explain *why*, not *what*. Entry-level devs should understand each function's purpose.
 - **File creation**: Build large files in small chunks to avoid network errors.
 - **Retrospectives**: Live in `docs/`. Update when later fixes change the story.
