@@ -6,6 +6,8 @@ import SwiftUI
 struct EntryRowView: View {
     let entry: NutritionEntry
     let onDelete: () -> Void
+    @AppStorage(JournalAppearanceSettings.showFoodImagesKey) private var showFoodImages = JournalAppearanceSettings.defaultShowFoodImages
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     /// Shared formatter — static so it's created once, not on every render
     private static let timeFormatter: DateFormatter = {
@@ -22,6 +24,9 @@ struct EntryRowView: View {
 
     var body: some View {
         HStack(spacing: OFJSpace.s12) {
+            if showFoodImages {
+                JournalEntryFoodImage(entryID: entry.id, savedFoodID: entry.savedFoodID)
+            }
             // Macro mini-summary
             VStack(alignment: .leading, spacing: OFJSpace.s2) {
                 // Show brand above food name if available
@@ -58,14 +63,16 @@ struct EntryRowView: View {
 
             Spacer()
 
-            // Macro chips
-            HStack(spacing: OFJSpace.s6) {
-                MacroChip(value: entry.protein, color: OFJColor.protein, label: "P")
-                MacroChip(value: entry.carbs, color: OFJColor.carbohydrates, label: "C")
-                MacroChip(value: entry.fat, color: OFJColor.fat, label: "F")
+            if !dynamicTypeSize.isAccessibilitySize {
+                FoodMacroPill(protein: entry.protein, carbs: entry.carbs, fat: entry.fat)
             }
         }
-        .padding(.vertical, OFJSpace.s4)
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 8) {
+            if dynamicTypeSize.isAccessibilitySize {
+                FoodMacroPill(protein: entry.protein, carbs: entry.carbs, fat: entry.fat)
+            }
+        }
+        .padding(.vertical, OFJLayout.journalRowVerticalPadding)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(entry.name), \(Int(entry.calories)) kilocalories, protein \(Int(entry.protein))g, carbs \(Int(entry.carbs))g, fat \(Int(entry.fat))g")
