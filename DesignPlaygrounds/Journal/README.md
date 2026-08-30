@@ -50,6 +50,11 @@ static let cardRadius: CGFloat = 24
 ```
 
 All sizes are **points**. Workbench zoom only changes viewing scale, not layout.
+The `lightGradient(progress:)` and `darkGradient(progress:)` functions inside
+`JournalStyle` independently control each mode's background colors and opacity.
+They start with identical values; lower an `.opacity(...)` only in the dark
+function to soften dark mode without changing light mode. The gradient's radius
+and position remain shared in `JournalDesign`.
 The default phone-sized artboard is 393 × 852 points. For another width, edit
 `phoneWidth`; text truncation, ring spacing, and rows respond to that width.
 
