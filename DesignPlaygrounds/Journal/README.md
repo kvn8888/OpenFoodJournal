@@ -58,6 +58,23 @@ is always the mock "today", so screenshots stay reproducible. Saturday is
 disabled with a dashed ring. Tap + to expand the menu. Mock destination buttons
 do not open the real app. Tab buttons only change selection styling.
 
+### Entry chip variants
+
+- **RGB glass** (default): blue protein, green carbs, red fat glass with white
+  stacked numbers/units. Tint inputs are exact sRGB primaries, not system colors.
+- **Saved Neutral**: the previous untinted-glass design with its original
+  lavender/green/amber text. Available in the two `Chips · Saved Neutral` Canvas
+  previews, or through the **Entry chips** selector in the running Mac window.
+- The complete neutral Journal, including Kevin's refinements, is preserved in
+  commit `a7c743b`. Switching variants shares current layout; the commit preserves
+  the exact earlier file if later geometry experiments need to be compared.
+
+`entryMacroGlassTintOpacity` affects RGB glass only. `entryMacroOverlap` and the
+size/font values affect both variants. Apple documents glass tinting and shape
+merging, not a guaranteed additive RGB or subtractive pigment mixing operation.
+Pure RGB inputs therefore don't guarantee cyan/yellow/white overlap results.
+See [Apple's Liquid Glass guide](https://developer.apple.com/documentation/swiftui/applying-liquid-glass-to-custom-views).
+
 ## Move a finished design back
 
 Tell Codex which sections to bring back, or provide a screenshot and the edited
