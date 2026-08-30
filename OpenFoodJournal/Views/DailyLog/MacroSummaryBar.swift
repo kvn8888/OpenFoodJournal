@@ -45,8 +45,23 @@ enum MacroNutrientID: String, CaseIterable {
 /// Each slot can hold a macro (protein/carbs/fat/calories) or a micronutrient.
 /// Long-press → context menu → edit sheet to reconfigure all slots.
 struct MacroSummaryBar: View {
-    let log: DailyLog?
+    private let log: DailyLog?
+    private let suppliedTotals: JournalDayTotals?
     let goals: UserGoals
+
+    /// History and standalone previews may still supply a live SwiftData log.
+    init(log: DailyLog?, goals: UserGoals) {
+        self.log = log
+        self.suppliedTotals = nil
+        self.goals = goals
+    }
+
+    /// Journal uses the exact snapshot that also feeds its calendar rings.
+    init(totals: JournalDayTotals, goals: UserGoals) {
+        self.log = nil
+        self.suppliedTotals = totals
+        self.goals = goals
+    }
 
     // ── Preferences (SwiftData singleton) ─────────────────────────
     // Ring slot configuration persisted in the Preferences model.
@@ -59,10 +74,9 @@ struct MacroSummaryBar: View {
     @State private var showEditSheet = false       // Context menu edit mode
 
     // ── Computed ──────────────────────────────────────────────────
-    private var calories: Double { log?.totalCalories ?? 0 }
-    private var protein: Double { log?.totalProtein ?? 0 }
-    private var carbs: Double { log?.totalCarbs ?? 0 }
-    private var fat: Double { log?.totalFat ?? 0 }
+    private var resolvedTotals: JournalDayTotals {
+        suppliedTotals ?? JournalDayTotals(entries: log?.safeEntries ?? [])
+    }
 
     /// All 5 slot IDs read from Preferences (or defaults)
     private var slotIDs: [String] {
@@ -73,26 +87,14 @@ struct MacroSummaryBar: View {
         return [p.ringSlot1, p.ringSlot2, p.ringSlot3, p.ringSlot4, p.ringSlot5]
     }
 
-    /// Aggregated micronutrient totals for the day — sum across all entries
-    private var microTotals: [String: Double] {
-        let entries = log?.safeEntries ?? []
-        var totals: [String: Double] = [:]
-        for entry in entries {
-            for (key, micro) in entry.micronutrients {
-                let normalizedKey = KnownMicronutrients.normalize(key)
-                totals[normalizedKey, default: 0] += micro.value
-            }
-        }
-        return totals
-    }
-
     var body: some View {
+        let totals = resolvedTotals
         VStack(spacing: OFJSpace.s12) {
             // Calorie headline
             HStack(alignment: .firstTextBaseline, spacing: OFJSpace.s4) {
-                Text(calories, format: .number.precision(.fractionLength(0)))
+                Text(totals.calories, format: .number.precision(.fractionLength(0)))
                     .font(OFJType.nutritionDisplay)
-                    .ofjNumericTextTransition(value: calories)
+                    .ofjNumericTextTransition(value: totals.calories)
                 Text("/ \(Int(goals.dailyCalories)) kcal")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -110,7 +112,7 @@ struct MacroSummaryBar: View {
                         if slotIdx > 0 {
                             Spacer(minLength: OFJSpace.s8)
                         }
-                        slotView(slotID: slotIDs[slotIdx], slotIndex: slotIdx + 1)
+                        slotView(slotID: slotIDs[slotIdx], slotIndex: slotIdx + 1, totals: totals)
                     }
                 }
                 .padding(.horizontal, OFJSpace.s4)
@@ -151,10 +153,10 @@ struct MacroSummaryBar: View {
 
     /// Shows a ring for any nutrient (macro or micro), or a + button if empty.
     @ViewBuilder
-    private func slotView(slotID: String, slotIndex: Int) -> some View {
+    private func slotView(slotID: String, slotIndex: Int, totals: JournalDayTotals) -> some View {
         if let macroID = MacroNutrientID(rawValue: slotID) {
             // Macro slot — pull value/goal from DailyLog totals + UserGoals
-            let (value, goal) = macroValueAndGoal(for: macroID)
+            let (value, goal) = macroValueAndGoal(for: macroID, totals: totals)
             MacroRingView(
                 value: value,
                 goal: goal,
@@ -163,8 +165,7 @@ struct MacroSummaryBar: View {
                 unit: macroID.unit
             )
         } else if let nutrient = KnownMicronutrients.nutrient(forID: slotID) {
-            // Micro slot — pull value from aggregated microTotals
-            let value = microTotals[nutrient.id] ?? 0
+            let value = totals.micronutrients[nutrient.id] ?? 0
             MacroRingView(
                 value: value,
                 goal: nutrient.dailyValue,
@@ -202,12 +203,12 @@ struct MacroSummaryBar: View {
     // MARK: - Helpers
 
     /// Returns (current value, goal) for a macro nutrient
-    private func macroValueAndGoal(for macro: MacroNutrientID) -> (Double, Double) {
+    private func macroValueAndGoal(for macro: MacroNutrientID, totals: JournalDayTotals) -> (Double, Double) {
         switch macro {
-        case .protein:  (protein, goals.dailyProtein)
-        case .carbs:    (carbs, goals.dailyCarbs)
-        case .fat:      (fat, goals.dailyFat)
-        case .calories: (calories, goals.dailyCalories)
+        case .protein:  (totals.protein, goals.dailyProtein)
+        case .carbs:    (totals.carbs, goals.dailyCarbs)
+        case .fat:      (totals.fat, goals.dailyFat)
+        case .calories: (totals.calories, goals.dailyCalories)
         }
     }
 
