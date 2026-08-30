@@ -55,7 +55,6 @@ enum JournalStyle {
 struct JournalDesign: View {
     var scenario: JournalScenario = .typical
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var selectedDay = 21
     @State private var menuExpanded = false
     @State private var selectedTab = "Journal"
@@ -127,7 +126,6 @@ struct JournalDesign: View {
         .clipShape(.rect(cornerRadius: 32))
         .onChange(of: scenario) { menuExpanded = false }
         // No global animation: keep changing numbers scoped to their own views.
-        .environment(\.accessibilityReduceMotion, reduceMotion)
     }
 }
 
@@ -189,7 +187,7 @@ private struct JournalCalendar: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(SampleDay.week) { date in
+            ForEach(SampleDay.week, id: \.id) { date in
                 JournalDayCell(
                     number: date.number, weekday: date.weekday,
                     progress: SampleDay.make(number: date.number, scenario: scenario).progress,
