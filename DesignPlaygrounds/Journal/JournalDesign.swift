@@ -20,9 +20,15 @@ enum JournalStyle {
     static let entryMacroGlassTintOpacity: Double = 0.7
     static let entryMacroNumberSize: CGFloat = 13
     static let entryMacroUnitSize: CGFloat = 12
-    static let entryProteinColor = Color(red: 0.54, green: 0.58, blue: 1.0)
-    static let entryCarbColor = Color(red: 0.26, green: 0.80, blue: 0.10)
-    static let entryFatColor = Color(red: 1.0, green: 0.75, blue: 0)
+    // Exact sRGB primaries, not adaptive system .blue/.green/.red colors.
+    // These are inputs to Apple's glass tint, not a custom additive blend.
+    static let entryProteinColor = Color(.sRGB, red: 0, green: 0, blue: 1, opacity: 1)
+    static let entryCarbColor = Color(.sRGB, red: 0, green: 1, blue: 0, opacity: 1)
+    static let entryFatColor = Color(.sRGB, red: 1, green: 0, blue: 0, opacity: 1)
+    // Keep the approved neutral-glass version's text palette unchanged.
+    static let savedNeutralProteinColor = Color(red: 0.54, green: 0.58, blue: 1.0)
+    static let savedNeutralCarbColor = Color(red: 0.26, green: 0.80, blue: 0.10)
+    static let savedNeutralFatColor = Color(red: 1.0, green: 0.75, blue: 0)
     static let cardPadding: CGFloat = 16
     static let cardRadius: CGFloat = 20
     static let weekdaySize: CGFloat = 12
@@ -55,6 +61,16 @@ enum JournalStyle {
         default: [.orange.opacity(0.15), overGoal.opacity(0.10), .clear]
         }
     }
+}
+
+enum JournalChipAppearance: String, CaseIterable, Identifiable {
+    case rgbGlass = "RGB glass"
+    case savedNeutral = "Saved neutral"
+    var id: String { rawValue }
+}
+
+extension EnvironmentValues {
+    @Entry var journalChipAppearance: JournalChipAppearance = .rgbGlass
 }
 
 // MARK: - 2. Journal screen composition
@@ -365,12 +381,13 @@ private struct JournalFoodRow: View {
 
 private struct JournalMacroChipGroup: View {
     let food: SampleFood
+    @Environment(\.journalChipAppearance) private var appearance
 
     private var macros: [(name: String, value: Int, color: Color)] {
         [
-            ("Protein", food.protein, JournalStyle.entryProteinColor),
-            ("Carbohydrates", food.carbs, JournalStyle.entryCarbColor),
-            ("Fat", food.fat, JournalStyle.entryFatColor)
+            ("Protein", food.protein, appearance == .savedNeutral ? JournalStyle.savedNeutralProteinColor : JournalStyle.entryProteinColor),
+            ("Carbohydrates", food.carbs, appearance == .savedNeutral ? JournalStyle.savedNeutralCarbColor : JournalStyle.entryCarbColor),
+            ("Fat", food.fat, appearance == .savedNeutral ? JournalStyle.savedNeutralFatColor : JournalStyle.entryFatColor)
         ]
     }
 
@@ -383,7 +400,12 @@ private struct JournalMacroChipGroup: View {
                     ForEach(macros, id: \.name) { macro in
                         Circle().fill(.clear)
                             .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
-                            .glassEffect(.regular, in: .circle)
+                            .glassEffect(
+                                appearance == .rgbGlass
+                                    ? .regular.tint(macro.color.opacity(JournalStyle.entryMacroGlassTintOpacity))
+                                    : .regular,
+                                in: .circle
+                            )
                     }
                 }
             }
@@ -401,6 +423,7 @@ private struct JournalMacroChip: View {
     let label: String
     let value: Int
     let color: Color
+    @Environment(\.journalChipAppearance) private var appearance
 
     var body: some View {
         VStack(spacing: -1) {
@@ -412,7 +435,7 @@ private struct JournalMacroChip: View {
             Text("G")
                 .font(.system(size: JournalStyle.entryMacroUnitSize, weight: .bold))
         }
-        .foregroundStyle(color)
+        .foregroundStyle(appearance == .rgbGlass ? Color.white : color)
         // Reserve a readable text column even when adjacent circles overlap.
         .frame(width: JournalStyle.entryMacroDiameter - JournalStyle.entryMacroOverlap)
         .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
@@ -607,6 +630,7 @@ private struct SampleDay {
 
 struct JournalWorkbench: View {
     @State private var scenario: JournalScenario = .typical
+    @State private var chipAppearance: JournalChipAppearance = .rgbGlass
     @State private var dark = false
     @State private var zoom = 0.85
 
@@ -623,10 +647,16 @@ struct JournalWorkbench: View {
                     .accessibilityLabel("Preview zoom")
             }
             .padding(12)
+            Picker("Entry chips", selection: $chipAppearance) {
+                ForEach(JournalChipAppearance.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12).padding(.bottom, 12)
             Divider()
             GeometryReader { viewport in
                 ScrollView([.horizontal, .vertical]) {
                     JournalDesign(scenario: scenario)
+                        .environment(\.journalChipAppearance, chipAppearance)
                         .preferredColorScheme(dark ? .dark : .light)
                         .scaleEffect(zoom)
                         .frame(width: JournalStyle.phoneWidth * zoom, height: JournalStyle.phoneHeight * zoom)
@@ -659,4 +689,16 @@ struct JournalWorkbench: View {
 
 #Preview("Journal · Over Goal") {
     JournalDesign(scenario: .over).preferredColorScheme(.light)
+}
+
+#Preview("Chips · Saved Neutral") {
+    JournalDesign()
+        .environment(\.journalChipAppearance, .savedNeutral)
+        .preferredColorScheme(.light)
+}
+
+#Preview("Chips · Saved Neutral Dark") {
+    JournalDesign()
+        .environment(\.journalChipAppearance, .savedNeutral)
+        .preferredColorScheme(.dark)
 }
