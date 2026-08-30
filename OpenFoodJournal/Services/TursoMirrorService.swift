@@ -206,6 +206,8 @@ enum TursoSchema {
             .init(name: "serving_mappings_json", type: "TEXT"),
             .init(name: "composite_ingredients_json", type: "TEXT"),
             .init(name: "calculator_ingredients_json", type: "TEXT"),
+            .init(name: "calculator_customizations_json", type: "TEXT"),
+            .init(name: "source_journal_entry_id", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
         TursoTableDefinition(name: "ofj_tracked_containers", columns: [
@@ -1205,6 +1207,8 @@ final class TursoMirrorService {
                 "serving_mappings_json": .text(jsonString(food.servingMappings)),
                 "composite_ingredients_json": .text(jsonString(food.compositeIngredients)),
                 "calculator_ingredients_json": .text(jsonString(food.calculatorIngredients)),
+                "calculator_customizations_json": .text(jsonString(food.calculatorCustomizations)),
+                "source_journal_entry_id": optionalString(food.sourceJournalEntryID?.uuidString),
                 "mirror_generation": .text(generation)
             ]))
         }
