@@ -14,6 +14,14 @@ enum JournalStyle {
     static let calorieSize: CGFloat = 32
     static let foodNameSize: CGFloat = 17
     static let rowVerticalPadding: CGFloat = 12
+    // Overlapping, solid entry chips; separate from the large nutrient rings.
+    static let entryMacroDiameter: CGFloat = 40
+    static let entryMacroOverlap: CGFloat = 14
+    static let entryMacroNumberSize: CGFloat = 13
+    static let entryMacroUnitSize: CGFloat = 12
+    static let entryProteinColor = Color(red: 0.54, green: 0.58, blue: 1.0)
+    static let entryCarbColor = Color(red: 0.26, green: 0.80, blue: 0.10)
+    static let entryFatColor = Color(red: 1.0, green: 0.75, blue: 0)
     static let cardPadding: CGFloat = 16
     static let cardRadius: CGFloat = 20
     static let weekdaySize: CGFloat = 12
@@ -344,27 +352,65 @@ private struct JournalFoodRow: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) {
-                JournalMacroChip(label: "P", value: food.protein, color: .blue)
-                JournalMacroChip(label: "C", value: food.carbs, color: .green)
-                JournalMacroChip(label: "F", value: food.fat, color: .yellow)
-            }
+            JournalMacroChipGroup(food: food)
         }
         .padding(.vertical, JournalStyle.rowVerticalPadding)
         .accessibilityElement(children: .combine)
     }
 }
 
+private struct JournalMacroChipGroup: View {
+    let food: SampleFood
+
+    private var macros: [(name: String, value: Int, color: Color)] {
+        [
+            ("Protein", food.protein, JournalStyle.entryProteinColor),
+            ("Carbohydrates", food.carbs, JournalStyle.entryCarbColor),
+            ("Fat", food.fat, JournalStyle.entryFatColor)
+        ]
+    }
+
+    var body: some View {
+        ZStack {
+            // Paint every circle first, then all labels above them. A later
+            // overlapping circle must never cover an earlier chip's digits.
+            HStack(spacing: -JournalStyle.entryMacroOverlap) {
+                ForEach(macros, id: \.name) { macro in
+                    Circle().fill(macro.color)
+                        .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
+                }
+            }
+            HStack(spacing: -JournalStyle.entryMacroOverlap) {
+                ForEach(macros, id: \.name) { macro in
+                    JournalMacroChip(label: macro.name, value: macro.value)
+                }
+            }
+        }
+        .fixedSize()
+    }
+}
+
 private struct JournalMacroChip: View {
     let label: String
     let value: Int
-    let color: Color
 
     var body: some View {
-        Text("\(label) \(value)g").font(.system(size: 11, weight: .semibold))
-            .foregroundStyle(color)
-            .padding(.horizontal, 6).padding(.vertical, 3)
-            .background(color.opacity(0.12), in: .capsule)
+        VStack(spacing: -1) {
+            Text(value, format: .number.precision(.fractionLength(0)))
+                .font(.system(size: JournalStyle.entryMacroNumberSize, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .modifier(DesignNumber(value: Double(value)))
+            Text("G")
+                .font(.system(size: JournalStyle.entryMacroUnitSize, weight: .bold))
+        }
+        .foregroundStyle(.white)
+        // Reserve a readable text column even when adjacent circles overlap.
+        .frame(width: JournalStyle.entryMacroDiameter - JournalStyle.entryMacroOverlap)
+        .frame(width: JournalStyle.entryMacroDiameter, height: JournalStyle.entryMacroDiameter)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label): \(value) grams")
+        .help("\(label): \(value) grams")
     }
 }
 
