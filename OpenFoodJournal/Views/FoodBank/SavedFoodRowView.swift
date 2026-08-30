@@ -11,6 +11,7 @@ struct SavedFoodRowView: View {
     let food: SavedFood
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
     @State private var generatedIconAnimationTrigger = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 12) {
@@ -117,12 +118,13 @@ struct SavedFoodRowView: View {
                     .ofjNumericTextTransition(
                         value: food.calculatorIngredients.count
                     )
-            } else {
-                HStack(spacing: 6) {
-                    MacroChip(value: food.protein, color: .blue, label: "P")
-                    MacroChip(value: food.carbs, color: .green, label: "C")
-                    MacroChip(value: food.fat, color: .yellow, label: "F")
-                }
+            } else if !dynamicTypeSize.isAccessibilitySize {
+                FoodMacroPill(protein: food.protein, carbs: food.carbs, fat: food.fat)
+            }
+        }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 8) {
+            if dynamicTypeSize.isAccessibilitySize && food.kind != .calculator {
+                FoodMacroPill(protein: food.protein, carbs: food.carbs, fat: food.fat)
             }
         }
         .padding(.vertical, 4)
@@ -140,7 +142,7 @@ struct SavedFoodRowView: View {
     }
 }
 
-private enum FoodIconMetrics {
+enum FoodIconMetrics {
     static let imageSize: CGFloat = 51
     static let columnWidth: CGFloat = 58
     static let shineWidth: CGFloat = imageSize * 0.3

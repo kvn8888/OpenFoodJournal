@@ -243,16 +243,20 @@ struct DailyLogView: View {
 
 private struct JournalCalorieBackground: View {
     let state: OFJColor.JournalCalorieState
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ZStack {
-            Color(uiColor: .systemBackground)
+            colorScheme == .dark
+                ? Color(red: 0.035, green: 0.035, blue: 0.04)
+                : Color.white
 
             RadialGradient(
-                colors: state.backgroundGradientColors,
+                stops: zip(state.backgroundGradientColors(for: colorScheme), OFJLayout.journalGradientLocations)
+                    .map { Gradient.Stop(color: $0.0, location: $0.1) },
                 center: .top,
                 startRadius: 16,
-                endRadius: 640
+                endRadius: OFJLayout.journalGradientEndRadius
             )
         }
         .ignoresSafeArea()

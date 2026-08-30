@@ -206,6 +206,8 @@ enum TursoSchema {
             .init(name: "serving_mappings_json", type: "TEXT"),
             .init(name: "composite_ingredients_json", type: "TEXT"),
             .init(name: "calculator_ingredients_json", type: "TEXT"),
+            .init(name: "calculator_customizations_json", type: "TEXT"),
+            .init(name: "source_journal_entry_id", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
         TursoTableDefinition(name: "ofj_tracked_containers", columns: [
@@ -280,6 +282,7 @@ enum TursoSchema {
             .init(name: "use_gemini_pro", type: "INTEGER"),
             .init(name: "food_bank_auto_generate_emojis", type: "INTEGER"),
             .init(name: "food_bank_use_generated_icon_images", type: "INTEGER"),
+            .init(name: "journal_show_food_images", type: "INTEGER"),
             .init(name: "off_contribute_enabled", type: "INTEGER"),
             .init(name: "off_contribution_success_count", type: "INTEGER"),
             .init(name: "off_last_contribution_at", type: "TEXT"),
@@ -1205,6 +1208,8 @@ final class TursoMirrorService {
                 "serving_mappings_json": .text(jsonString(food.servingMappings)),
                 "composite_ingredients_json": .text(jsonString(food.compositeIngredients)),
                 "calculator_ingredients_json": .text(jsonString(food.calculatorIngredients)),
+                "calculator_customizations_json": .text(jsonString(food.calculatorCustomizations)),
+                "source_journal_entry_id": optionalString(food.sourceJournalEntryID?.uuidString),
                 "mirror_generation": .text(generation)
             ]))
         }
@@ -1280,6 +1285,7 @@ final class TursoMirrorService {
             "use_gemini_pro": .bool(defaults.bool(forKey: "scan.useProModel")),
             "food_bank_auto_generate_emojis": .bool(defaults.bool(forKey: FoodBankEmojiSettings.autoGenerateKey)),
             "food_bank_use_generated_icon_images": .bool(defaults.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey)),
+            "journal_show_food_images": .bool(JournalAppearanceSettings.showFoodImages(in: defaults)),
             "off_contribute_enabled": .bool(defaults.bool(forKey: "off.contributeEnabled")),
             "off_contribution_success_count": .integer(defaults.integer(forKey: "off.contributionSuccessCount")),
             "off_last_contribution_at": optionalDate(timestamp: defaults.double(forKey: "off.lastContributionAt")),

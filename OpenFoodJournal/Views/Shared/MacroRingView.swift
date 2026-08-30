@@ -10,6 +10,11 @@ struct MacroRingView: View {
     let color: Color
     let label: String
     let unit: String
+    var usesJournalStyle = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var overColor: Color { usesJournalStyle ? OFJColor.calendarOverGoalRGB.color : .orange }
+    private var strokeWidth: CGFloat { usesJournalStyle ? OFJLayout.journalNutrientRingStroke : 5 }
 
     private var progress: Double {
         guard goal > 0 else { return 0 }
@@ -24,27 +29,30 @@ struct MacroRingView: View {
         // Rings are pinned to top; labels sit below and can wrap without
         // shifting the ring position. fixedSize(vertical: false) lets the
         // label text wrap horizontally within the available width.
-        VStack(spacing: 4) {
+        VStack(spacing: usesJournalStyle ? 7 : 4) {
             ZStack {
                 // Track
                 Circle()
-                    .stroke(color.opacity(0.2), lineWidth: 5)
+                    .stroke(color.opacity(usesJournalStyle ? 0.1 : 0.2), lineWidth: strokeWidth)
 
                 // Progress arc
                 Circle()
                     .trim(from: 0, to: progress)
                     .stroke(
-                        isOver ? Color.orange : color,
-                        style: StrokeStyle(lineWidth: 5, lineCap: .round)
+                        isOver ? overColor : color,
+                        style: StrokeStyle(lineWidth: strokeWidth, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
-                    .animation(.easeInOut, value: progress)
+                    .animation(reduceMotion ? nil : .easeInOut, value: progress)
 
                 // Center label
-                VStack(spacing: 0) {
+                VStack(spacing: usesJournalStyle ? -2 : 0) {
                     Text(value, format: .number.precision(.fractionLength(0)))
-                        .font(.system(size: 13, weight: .semibold, design: .rounded))
-                        .foregroundStyle(isOver ? .orange : .primary)
+                        .font(.system(size: usesJournalStyle ? 16 : 13, weight: .semibold, design: .rounded))
+                        .foregroundStyle(isOver ? overColor : Color.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.65)
+                        .frame(width: 40)
                         .ofjNumericTextTransition(value: value)
                     Text(unit)
                         .font(.system(size: 8, weight: .medium))

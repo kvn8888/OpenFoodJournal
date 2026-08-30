@@ -42,6 +42,7 @@ struct SettingsView: View {
     @AppStorage(AIProviderSettings.chatContextBudgetKey) private var chatContextBudgetRawValue: String = ChatContextBudget.balanced.rawValue
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
+    @AppStorage(JournalAppearanceSettings.showFoodImagesKey) private var showJournalFoodImages = JournalAppearanceSettings.defaultShowFoodImages
     @AppStorage(ChatModelPreference.storageKey) private var chatModelPreferenceRawValue: String = ChatModelPreference.fast.rawValue
     @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
     @AppStorage("off.contributionSuccessCount") private var offContributionSuccessCount: Int = 0
@@ -119,6 +120,15 @@ struct SettingsView: View {
             }
 
             // MARK: Goals
+            Section {
+                Toggle("Show Food Images", isOn: $showJournalFoodImages)
+                    .onChange(of: showJournalFoodImages) { tursoMirror.scheduleMirror(reason: "journal-image-appearance") }
+            } header: {
+                Text("Journal")
+            } footer: {
+                Text("Show existing Food Bank images beside journal entries, with placeholders when unavailable. This does not generate images or make AI requests.")
+            }
+
             Section("Goals") {
                 NavigationLink("Daily Macro Goals") {
                     GoalsEditorView()
@@ -1478,6 +1488,7 @@ struct SettingsView: View {
                     museSparkModel: museSparkModel,
                     chatContextBudget: chatContextBudgetRawValue,
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
+                    showJournalFoodImages: showJournalFoodImages,
                     offContributeEnabled: offContributeEnabled,
                     breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
                     lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
@@ -1543,6 +1554,7 @@ struct SettingsView: View {
             museSparkModel = backup.appSettings.museSparkModel
             chatContextBudgetRawValue = backup.appSettings.chatContextBudget
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
+            showJournalFoodImages = backup.appSettings.showJournalFoodImages
             offContributeEnabled = backup.appSettings.offContributeEnabled
             mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
             mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes

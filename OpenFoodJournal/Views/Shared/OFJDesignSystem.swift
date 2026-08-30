@@ -68,6 +68,10 @@ enum OFJColor {
     static let protein = Color.blue
     static let carbohydrates = Color.green
     static let fat = Color.yellow
+    // Approved neutral-pill palette; the RGB experiment stays in the playground.
+    static let journalProtein = Color(red: 0.54, green: 0.58, blue: 1)
+    static let journalCarbohydrates = Color(red: 0.26, green: 0.80, blue: 0.10)
+    static let journalFat = Color(red: 1, green: 0.75, blue: 0)
 
     static let scanAction = Color.blue
     static let manualAction = Color.green
@@ -92,7 +96,7 @@ enum OFJColor {
                 // Black in light mode and white in dark mode for legibility.
                 Color.primary
             case .approachingGoal:
-                Color.green.opacity(0.6)
+                Color.green.opacity(0.5)
             case .goalMet:
                 Color.green
             case .overGoal:
@@ -100,24 +104,25 @@ enum OFJColor {
             }
         }
 
-        var backgroundGradientColors: [Color] {
-            switch self {
+        func backgroundGradientColors(for colorScheme: ColorScheme) -> [Color] {
+            let dark = colorScheme == .dark
+            return switch self {
             case .belowGoal, .approachingGoal:
                 [
-                    Color.yellow.opacity(0.13),
-                    Color.orange.opacity(0.08),
+                    Color.yellow.opacity(dark ? 0.20 : 0.13),
+                    Color.orange.opacity(dark ? 0.20 : 0.08),
                     Color.clear,
                 ]
             case .goalMet:
                 [
-                    Color.green.opacity(0.14),
-                    Color.green.opacity(0.05),
+                    Color.green.opacity(dark ? 0.20 : 0.14),
+                    Color.green.opacity(dark ? 0.10 : 0.05),
                     Color.clear,
                 ]
             case .overGoal:
                 [
-                    Color.orange.opacity(0.15),
-                    OFJColor.calendarOverGoalRGB.color.opacity(0.06),
+                    Color.orange.opacity(dark ? 0.20 : 0.15),
+                    OFJColor.calendarOverGoalRGB.color.opacity(dark ? 0.15 : 0.10),
                     Color.clear,
                 ]
             }
@@ -295,6 +300,14 @@ extension View {
 
 /// Shared geometry for list-backed screens and tappable controls.
 enum OFJLayout {
+    // Three 40pt circles overlapped by 5pt, now expressed as a smooth pill.
+    static let journalMacroDiameter: CGFloat = 40
+    static let journalMacroOverlap: CGFloat = 5
+    static let journalMacroPillWidth: CGFloat = 110
+    static let journalRowVerticalPadding: CGFloat = 12
+    static let journalGradientLocations: [CGFloat] = [0, 0.25, 1]
+    static let journalGradientEndRadius: CGFloat = 800
+    static let journalNutrientRingStroke: CGFloat = 4.3
     static let minimumHitTarget: CGFloat = 44
     /// One outer resting height for the Assistant's add, prompt, and send/stop
     /// surfaces. Raw glass draws inside this geometry; glass button styles are

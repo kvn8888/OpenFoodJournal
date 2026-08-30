@@ -4,6 +4,8 @@
 import SwiftUI
 
 struct MealSectionView: View {
+    @Environment(NutritionStore.self) private var nutritionStore
+    @State private var foodBankMessage: String?
     let mealType: MealType
     let entries: [NutritionEntry]
     let onSelect: (NutritionEntry) -> Void
@@ -24,6 +26,7 @@ struct MealSectionView: View {
                         EntryRowView(entry: entry, onDelete: { onDelete(entry) })
                     }
                     .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
                     // Swipe left (trailing) — Delete action (moved here from EntryRowView
                     // to avoid double swipeActions registration which causes gesture lag)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -41,6 +44,12 @@ struct MealSectionView: View {
                             Label("Edit", systemImage: "pencil")
                         }
                         .tint(.blue)
+                        Button {
+                            saveToFoodBank(entry)
+                        } label: {
+                            Label("Save to Food Bank", systemImage: "tray.and.arrow.down")
+                        }
+                        .tint(.green)
                     }
                     // Swipe left (trailing) — Delete, already defined in EntryRowView,
                     // rendered here because DailyLogView now uses a List (where
@@ -51,6 +60,12 @@ struct MealSectionView: View {
                             onSelect(entry)
                         } label: {
                             Label("Edit", systemImage: "pencil")
+                        }
+
+                        Button {
+                            saveToFoodBank(entry)
+                        } label: {
+                            Label("Save to Food Bank", systemImage: "tray.and.arrow.down")
                         }
 
                         // Quick info — shows macros inline
@@ -74,18 +89,37 @@ struct MealSectionView: View {
             } header: {
                 HStack {
                     Label(mealType.rawValue, systemImage: mealType.systemImage)
-                        .font(.subheadline)
+                        .font(.headline)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.secondary)
                         .textCase(nil)
                     Spacer()
                     Text("\(Int(totalCalories)) kcal")
                         .font(.subheadline)
-                        .foregroundStyle(.primary)
+                        .foregroundStyle(.secondary)
                         .textCase(nil)
                         .ofjNumericTextTransition(value: totalCalories)
                 }
             }
+            .alert("Food Bank", isPresented: Binding(
+                get: { foodBankMessage != nil },
+                set: { if !$0 { foodBankMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { foodBankMessage = nil }
+            } message: {
+                Text(foodBankMessage ?? "")
+            }
+        }
+    }
+
+    private func saveToFoodBank(_ entry: NutritionEntry) {
+        switch nutritionStore.saveJournalEntryToFoodBank(entry) {
+        case .saved(let food):
+            foodBankMessage = "Saved \(food.name) as a reusable copy of this logged portion. The journal entry is unchanged."
+        case .alreadySaved(let food):
+            foodBankMessage = "This entry is already saved as \(food.name). No duplicate was created."
+        case .failed:
+            foodBankMessage = "Could not save this food. Please try again."
         }
     }
 }
@@ -110,11 +144,7 @@ private struct EntryContextMenuPreview: View {
             Text("\(Int(entry.calories)) kcal")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            HStack(spacing: OFJSpace.s6) {
-                MacroChip(value: entry.protein, color: OFJColor.protein, label: "P")
-                MacroChip(value: entry.carbs, color: OFJColor.carbohydrates, label: "C")
-                MacroChip(value: entry.fat, color: OFJColor.fat, label: "F")
-            }
+            FoodMacroPill(protein: entry.protein, carbs: entry.carbs, fat: entry.fat)
         }
         .padding(OFJSpace.s16)
         .frame(width: 280, alignment: .leading)
