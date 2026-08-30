@@ -47,17 +47,21 @@ final class OpenFoodJournalUITests: XCTestCase {
     }
 
     @MainActor
-    func testInterruptedRunCompactionMeterSourceAndStop() throws {
+    func testInterruptedRunResponseInfoSourceAndStop() throws {
         app.tabBars.buttons["Assistant"].tap()
 
         let continueButton = app.descendants(matching: .any)["assistant.continue"]
         XCTAssertTrue(scrollToElement(continueButton), app.debugDescription)
         continueButton.tap()
 
-        let contextMeter = app.descendants(matching: .any)["assistant.context-meter"]
-        XCTAssertTrue(contextMeter.waitForExistence(timeout: 5))
-        XCTAssertTrue(contextMeter.label.localizedCaseInsensitiveContains("reported"))
-        XCTAssertTrue(contextMeter.label.localizedCaseInsensitiveContains("local fallback"))
+        let completedResponse = app.staticTexts["UI test response with a durable source."]
+        XCTAssertTrue(completedResponse.waitForExistence(timeout: 5))
+        completedResponse.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["Info"].waitForExistence(timeout: 2))
+        app.buttons["Info"].tap()
+        XCTAssertTrue(app.navigationBars["Response Info"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Context Window"].exists)
+        app.buttons["Done"].tap()
 
         let source = app.descendants(matching: .any)["assistant.source.0"]
         XCTAssertTrue(source.waitForExistence(timeout: 5))

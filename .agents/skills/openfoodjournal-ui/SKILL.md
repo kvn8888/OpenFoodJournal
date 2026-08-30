@@ -143,11 +143,11 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 - The live camera is the mode-selection surface; do not add a separate full-screen mode chooser.
 - Show exactly three labeled rectangular controls in this order: Scan Food, Barcode, Food Label.
-- Use SwiftUI's native continuous `Slider` immediately above the mode row. Its range comes from AVFoundation's `systemRecommendedVideoZoomRange`, its neutral point represents the displayed 1× factor, and it must not be replaced with bespoke discrete zoom pills.
-- Do not wrap the zoom slider in `.glassEffect`, a material capsule, or a custom button surface. It sits directly over the bottom legibility gradient so its system appearance remains visually native.
+- Show exactly three compact zoom steps—0.5×, 1×, and 2×—immediately above the mode row. They are ordinary camera-style capsules, not Liquid Glass. Unsupported hardware steps remain visible but disabled.
+- The initial camera input is the physical wide-angle lens only. Selecting 0.5× swaps the single session input to the physical ultra-wide lens; 1× and 2× share the physical wide lens, with 2× applying a 2.0 device zoom factor. Never initialize a virtual triple/dual multi-camera input.
 - Place circular torch and photo-library controls to the left and right of the centered shutter.
 - The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
-- Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. The native zoom slider is the deliberate exception and has no custom glass container. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
+- Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. The discrete zoom capsules are the deliberate non-glass exception. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
 - The full-screen preview uses `.resizeAspectFill`, so it must publish its normalized visible camera rectangle through `metadataOutputRectConverted(fromLayerRect:)`. Snapshot that rectangle at shutter time and crop the still before review, barcode detection, or AI submission; never show or analyze uncropped sensor content that was outside the viewfinder.
 - `ScanCameraModeDescriptor.supported` is the executable order/label contract; `OFJLayout` owns camera control geometry.
 
@@ -155,6 +155,12 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 - The Assistant composer attachment menu keeps distinct actions for Take Photo, Photo Library, and Attach PDF.
 - Take Photo uses `AssistantCameraPicker` only as a one-image UIKit camera bridge; the result must pass through the same downscaled JPEG and `ChatDraftAttachment` pipeline as library images.
+
+### Assistant Response Metadata
+
+- Keep the transcript focused on the conversation. Do not render separate completed-run boxes or an always-visible context meter below every thread.
+- A model response's context menu includes **Info**. Its sheet owns provider/model/request IDs, rounds, first-event/first-text latency, total and tool duration, retries, tokens/cost, and the current context estimate/limit/reserves/reconciliation state.
+- The Info action belongs only to model responses and must remain attached to the visible bubble so long-press previews do not expand to the full transcript row.
 - Composer add/send/stop controls and the prompt pill use the shared `OFJLayout.assistantComposerRestingHeight` metric. Apply raw interactive `glassEffect` to the already-sized circular controls instead of `.buttonStyle(.glass)`/`.glassProminent`, whose control insets make a 48-point label render taller than the prompt. Editing a user message reloads its text and attachment pills into this same composer; a visible editing state must offer Cancel.
 - Attach context menus to the visible chat bubble rather than its full-width alignment row. Conversation history starts with a horizontal library of persisted chat images/files and exposes a per-thread Regenerate Title action.
 - Camera capture is full-screen, cancels without mutating the draft, and remains disabled on devices without a camera or when the shared four-image staging limit is full.

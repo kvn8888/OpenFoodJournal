@@ -69,6 +69,63 @@ final class ChatLiveProviderTests: XCTestCase {
         try await assertLowCostContract(proxy)
     }
 
+    func testOpenAILiveContract() async throws {
+        try requireLiveRun()
+        let key = try requireEnvironment("OFJ_OPENAI_API_KEY")
+        let model = environment("OFJ_OPENAI_MODEL") ?? AIProviderSettings.defaultOpenAIFastModel
+        let proxy = OpenAIResponsesChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.descriptor(provider: .openAI, model: model),
+                apiKey: key,
+                endpoint: URL(string: "https://api.openai.com/v1")
+            ),
+            session: liveSession()
+        )
+        try await assertLowCostContract(proxy)
+    }
+
+    func testAnthropicLiveContract() async throws {
+        try requireLiveRun()
+        let key = try requireEnvironment("OFJ_ANTHROPIC_API_KEY")
+        let model = environment("OFJ_ANTHROPIC_MODEL") ?? AIProviderSettings.defaultAnthropicFastModel
+        let proxy = AnthropicChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: model),
+                apiKey: key,
+                endpoint: URL(string: "https://api.anthropic.com/v1")
+            ),
+            session: liveSession()
+        )
+        try await assertLowCostContract(proxy)
+    }
+
+    func testMuseSparkLiveContract() async throws {
+        try requireLiveRun()
+        let key = try requireEnvironment("OFJ_MUSE_SPARK_API_KEY")
+        let model = environment("OFJ_MUSE_SPARK_MODEL") ?? AIProviderSettings.defaultMuseSparkModel
+        let proxy = MuseSparkChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.descriptor(provider: .museSpark, model: model),
+                apiKey: key,
+                endpoint: URL(string: "https://api.meta.ai/v1")
+            ),
+            session: liveSession()
+        )
+        try await assertLowCostContract(proxy)
+    }
+
+    func testExaLiveContract() async throws {
+        try requireLiveRun()
+        let key = try requireEnvironment("OFJ_EXA_API_KEY")
+        let result = try await ExaChatWebSearchProvider(
+            apiKey: key,
+            session: liveSession(),
+            maxResults: 1
+        ).search(query: "OpenFoodJournal GitHub")
+        XCTAssertFalse(result.sources.isEmpty)
+        XCTAssertEqual(result.providerID, AssistantResearchProvider.exa.rawValue)
+    }
+
     func testAzureSolLiveContract() async throws {
         try await assertAzureContract(model: .sol, deploymentKey: "OFJ_AZURE_SOL_DEPLOYMENT")
     }

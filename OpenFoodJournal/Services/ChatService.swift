@@ -329,7 +329,7 @@ final class ChatService {
                 guard let searcher = proxy as? any ChatNativeWebSearching else {
                     throw ChatError.serverError(
                         400,
-                        "\(selection.provider.displayName) does not expose native web search. Select Tavily in Settings."
+                        "\(selection.provider.displayName) does not expose native web search through this adapter. Select Exa, Tavily, or Parallel in Settings."
                     )
                 }
                 return ModelProviderChatWebSearchProvider(
@@ -354,6 +354,11 @@ final class ChatService {
                     mode: ParallelSearchMode.stored(),
                     session: liveSession
                 )
+            case .exa:
+                guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
+                    throw ChatError.noAPIKey(AssistantResearchProvider.exa.displayName)
+                }
+                return ExaChatWebSearchProvider(apiKey: apiKey, session: liveSession)
             }
         }
         self.apiKeyProvider = resolvedAPIKeyProvider
@@ -3328,7 +3333,8 @@ final class ChatService {
         }
         activeRun?.providerRequestID = search.providerRequestID
         if search.providerID == AssistantResearchProvider.tavily.rawValue
-            || search.providerID == AssistantResearchProvider.parallel.rawValue {
+            || search.providerID == AssistantResearchProvider.parallel.rawValue
+            || search.providerID == AssistantResearchProvider.exa.rawValue {
             recordExternalResearchUsage(search)
         } else {
             modelCatalog?.observeResolvedModel(
@@ -3629,6 +3635,7 @@ final class ChatService {
             return ToolOutcome(result: .object(["error": .string("name is required")]), status: .failed)
         }
         let micronutrients = Self.parseMicronutrients(args["micronutrients"])
+        let servingMetadata = Self.servingMetadata(from: args)
         let food = SavedFood(
             name: name,
             brand: args["brand"]?.stringValue,
@@ -3637,7 +3644,11 @@ final class ChatService {
             carbs: args["carbs"]?.doubleValue ?? 0,
             fat: args["fat"]?.doubleValue ?? 0,
             micronutrients: micronutrients,
-            servingSize: args["serving_description"]?.stringValue
+            servingSize: servingMetadata.description,
+            serving: servingMetadata.serving,
+            servingQuantity: servingMetadata.quantity,
+            servingUnit: servingMetadata.unit,
+            servingMappings: servingMetadata.mappings
         )
         nutritionStore.addSavedFood(food, mirrorReason: "chat_save_food")
 
@@ -3723,6 +3734,20 @@ final class ChatService {
         if let carbs = args["carbs"]?.doubleValue { food.carbs = carbs }
         if let fat = args["fat"]?.doubleValue { food.fat = fat }
         if let serving = args["serving_description"]?.stringValue { food.servingSize = serving }
+        if Self.containsServingMetadata(args) {
+            let metadata = Self.servingMetadata(
+                from: args,
+                fallbackDescription: food.servingSize,
+                fallbackQuantity: food.servingQuantity,
+                fallbackUnit: food.servingUnit,
+                fallbackGrams: food.serving?.grams
+            )
+            food.servingSize = metadata.description
+            food.serving = metadata.serving
+            food.servingQuantity = metadata.quantity
+            food.servingUnit = metadata.unit
+            food.servingMappings = metadata.mappings
+        }
         Self.applyMicronutrientChanges(args, to: &food.micronutrients)
         try? modelContext.save()
         tursoMirror?.scheduleMirror(reason: "chat_update_food")
@@ -3732,6 +3757,100 @@ final class ChatService {
             "food_id": .string(food.id.uuidString),
             "micronutrients": Self.micronutrientsValue(food.micronutrients),
         ]))
+    }
+
+    private struct AgentServingMetadata {
+        let description: String?
+        let quantity: Double?
+        let unit: String?
+        let serving: ServingSize?
+        let mappings: [ServingMapping]
+    }
+
+    /// Converts the agent's provider-neutral serving fields into the same
+    /// structured mapping used by scans and manual foods. A display string is
+    /// not enough: Log Food discovers selectable units from `serving` and
+    /// `servingMappings`, so this boundary must persist both sides explicitly.
+    private static func servingMetadata(
+        from args: JSONValue,
+        fallbackDescription: String? = nil,
+        fallbackQuantity: Double? = nil,
+        fallbackUnit: String? = nil,
+        fallbackGrams: Double? = nil
+    ) -> AgentServingMetadata {
+        let description = args["serving_description"]?.stringValue ?? fallbackDescription
+        let parsed = parsedServingDescription(description)
+        let quantity = args["serving_quantity"]?.doubleValue
+            ?? parsed.quantity
+            ?? fallbackQuantity
+            ?? 1
+        let explicitUnit = args["serving_unit"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let unit = (explicitUnit?.isEmpty == false ? explicitUnit : nil)
+            ?? parsed.unit
+            ?? fallbackUnit
+            ?? "serving"
+        let grams = args["serving_grams"]?.doubleValue
+            ?? args["serving_weight_grams"]?.doubleValue
+            ?? parsed.grams
+            ?? fallbackGrams
+        let validQuantity = quantity.isFinite && quantity > 0 ? quantity : 1
+        let validGrams = grams.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let mapping: [ServingMapping]
+        if let validGrams,
+           !["g", "gram", "grams"].contains(unit.lowercased()) {
+            mapping = [ServingMapping(
+                from: ServingAmount(value: validQuantity, unit: unit),
+                to: ServingAmount(value: validGrams, unit: "g")
+            )]
+        } else {
+            mapping = []
+        }
+        return AgentServingMetadata(
+            description: description,
+            quantity: validQuantity,
+            unit: unit,
+            serving: validGrams.map(ServingSize.mass),
+            mappings: mapping
+        )
+    }
+
+    private static func containsServingMetadata(_ args: JSONValue) -> Bool {
+        if args["serving_quantity"] != nil
+            || args["serving_unit"] != nil
+            || args["serving_grams"] != nil
+            || args["serving_weight_grams"] != nil {
+            return true
+        }
+        return parsedServingDescription(args["serving_description"]?.stringValue).grams != nil
+    }
+
+    private static func parsedServingDescription(
+        _ description: String?
+    ) -> (quantity: Double?, unit: String?, grams: Double?) {
+        guard let description, !description.isEmpty else { return (nil, nil, nil) }
+        let gramsPattern = #"([0-9]+(?:\.[0-9]+)?)\s*(?:g|grams?)\b"#
+        let leadingPattern = #"^\s*([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z][A-Za-z ]*?)\s*(?:=|\()"#
+        let grams = firstRegexGroups(in: description, pattern: gramsPattern)
+            .first.flatMap(Double.init)
+        let leading = firstRegexGroups(in: description, pattern: leadingPattern)
+        let quantity = leading.first.flatMap(Double.init)
+        let unit = leading.count > 1
+            ? leading[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+        return (quantity, unit?.isEmpty == false ? unit : nil, grams)
+    }
+
+    private static func firstRegexGroups(in text: String, pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..., in: text)
+              ) else { return [] }
+        return (1..<match.numberOfRanges).compactMap { index in
+            guard let range = Range(match.range(at: index), in: text) else { return nil }
+            return String(text[range])
+        }
     }
 
     private func updateGoals(_ args: JSONValue) -> ToolOutcome {
@@ -4045,6 +4164,48 @@ final class ChatService {
                     routingMode: .automatic
                 )
             )
+        case .openAI:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.openAIFastModel(in: defaults)
+            let smart = AIProviderSettings.openAISmartModel(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAI, model: primary),
+                    endpoint: URL(string: "https://api.openai.com/v1"),
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAI, model: fast),
+                    endpoint: URL(string: "https://api.openai.com/v1"),
+                    routingMode: .automatic
+                )
+            )
+        case .anthropic:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.anthropicFastModel(in: defaults)
+            let smart = AIProviderSettings.anthropicSmartModel(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: primary),
+                    endpoint: URL(string: "https://api.anthropic.com/v1"),
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: fast),
+                    endpoint: URL(string: "https://api.anthropic.com/v1"),
+                    routingMode: .automatic
+                )
+            )
+        case .museSpark:
+            let model = AIProviderSettings.museSparkModel()
+            let selection = AssistantModelSelection(
+                descriptor: ChatModelCatalog.descriptor(provider: .museSpark, model: model),
+                endpoint: URL(string: "https://api.meta.ai/v1"),
+                routingMode: .automatic
+            )
+            return ChatRequestConfig(primary: selection, fallback: selection)
         }
     }
 

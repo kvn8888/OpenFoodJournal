@@ -41,6 +41,9 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
     case gemini
     case openRouter
     case azureOpenAI
+    case openAI
+    case anthropic
+    case museSpark
 
     var id: String { rawValue }
 
@@ -49,6 +52,9 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
         case .gemini: "Gemini"
         case .openRouter: "OpenRouter"
         case .azureOpenAI: "Azure OpenAI"
+        case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .museSpark: "Muse Spark"
         }
     }
 
@@ -57,6 +63,9 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
         case .gemini: KeychainService.geminiAPIKeyAccount
         case .openRouter: KeychainService.openRouterAPIKeyAccount
         case .azureOpenAI: KeychainService.azureOpenAIAPIKeyAccount
+        case .openAI: KeychainService.openAIAPIKeyAccount
+        case .anthropic: KeychainService.anthropicAPIKeyAccount
+        case .museSpark: KeychainService.museSparkAPIKeyAccount
         }
     }
 
@@ -82,6 +91,7 @@ enum AssistantResearchProvider: String, CaseIterable, Identifiable, Codable, Sen
     case modelProvider
     case tavily
     case parallel
+    case exa
 
     var id: String { rawValue }
 
@@ -90,6 +100,7 @@ enum AssistantResearchProvider: String, CaseIterable, Identifiable, Codable, Sen
         case .modelProvider: "Model Provider"
         case .tavily: "Tavily"
         case .parallel: "Parallel"
+        case .exa: "Exa"
         }
     }
 
@@ -264,13 +275,57 @@ enum ChatModelCatalog {
            let azureModel = AzureAssistantModel(rawValue: base) {
             return azureDescriptor(model: azureModel, deployment: model)
         }
+        if provider == .openAI,
+           let model = OpenAIAssistantModel(rawValue: base) {
+            return openAIDescriptor(model: model, deployment: model.rawValue)
+        }
+        let capabilities: ChatModelCapabilities
+        if provider == .anthropic || provider == .museSpark {
+            capabilities = ChatModelCapabilities(
+                maximumInputTokens: conservativeCapabilities.maximumInputTokens,
+                maximumOutputTokens: conservativeCapabilities.maximumOutputTokens,
+                supportsStreaming: true,
+                supportsFunctions: true,
+                supportsParallelCalls: true,
+                supportsImages: true,
+                supportsPDFs: true,
+                supportsWebSearch: false,
+                supportsNativeCompaction: false
+            )
+        } else {
+            capabilities = conservativeCapabilities
+        }
         return ChatModelDescriptor(
             provider: provider,
             baseModelID: base,
             deploymentIdentifier: model,
             displayName: model,
-            capabilities: conservativeCapabilities,
+            capabilities: capabilities,
             lastVerifiedAt: "2026-07-20"
+        )
+    }
+
+    static func openAIDescriptor(
+        model: OpenAIAssistantModel,
+        deployment: String
+    ) -> ChatModelDescriptor {
+        ChatModelDescriptor(
+            provider: .openAI,
+            baseModelID: model.rawValue,
+            deploymentIdentifier: deployment,
+            displayName: model.displayName,
+            capabilities: ChatModelCapabilities(
+                maximumInputTokens: 922_000,
+                maximumOutputTokens: 128_000,
+                supportsStreaming: true,
+                supportsFunctions: true,
+                supportsParallelCalls: true,
+                supportsImages: true,
+                supportsPDFs: true,
+                supportsWebSearch: true,
+                supportsNativeCompaction: true
+            ),
+            lastVerifiedAt: "2026-08-27"
         )
     }
 
@@ -296,6 +351,20 @@ enum ChatModelCatalog {
             ),
             lastVerifiedAt: "2026-07-20"
         )
+    }
+}
+
+enum OpenAIAssistantModel: String, CaseIterable, Identifiable, Codable, Sendable {
+    case sol = "gpt-5.6-sol"
+    case terra = "gpt-5.6-terra"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sol: "GPT-5.6 Sol"
+        case .terra: "GPT-5.6 Terra"
+        }
     }
 }
 
@@ -333,7 +402,7 @@ nonisolated enum ChatPricingCatalog {
     static let lastVerifiedAt = "2026-07-24"
 
     static func pricing(for selection: AssistantModelSelection) -> ChatModelPricing? {
-        if selection.provider == .azureOpenAI,
+        if (selection.provider == .azureOpenAI || selection.provider == .openAI),
            let model = AzureAssistantModel(rawValue: selection.descriptor.baseModelID) {
             let rates: (input: Double, cached: Double, output: Double) = switch model {
             case .sol: (5.00, 0.50, 30.00)
@@ -348,7 +417,9 @@ nonisolated enum ChatPricingCatalog {
                 longContextCachedInputMultiplier: 2,
                 longContextOutputMultiplier: 1.5,
                 outputIncludesThinking: true,
-                source: "GPT-5.6 public standard token rates checked \(lastVerifiedAt); Azure agreement and deployment type may differ"
+                source: selection.provider == .azureOpenAI
+                    ? "GPT-5.6 public standard token rates checked \(lastVerifiedAt); Azure agreement and deployment type may differ"
+                    : "OpenAI GPT-5.6 public token rates checked \(lastVerifiedAt)"
             )
         }
 
@@ -551,6 +622,11 @@ enum AIProviderSettings {
     static let azureSolDeploymentKey = "assistant.azure.solDeployment"
     static let azureTerraDeploymentKey = "assistant.azure.terraDeployment"
     static let azureDefaultModelKey = "assistant.azure.defaultModel"
+    static let openAIFastModelKey = "assistant.openai.fastModel"
+    static let openAISmartModelKey = "assistant.openai.smartModel"
+    static let anthropicFastModelKey = "assistant.anthropic.fastModel"
+    static let anthropicSmartModelKey = "assistant.anthropic.smartModel"
+    static let museSparkModelKey = "assistant.museSpark.model"
     nonisolated static let chatContextBudgetKey = "assistant.contextBudget"
 
     static let defaultProvider = AIProvider.gemini
@@ -558,6 +634,11 @@ enum AIProviderSettings {
     static let defaultOpenRouterProModel = "google/gemini-pro-latest"
     static let defaultOpenRouterEmojiModel = "google/gemini-flash-latest"
     static let defaultAzureModel = AzureAssistantModel.terra
+    static let defaultOpenAIFastModel = OpenAIAssistantModel.terra.rawValue
+    static let defaultOpenAISmartModel = OpenAIAssistantModel.sol.rawValue
+    static let defaultAnthropicFastModel = "claude-sonnet-5"
+    static let defaultAnthropicSmartModel = "claude-opus-5"
+    static let defaultMuseSparkModel = "muse-spark-1.2"
     static let googleVertexProviderSlug = "google-vertex"
 
     static func openRouterLiteModel(in defaults: UserDefaults = .standard) -> String {
@@ -589,6 +670,26 @@ enum AIProviderSettings {
               let model = AzureAssistantModel(rawValue: raw)
         else { return defaultAzureModel }
         return model
+    }
+
+    static func openAIFastModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAIFastModelKey), fallback: defaultOpenAIFastModel)
+    }
+
+    static func openAISmartModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAISmartModelKey), fallback: defaultOpenAISmartModel)
+    }
+
+    static func anthropicFastModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: anthropicFastModelKey), fallback: defaultAnthropicFastModel)
+    }
+
+    static func anthropicSmartModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: anthropicSmartModelKey), fallback: defaultAnthropicSmartModel)
+    }
+
+    static func museSparkModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: museSparkModelKey), fallback: defaultMuseSparkModel)
     }
 
     private static func trimmed(_ value: String?, fallback: String) -> String {
