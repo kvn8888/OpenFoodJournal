@@ -56,7 +56,21 @@ enum JournalStyle {
         }
     }
 
-    static func gradient(progress: Double) -> [Color] {
+    static func gradient(progress: Double, colorScheme: ColorScheme) -> [Color] {
+        colorScheme == .dark ? darkGradient(progress: progress) : lightGradient(progress: progress)
+    }
+
+    // LIGHT MODE — edit these colors/opacities independently of dark mode.
+    static func lightGradient(progress: Double) -> [Color] {
+        switch progress {
+        case ..<0.95: [.yellow.opacity(0.13), .orange.opacity(0.08), .clear]
+        case ..<1.05: [.green.opacity(0.14), .green.opacity(0.05), .clear]
+        default: [.orange.opacity(0.15), overGoal.opacity(0.10), .clear]
+        }
+    }
+
+    // DARK MODE — same starting values, but changes here affect only dark mode.
+    static func darkGradient(progress: Double) -> [Color] {
         switch progress {
         case ..<0.95: [.yellow.opacity(0.13), .orange.opacity(0.08), .clear]
         case ..<1.05: [.green.opacity(0.14), .green.opacity(0.05), .clear]
@@ -93,7 +107,7 @@ struct JournalDesign: View {
         ZStack(alignment: .bottom) {
             (colorScheme == .dark ? JournalStyle.darkBackground : Color.white)
             RadialGradient(
-                colors: JournalStyle.gradient(progress: day.progress),
+                colors: JournalStyle.gradient(progress: day.progress, colorScheme: colorScheme),
                 center: .top, startRadius: 16, endRadius: 640
             )
 
