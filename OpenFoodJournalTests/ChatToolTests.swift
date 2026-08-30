@@ -329,6 +329,40 @@ struct ChatToolTests {
         #expect(permissionLines.contains("Vitamin B12 → 1.8 mcg"))
     }
 
+    @Test func saveFoodTurnsServingGramDescriptionIntoSelectableMapping() async throws {
+        let harness = try ChatTestHarness()
+        _ = try #require(await harness.runTool("save_food", args: .object([
+            "name": .string("Protein Bar"),
+            "calories": .number(210),
+            "protein": .number(20),
+            "carbs": .number(22),
+            "fat": .number(6),
+            // This is the legacy shape models already emitted. The write
+            // boundary must not leave the conversion trapped in display text.
+            "serving_description": .string("1 serving = 42 grams"),
+        ])))
+
+        let food = try #require(try harness.context.fetch(FetchDescriptor<SavedFood>()).first)
+        #expect(food.servingQuantity == 1)
+        #expect(food.servingUnit == "serving")
+        #expect(food.servingMappings == [ServingMapping(
+            from: ServingAmount(value: 1, unit: "serving"),
+            to: ServingAmount(value: 42, unit: "g")
+        )])
+        let converter = ServingConverter(
+            calories: food.calories,
+            protein: food.protein,
+            carbs: food.carbs,
+            fat: food.fat,
+            quantity: food.servingQuantity ?? 1,
+            unit: food.servingUnit ?? "serving",
+            serving: food.serving,
+            mappings: food.servingMappings
+        )
+        #expect(converter.availableUnits.contains("g"))
+        #expect(converter.factorFor("g") == 42)
+    }
+
     @Test func updateGoalsMutatesInjectedGoalInterface() async throws {
         let harness = try ChatTestHarness()
         let record = try #require(await harness.runTool("update_goals", args: .object([

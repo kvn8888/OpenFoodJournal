@@ -328,6 +328,11 @@ struct OpenFoodJournalTests {
         #expect(record.assistantResearchProvider == AssistantResearchProvider.modelProvider.rawValue)
         #expect(record.tavilySearchDepth == TavilySearchDepth.fast.rawValue)
         #expect(record.parallelSearchMode == ParallelSearchMode.basic.rawValue)
+        #expect(record.openAIFastModel == AIProviderSettings.defaultOpenAIFastModel)
+        #expect(record.openAISmartModel == AIProviderSettings.defaultOpenAISmartModel)
+        #expect(record.anthropicFastModel == AIProviderSettings.defaultAnthropicFastModel)
+        #expect(record.anthropicSmartModel == AIProviderSettings.defaultAnthropicSmartModel)
+        #expect(record.museSparkModel == AIProviderSettings.defaultMuseSparkModel)
     }
 
     @MainActor

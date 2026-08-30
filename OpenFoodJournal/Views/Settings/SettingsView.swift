@@ -34,6 +34,11 @@ struct SettingsView: View {
     @AppStorage(AIProviderSettings.azureSolDeploymentKey) private var azureSolDeployment: String = ""
     @AppStorage(AIProviderSettings.azureTerraDeploymentKey) private var azureTerraDeployment: String = ""
     @AppStorage(AIProviderSettings.azureDefaultModelKey) private var azureDefaultModelRawValue: String = AIProviderSettings.defaultAzureModel.rawValue
+    @AppStorage(AIProviderSettings.openAIFastModelKey) private var openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel
+    @AppStorage(AIProviderSettings.openAISmartModelKey) private var openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel
+    @AppStorage(AIProviderSettings.anthropicFastModelKey) private var anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel
+    @AppStorage(AIProviderSettings.anthropicSmartModelKey) private var anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel
+    @AppStorage(AIProviderSettings.museSparkModelKey) private var museSparkModel: String = AIProviderSettings.defaultMuseSparkModel
     @AppStorage(AIProviderSettings.chatContextBudgetKey) private var chatContextBudgetRawValue: String = ChatContextBudget.balanced.rawValue
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
@@ -48,6 +53,10 @@ struct SettingsView: View {
     @State private var azureAPIKeyInput: String = ""
     @State private var tavilyAPIKeyInput: String = ""
     @State private var parallelAPIKeyInput: String = ""
+    @State private var openAIAPIKeyInput: String = ""
+    @State private var anthropicAPIKeyInput: String = ""
+    @State private var museSparkAPIKeyInput: String = ""
+    @State private var exaAPIKeyInput: String = ""
     /// Whether the saved key is currently masked (showing dots instead of the key).
     @State private var isKeyMasked: Bool = true
     /// Whether a valid API key is currently stored in Keychain.
@@ -56,12 +65,18 @@ struct SettingsView: View {
     @State private var hasAzureOpenAIAPIKey: Bool = false
     @State private var hasTavilyAPIKey: Bool = false
     @State private var hasParallelAPIKey: Bool = false
+    @State private var hasOpenAIAPIKey: Bool = false
+    @State private var hasAnthropicAPIKey: Bool = false
+    @State private var hasMuseSparkAPIKey: Bool = false
+    @State private var hasExaAPIKey: Bool = false
     @State private var azureConnectionStatus: [AzureAssistantModel: String] = [:]
     @State private var azureConnectionsInProgress: Set<AzureAssistantModel> = []
     @State private var tavilyConnectionStatus: String?
     @State private var tavilyConnectionInProgress = false
     @State private var parallelConnectionStatus: String?
     @State private var parallelConnectionInProgress = false
+    @State private var exaConnectionStatus: String?
+    @State private var exaConnectionInProgress = false
 
     @State private var showOnboarding = false
     /// Shown when the user tries to export but has logged no food yet.
@@ -294,6 +309,59 @@ struct SettingsView: View {
                             model: .terra,
                             deployment: $azureTerraDeployment
                         )
+
+                    case .openAI:
+                        apiKeyRow(
+                            providerName: "OpenAI",
+                            placeholder: "Paste your OpenAI API key",
+                            input: $openAIAPIKeyInput,
+                            hasKey: $hasOpenAIAPIKey,
+                            account: KeychainService.openAIAPIKeyAccount
+                        )
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $openAIFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $openAISmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://platform.openai.com/api-keys")!) {
+                            Label("Manage OpenAI API Keys", systemImage: "safari")
+                        }
+
+                    case .anthropic:
+                        apiKeyRow(
+                            providerName: "Anthropic",
+                            placeholder: "Paste your Anthropic API key",
+                            input: $anthropicAPIKeyInput,
+                            hasKey: $hasAnthropicAPIKey,
+                            account: KeychainService.anthropicAPIKeyAccount
+                        )
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $anthropicFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $anthropicSmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://console.anthropic.com/settings/keys")!) {
+                            Label("Manage Anthropic API Keys", systemImage: "safari")
+                        }
+
+                    case .museSpark:
+                        apiKeyRow(
+                            providerName: "Muse Spark",
+                            placeholder: "Paste your Meta Model API key",
+                            input: $museSparkAPIKeyInput,
+                            hasKey: $hasMuseSparkAPIKey,
+                            account: KeychainService.museSparkAPIKeyAccount
+                        )
+                        TextField("Model slug", text: $museSparkModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://dev.meta.ai")!) {
+                            Label("Manage Meta Model API", systemImage: "safari")
+                        }
                     }
 
                     Picker("Context", selection: $chatContextBudgetRawValue) {
@@ -414,6 +482,38 @@ struct SettingsView: View {
                         Link(destination: URL(string: "https://platform.parallel.ai")!) {
                             Label("Manage Parallel API Key", systemImage: "safari")
                         }
+
+                    case .exa:
+                        apiKeyRow(
+                            providerName: "Exa",
+                            placeholder: "Paste your Exa API key",
+                            input: $exaAPIKeyInput,
+                            hasKey: $hasExaAPIKey,
+                            account: KeychainService.exaAPIKeyAccount
+                        )
+                        HStack {
+                            Button {
+                                testExaSearch()
+                            } label: {
+                                Label(
+                                    exaConnectionInProgress ? "Testing" : "Test Search",
+                                    systemImage: exaConnectionInProgress ? "hourglass" : "network"
+                                )
+                            }
+                            .disabled(exaConnectionInProgress)
+                            Spacer()
+                            if let exaConnectionStatus {
+                                Text(exaConnectionStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(exaConnectionStatus == "Connected" ? .green : .secondary)
+                            }
+                        }
+                        Text("Test Search makes one small Exa request.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Link(destination: URL(string: "https://dashboard.exa.ai/api-keys")!) {
+                            Label("Manage Exa API Key", systemImage: "safari")
+                        }
                     }
                 } header: {
                     Text("Assistant Web Research")
@@ -422,6 +522,8 @@ struct SettingsView: View {
                         Text("Tavily searches independently of the Assistant model. Results and source links are saved with the conversation; API keys stay in Keychain and are never exported. Page downloads still use the app's protected URL fetcher.")
                     } else if selectedAssistantResearchProvider == .parallel {
                         Text("Parallel returns objective-focused excerpts from multiple keyword queries. Results and source links are saved with the conversation; API keys stay in Keychain and are never exported. Page downloads still use the app's protected URL fetcher.")
+                    } else if selectedAssistantResearchProvider == .exa {
+                        Text("Exa returns source text and citations to the same durable research pipeline. The API key stays in Keychain, and page downloads still use the app's protected URL fetcher.")
                     } else {
                         Text("Uses the selected Assistant model's native web-search capability.")
                     }
@@ -720,6 +822,10 @@ struct SettingsView: View {
             hasAzureOpenAIAPIKey = KeychainService.hasAzureOpenAIAPIKey
             hasTavilyAPIKey = KeychainService.hasTavilyAPIKey
             hasParallelAPIKey = KeychainService.hasParallelAPIKey
+            hasOpenAIAPIKey = KeychainService.hasOpenAIAPIKey
+            hasAnthropicAPIKey = KeychainService.hasAnthropicAPIKey
+            hasMuseSparkAPIKey = KeychainService.hasMuseSparkAPIKey
+            hasExaAPIKey = KeychainService.hasExaAPIKey
             _ = GeminiCostAccumulator.current(in: modelContext)
             try? modelContext.save()
         }
@@ -877,6 +983,12 @@ struct SettingsView: View {
             "Fast uses the lightweight model; Smart uses the deeper model. Context is compacted before reaching the selected limit."
         case .azureOpenAI:
             "Deployment names are the identifiers configured in your Azure resource. Limits come from the app's dated capability catalog; connection tests check reachability. Azure calls are stateless and API keys stay in Keychain."
+        case .openAI:
+            "OpenAI uses the Responses API with stateless, portable conversation replay. Model slugs remain editable and capabilities refresh from the runtime catalog."
+        case .anthropic:
+            "Anthropic uses the Messages API. Signed thinking blocks and tool IDs are preserved for later turns; model slugs remain editable."
+        case .museSpark:
+            "Muse Spark uses Meta's OpenAI-compatible Model API. The model slug is runtime-editable so app updates are not required when Meta changes models."
         }
     }
 
@@ -1032,6 +1144,32 @@ struct SettingsView: View {
                 parallelConnectionStatus = "Cancelled"
             } catch {
                 parallelConnectionStatus = error.localizedDescription
+            }
+        }
+    }
+
+    private func testExaSearch() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OFJ_UI_TEST_MODE"] == "1" {
+            exaConnectionStatus = "Connected"
+            return
+        }
+        #endif
+        guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
+            exaConnectionStatus = "Save an API key first"
+            return
+        }
+        exaConnectionInProgress = true
+        exaConnectionStatus = nil
+        Task {
+            defer { exaConnectionInProgress = false }
+            do {
+                try await ExaChatWebSearchProvider(apiKey: apiKey).testSearch()
+                exaConnectionStatus = "Connected"
+            } catch is CancellationError {
+                exaConnectionStatus = "Cancelled"
+            } catch {
+                exaConnectionStatus = error.localizedDescription
             }
         }
     }
@@ -1333,6 +1471,11 @@ struct SettingsView: View {
                     azureSolDeployment: azureSolDeployment,
                     azureTerraDeployment: azureTerraDeployment,
                     azureDefaultModel: azureDefaultModelRawValue,
+                    openAIFastModel: openAIFastModel,
+                    openAISmartModel: openAISmartModel,
+                    anthropicFastModel: anthropicFastModel,
+                    anthropicSmartModel: anthropicSmartModel,
+                    museSparkModel: museSparkModel,
                     chatContextBudget: chatContextBudgetRawValue,
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
                     offContributeEnabled: offContributeEnabled,
@@ -1393,6 +1536,11 @@ struct SettingsView: View {
             azureSolDeployment = backup.appSettings.azureSolDeployment
             azureTerraDeployment = backup.appSettings.azureTerraDeployment
             azureDefaultModelRawValue = backup.appSettings.azureDefaultModel
+            openAIFastModel = backup.appSettings.openAIFastModel
+            openAISmartModel = backup.appSettings.openAISmartModel
+            anthropicFastModel = backup.appSettings.anthropicFastModel
+            anthropicSmartModel = backup.appSettings.anthropicSmartModel
+            museSparkModel = backup.appSettings.museSparkModel
             chatContextBudgetRawValue = backup.appSettings.chatContextBudget
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
             offContributeEnabled = backup.appSettings.offContributeEnabled

@@ -168,9 +168,6 @@ struct ChatView: View {
                         errorBanner(error)
                     }
 
-                    if let thread = currentThread {
-                        ChatCompletedRunDetails(threadID: thread.id)
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -483,10 +480,6 @@ struct ChatView: View {
                 pendingAttachmentsRow
             }
 
-            if let usage = chatService.contextUsage {
-                contextMeter(usage)
-            }
-
             GlassEffectContainer(spacing: 8) {
                 HStack(alignment: .bottom, spacing: 8) {
                     Menu {
@@ -593,65 +586,6 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 4)
-    }
-
-    private func contextMeter(_ usage: ChatContextUsage) -> some View {
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Next request")
-                Spacer()
-                Text("~\(compactTokenCount(usage.displayedTokens)) / \(compactTokenCount(usage.selectedLimit))")
-                    .ofjNumericTextTransition(value: usage.displayedTokens)
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-
-            ProgressView(
-                value: min(Double(usage.displayedTokens), Double(usage.selectedLimit)),
-                total: Double(max(1, usage.selectedLimit))
-            )
-            .tint(usage.isContextLimited ? .orange : .accentColor)
-
-            Text("Reserved: \(compactTokenCount(usage.reservedOutputTokens)) output + \(compactTokenCount(usage.reservedToolTokens)) tools")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .ofjNumericTextTransition(
-                    value: usage.reservedOutputTokens + usage.reservedToolTokens
-                )
-
-            if let reported = usage.reportedInputTokens {
-                let cached = usage.reportedCachedInputTokens ?? 0
-                Text("Last provider report: \(compactTokenCount(reported)) input · \(compactTokenCount(cached)) cached")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .ofjNumericTextTransition(value: reported + cached)
-            }
-
-            if usage.isEstimateFrozen {
-                Text("Estimate frozen until this run completes")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if let explanation = usage.explanation ?? chatService.contextWarning {
-                Text(explanation)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .accessibilityIdentifier("assistant.context-warning")
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("assistant.context-meter")
-    }
-
-    private func compactTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        }
-        if count >= 1_000 {
-            return String(format: "%.0fk", Double(count) / 1_000)
-        }
-        return count.formatted()
     }
 
     private var pendingAttachmentsRow: some View {
@@ -826,6 +760,8 @@ private struct ScopedChatTranscript: View {
     let onEdit: (ChatMessage) -> Void
 
     @Query private var messages: [ChatMessage]
+    @Query private var runs: [ChatAgentRun]
+    @State private var infoMessage: ChatMessage?
 
     init(thread: ChatThread, onEdit: @escaping (ChatMessage) -> Void) {
         self.thread = thread
@@ -840,6 +776,12 @@ private struct ScopedChatTranscript: View {
                 SortDescriptor(\ChatMessage.timestamp),
                 SortDescriptor(\ChatMessage.id)
             ]
+        )
+        _runs = Query(
+            filter: #Predicate<ChatAgentRun> { run in
+                run.thread?.id == threadID
+            },
+            sort: [SortDescriptor(\ChatAgentRun.createdAt, order: .reverse)]
         )
     }
 
@@ -868,6 +810,18 @@ private struct ScopedChatTranscript: View {
         .onAppear { chatService.repairTranscriptOrdering(in: thread) }
         .onChange(of: messages.map(\.transcriptOrdinal)) {
             chatService.repairTranscriptOrdering(in: thread)
+        }
+        .sheet(item: $infoMessage) { message in
+            NavigationStack {
+                ChatResponseInfoView(
+                    message: message,
+                    run: message.runID.flatMap { runID in
+                        runs.first { $0.id == runID }
+                    },
+                    contextUsage: chatService.contextUsage,
+                    contextWarning: chatService.contextWarning
+                )
+            }
         }
     }
 
@@ -927,6 +881,14 @@ private struct ScopedChatTranscript: View {
             }
         }
 
+        if message.role == .model {
+            Button {
+                infoMessage = message
+            } label: {
+                Label("Info", systemImage: "info.circle")
+            }
+        }
+
         if message.role == .model,
            message.id == messages.last?.id,
            !chatService.isStreaming {
@@ -950,69 +912,122 @@ private struct ScopedChatTranscript: View {
     }
 }
 
-private struct ChatCompletedRunDetails: View {
-    @Query private var runs: [ChatAgentRun]
-
-    init(threadID: UUID) {
-        _runs = Query(
-            filter: #Predicate<ChatAgentRun> { run in
-                run.thread?.id == threadID
-            },
-            sort: [SortDescriptor(\ChatAgentRun.createdAt, order: .reverse)]
-        )
-    }
-
-    private var completedRuns: [ChatAgentRun] {
-        Array(runs.filter { $0.phase.isTerminal }.prefix(3))
-    }
+private struct ChatResponseInfoView: View {
+    @Environment(\.dismiss) private var dismiss
+    let message: ChatMessage
+    let run: ChatAgentRun?
+    let contextUsage: ChatContextUsage?
+    let contextWarning: String?
 
     var body: some View {
-        ForEach(completedRuns) { run in
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 5) {
-                    detail("Rounds", run.roundRecords.count.formatted())
+        Form {
+            Section("Generation") {
+                infoRow("Status", run?.phase.rawValue.capitalized ?? "Completed")
+                infoRow("Provider", message.providerID ?? run?.providerID ?? "Unknown")
+                infoRow("Model", message.modelID ?? run?.modelID ?? "Unknown")
+                if let baseModel = run?.baseModelID, baseModel != run?.modelID {
+                    infoRow("Resolved model", baseModel)
+                }
+                if let requestID = message.providerRequestID ?? run?.providerRequestID {
+                    infoRow("Request ID", requestID)
+                }
+            }
+
+            if let run {
+                Section("Performance") {
+                    infoRow("Rounds", run.roundRecords.count.formatted())
+                    if let firstEvent = run.roundRecords.compactMap(\.firstProviderEventMs).first {
+                        infoRow("First provider event", duration(firstEvent))
+                    }
                     if let ttft = run.roundRecords.compactMap(\.firstVisibleTextMs).first {
-                        detail("TTFT", "\(ttft) ms")
+                        infoRow("First visible text", duration(ttft))
                     }
-                    detail("Tool time", "\(run.cumulativeToolLatencyMs) ms")
-                    detail("Tokens", "\(run.reportedInputTokens) in · \(run.reportedOutputTokens) out · \(run.reportedThinkingTokens) reasoning")
+                    let roundDuration = run.roundRecords.reduce(0) { $0 + $1.durationMs }
+                    infoRow("Model time", duration(roundDuration))
+                    infoRow("Tool time", duration(run.cumulativeToolLatencyMs))
+                    if let started = run.requestStartedAt, let completed = run.requestCompletedAt {
+                        infoRow("Total", elapsed(started, completed))
+                    }
+                    infoRow("Retries", run.roundRecords.reduce(0) { $0 + $1.retryCount }.formatted())
+                }
+
+                Section("Usage") {
+                    infoRow("Input", run.reportedInputTokens.formatted())
+                    infoRow("Cached input", run.reportedCachedInputTokens.formatted())
+                    infoRow("Output", run.reportedOutputTokens.formatted())
+                    infoRow("Reasoning", run.reportedThinkingTokens.formatted())
                     if let cost = knownCost(run) {
-                        detail("Cost", cost.formatted(.currency(code: "USD")))
+                        infoRow("Estimated cost", cost.formatted(.currency(code: "USD")))
                     } else {
-                        detail("Cost", "Usage only")
-                    }
-                    detail("Retries", run.roundRecords.reduce(0) { $0 + $1.retryCount }.formatted())
-                    if let requestID = run.providerRequestID {
-                        detail("Request ID", requestID)
+                        infoRow("Cost", "Usage only")
                     }
                 }
-                .font(.caption)
-                .textSelection(.enabled)
-                .padding(.top, 6)
-            } label: {
-                Label(
-                    "\(run.phase.rawValue.capitalized) · \(run.modelID)",
-                    systemImage: run.phase == .completed ? "checkmark.circle" : "exclamationmark.circle"
-                )
-                .font(.caption)
             }
-            .padding(10)
-            .glassEffect(in: .rect(cornerRadius: 14))
+
+            Section("Context Window") {
+                if let usage = contextUsage {
+                    infoRow("Next request estimate", "~\(compactTokens(usage.displayedTokens))")
+                    infoRow("Selected limit", compactTokens(usage.selectedLimit))
+                    infoRow("Reserved output", compactTokens(usage.reservedOutputTokens))
+                    infoRow("Reserved tools", compactTokens(usage.reservedToolTokens))
+                    if let reported = usage.reportedInputTokens {
+                        infoRow("Last reported input", compactTokens(reported))
+                    }
+                    if let cached = usage.reportedCachedInputTokens {
+                        infoRow("Last reported cached", compactTokens(cached))
+                    }
+                    if usage.isCompacted { infoRow("Compacted", "Yes") }
+                    if usage.isEstimateFrozen { infoRow("Estimate", "Frozen during generation") }
+                    if let explanation = usage.explanation ?? contextWarning {
+                        Text(explanation)
+                            .font(.caption)
+                            .foregroundStyle(usage.isContextLimited ? .orange : .secondary)
+                    }
+                } else if let run {
+                    infoRow("Selected limit", compactTokens(run.selectedContextLimit))
+                    infoRow("Input used", compactTokens(run.reportedInputTokens))
+                    infoRow("Compactions", run.compactionCount.formatted())
+                } else {
+                    Text("Context details are unavailable for this older response.")
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        .navigationTitle("Response Info")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func knownCost(_ run: ChatAgentRun) -> Double? {
-        let values = run.roundRecords.compactMap(\.estimatedCostUSD)
-        guard values.count == run.roundRecords.count, !values.isEmpty else { return nil }
-        return values.reduce(0, +)
+        let costs = run.roundRecords.compactMap(\.estimatedCostUSD)
+        guard !costs.isEmpty, costs.count == run.roundRecords.count else { return nil }
+        return costs.reduce(0, +)
     }
 
-    private func detail(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).multilineTextAlignment(.trailing)
-        }
+    private func duration(_ milliseconds: Int) -> String {
+        milliseconds >= 1_000
+            ? (Double(milliseconds) / 1_000).formatted(.number.precision(.fractionLength(1))) + " s"
+            : "\(milliseconds) ms"
+    }
+
+    private func elapsed(_ start: Date, _ end: Date) -> String {
+        duration(Int(max(0, end.timeIntervalSince(start)) * 1_000))
+    }
+
+    private func compactTokens(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fk", Double(count) / 1_000) }
+        return count.formatted()
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        LabeledContent(label, value: value)
+            .textSelection(.enabled)
     }
 }
 

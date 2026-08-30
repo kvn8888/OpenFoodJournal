@@ -96,20 +96,13 @@ struct OFJDesignSystemTests {
         #expect(!descriptors.map(\.mode).contains(.manual))
     }
 
-    @Test("camera zoom uses Apple's display multiplier and preserves a visible 1x neutral point")
-    func cameraZoomConfiguration() {
-        let configuration = CameraZoomConfiguration(
-            range: 1.0...10.0,
-            displayMultiplier: 0.5
-        )
-
-        #expect(configuration.neutralFactor == 2.0)
-        #expect(configuration.displayFactor(for: 1.0) == 0.5)
-        #expect(configuration.displayFactor(for: 2.0) == 1.0)
-        #expect(configuration.displayLabel(for: 2.0) == "1×")
-        #expect(configuration.displayLabel(for: 3.0) == "1.5×")
-        #expect(configuration.clampedFactor(100) == 10.0)
-        #expect(configuration.isAdjustable)
+    @Test("camera exposes exactly three discrete physical-lens zoom steps")
+    func cameraZoomLevelContract() {
+        #expect(CameraZoomLevel.allCases == [.half, .one, .two])
+        #expect(CameraZoomLevel.allCases.map(\.displayLabel) == ["0.5×", "1×", "2×"])
+        #expect(CameraZoomLevel.half.deviceZoomFactor == 1)
+        #expect(CameraZoomLevel.one.deviceZoomFactor == 1)
+        #expect(CameraZoomLevel.two.deviceZoomFactor == 2)
     }
 
     @Test("camera preview crop maps normalized viewfinder geometry to photo pixels")

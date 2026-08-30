@@ -657,6 +657,11 @@ struct AppSettingsRecord: Codable {
     var azureSolDeployment: String
     var azureTerraDeployment: String
     var azureDefaultModel: String
+    var openAIFastModel: String
+    var openAISmartModel: String
+    var anthropicFastModel: String
+    var anthropicSmartModel: String
+    var museSparkModel: String
     var chatContextBudget: String
     var useGeneratedFoodIconImages: Bool
     var offContributeEnabled: Bool
@@ -680,6 +685,11 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment: String = "",
         azureTerraDeployment: String = "",
         azureDefaultModel: String = AIProviderSettings.defaultAzureModel.rawValue,
+        openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel,
+        openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel,
+        anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel,
+        anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel,
+        museSparkModel: String = AIProviderSettings.defaultMuseSparkModel,
         chatContextBudget: String = ChatContextBudget.balanced.rawValue,
         useGeneratedFoodIconImages: Bool = false,
         offContributeEnabled: Bool,
@@ -702,6 +712,11 @@ struct AppSettingsRecord: Codable {
         self.azureSolDeployment = azureSolDeployment
         self.azureTerraDeployment = azureTerraDeployment
         self.azureDefaultModel = azureDefaultModel
+        self.openAIFastModel = openAIFastModel
+        self.openAISmartModel = openAISmartModel
+        self.anthropicFastModel = anthropicFastModel
+        self.anthropicSmartModel = anthropicSmartModel
+        self.museSparkModel = museSparkModel
         self.chatContextBudget = chatContextBudget
         self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
         self.offContributeEnabled = offContributeEnabled
@@ -726,6 +741,11 @@ struct AppSettingsRecord: Codable {
         case azureSolDeployment
         case azureTerraDeployment
         case azureDefaultModel
+        case openAIFastModel
+        case openAISmartModel
+        case anthropicFastModel
+        case anthropicSmartModel
+        case museSparkModel
         case chatContextBudget
         case useGeneratedFoodIconImages
         case offContributeEnabled
@@ -754,6 +774,11 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment = try container.decodeIfPresent(String.self, forKey: .azureSolDeployment) ?? ""
         azureTerraDeployment = try container.decodeIfPresent(String.self, forKey: .azureTerraDeployment) ?? ""
         azureDefaultModel = try container.decodeIfPresent(String.self, forKey: .azureDefaultModel) ?? AIProviderSettings.defaultAzureModel.rawValue
+        openAIFastModel = try container.decodeIfPresent(String.self, forKey: .openAIFastModel) ?? AIProviderSettings.defaultOpenAIFastModel
+        openAISmartModel = try container.decodeIfPresent(String.self, forKey: .openAISmartModel) ?? AIProviderSettings.defaultOpenAISmartModel
+        anthropicFastModel = try container.decodeIfPresent(String.self, forKey: .anthropicFastModel) ?? AIProviderSettings.defaultAnthropicFastModel
+        anthropicSmartModel = try container.decodeIfPresent(String.self, forKey: .anthropicSmartModel) ?? AIProviderSettings.defaultAnthropicSmartModel
+        museSparkModel = try container.decodeIfPresent(String.self, forKey: .museSparkModel) ?? AIProviderSettings.defaultMuseSparkModel
         chatContextBudget = try container.decodeIfPresent(String.self, forKey: .chatContextBudget) ?? ChatContextBudget.balanced.rawValue
         useGeneratedFoodIconImages = try container.decodeIfPresent(Bool.self, forKey: .useGeneratedFoodIconImages) ?? false
         offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false

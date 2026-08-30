@@ -36,15 +36,15 @@ struct ScanCameraModeDescriptor: Identifiable, Equatable {
 struct ScanCameraControls: View {
     @Binding var mode: ScanMode
 
-    let zoomFactor: Double
-    let zoomConfiguration: CameraZoomConfiguration
+    let zoomLevel: CameraZoomLevel
+    let availableZoomLevels: [CameraZoomLevel]
     let torchOn: Bool
     let torchAvailable: Bool
     let canRetry: Bool
     let isBusy: Bool
     let onExit: () -> Void
     let onRetry: () -> Void
-    let onZoom: (Double) -> Void
+    let onZoom: (CameraZoomLevel) -> Void
     let onTorch: () -> Void
     let onCapture: () -> Void
     let onLibrary: () -> Void
@@ -112,42 +112,38 @@ struct ScanCameraControls: View {
     }
 
     private var zoomControl: some View {
-        VStack(spacing: OFJSpace.s3) {
-            Text(zoomConfiguration.displayLabel(for: zoomFactor))
-                .font(OFJType.cameraZoom)
-                .monospacedDigit()
-                .ofjNumericTextTransition(
-                    value: zoomConfiguration.displayFactor(for: zoomFactor)
-                )
-
-            Slider(
-                value: Binding(
-                    get: { zoomFactor },
-                    set: onZoom
-                ),
-                in: zoomConfiguration.range
-            ) {
-                Text("Zoom")
-            } minimumValueLabel: {
-                Image(systemName: "minus.magnifyingglass")
-            } maximumValueLabel: {
-                Image(systemName: "plus.magnifyingglass")
+        HStack(spacing: OFJSpace.s8) {
+            ForEach(CameraZoomLevel.allCases) { level in
+                let isAvailable = availableZoomLevels.contains(level)
+                Button {
+                    withAnimation(OFJMotion.quickSpring) {
+                        onZoom(level)
+                    }
+                } label: {
+                    Text(level.displayLabel)
+                        .font(OFJType.cameraZoom)
+                        .monospacedDigit()
+                        .foregroundStyle(zoomLevel == level ? .black : .white)
+                        .frame(width: 44, height: 36)
+                        .background(
+                            zoomLevel == level
+                                ? Color.white
+                                : Color.black.opacity(0.48),
+                            in: .capsule
+                        )
+                        .contentShape(.capsule)
+                }
+                .buttonStyle(.plain)
+                .disabled(!isAvailable)
+                .opacity(isAvailable ? 1 : 0.3)
+                .accessibilityLabel(level.accessibilityLabel)
+                .accessibilityAddTraits(zoomLevel == level ? .isSelected : [])
             }
-            .tint(.white)
-            .disabled(!zoomConfiguration.isAdjustable)
         }
-        .foregroundStyle(.white)
-        .padding(.horizontal, OFJSpace.s12)
-        .frame(
-            maxWidth: OFJLayout.cameraZoomControlWidth,
-            minHeight: OFJLayout.cameraZoomControlHeight
-        )
-        // Keep zoom visually native. Wrapping Slider in a custom glass capsule
-        // makes it read like the discrete zoom pills this control replaced.
-        // The camera's bottom gradient already provides the needed contrast.
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Camera zoom")
-        .accessibilityValue(zoomConfiguration.displayLabel(for: zoomFactor))
+        // Deliberately not Liquid Glass. These are small camera zoom steps,
+        // while the surrounding mode and utility controls remain glass.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Camera zoom levels")
     }
 
     private var modeSelector: some View {
@@ -327,13 +323,8 @@ struct CaptureButton: View {
 #if DEBUG
 private struct ScanCameraControlsPreview: View {
     @State private var mode = ScanMode.foodPhoto
-    @State private var zoom = 2.0
+    @State private var zoom = CameraZoomLevel.one
     @State private var torchOn = false
-
-    private let zoomConfiguration = CameraZoomConfiguration(
-        range: 1.0...10.0,
-        displayMultiplier: 0.5
-    )
 
     var body: some View {
         ZStack {
@@ -346,8 +337,8 @@ private struct ScanCameraControlsPreview: View {
 
             ScanCameraControls(
                 mode: $mode,
-                zoomFactor: zoom,
-                zoomConfiguration: zoomConfiguration,
+                zoomLevel: zoom,
+                availableZoomLevels: CameraZoomLevel.allCases,
                 torchOn: torchOn,
                 torchAvailable: true,
                 canRetry: true,
