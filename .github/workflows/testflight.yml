@@ -31,6 +31,11 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS: "1"
       OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}
+      # xcodebuild does not forward arbitrary host variables into the iOS test
+      # process. TEST_RUNNER_ is stripped when forwarding them to XCTest.
+      # https://developer.apple.com/documentation/xcode/environment-variable-reference
+      TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS: "1"
+      TEST_RUNNER_OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}
 
     steps:
       - name: Check out trusted TestFlight source
@@ -51,6 +56,7 @@ jobs:
 
       - name: Execute production Gemini food-image contract
         run: |
+          set -o pipefail
           xcodebuild \
             -project OpenFoodJournal.xcodeproj \
             -scheme OpenFoodJournalUnitTests \
@@ -60,16 +66,17 @@ jobs:
             -parallel-testing-enabled NO \
             -only-testing:OpenFoodJournalTests/ChatLiveProviderTests/testGeminiFoodIconImageLiveContract \
             CODE_SIGNING_ALLOWED=NO \
-            test
+            test 2>&1 | tee "${RUNNER_TEMP}/GeminiFoodImageContract.log"
+          bash .github/scripts/verify-live-test-log.sh \
+            "${RUNNER_TEMP}/GeminiFoodImageContract.log" \
+            testGeminiFoodIconImageLiveContract
 
-      - name: Retain failed Gemini contract diagnostics briefly
+      - name: Report failure without retaining credential-bearing test results
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: gemini-food-image-contract-${{ github.run_id }}
-          path: ${{ runner.temp }}/GeminiFoodImageContract.xcresult
-          if-no-files-found: ignore
-          retention-days: 3
+        run: |
+          echo "::error::The required Gemini API contract did not pass. Inspect the masked workflow log."
+          # XCTest result bundles may contain forwarded environment variables.
+          # Keep them ephemeral; never upload a secret-bearing xcresult artifact.
 
   deploy:
     name: Build and distribute
