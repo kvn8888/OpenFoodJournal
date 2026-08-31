@@ -3,20 +3,20 @@ import SwiftUI
 
 struct HistoryView: View {
     @Environment(UserGoals.self) private var goals
-    @State private var selectedDate = Calendar.current.startOfDay(for: Date.now)
-    @State private var comparisonDate = Calendar.current.startOfDay(for: Date.now)
+    @State private var selectedDate = Calendar.current.startOfDay(for: AppPresentationDate.now)
+    @State private var comparisonDate = Calendar.current.startOfDay(for: AppPresentationDate.now)
     @State private var monthly = false
     @State private var selectedMetricID = "macro:calories"
     @State private var showDetail = false
     private var days: Int { monthly ? 30 : 7 }
     private var oldestDate: Date {
-        let month = Calendar.current.dateInterval(of: .month, for: .now)?.start ?? .now
+        let month = Calendar.current.dateInterval(of: .month, for: AppPresentationDate.now)?.start ?? AppPresentationDate.now
         return Calendar.current.date(byAdding: .month, value: -26, to: month) ?? month
     }
 
     var body: some View {
         NavigationStack {
-            NutritionLogQuery(from: min(oldestDate, NutritionDateRange.offset(comparisonDate, days: -60)), through: .now) { analytics in
+            NutritionLogQuery(from: min(oldestDate, NutritionDateRange.offset(comparisonDate, days: -60)), through: AppPresentationDate.now) { analytics in
                 let macros = NutritionMetric.macros(goals: goals)
                 let metric = (macros + analytics.trackedMicros).first { $0.id == selectedMetricID } ?? macros[0]
                 let selectedCalories = analytics.valuesByDate[Calendar.current.startOfDay(for: selectedDate)]?["macro:calories"]
