@@ -94,6 +94,9 @@ struct RadialMenuButton: View {
                                         item.action()
                                     }
                                 }
+                                .accessibilityElement(children: .combine)
+                                .accessibilityLabel(item.label)
+                                .accessibilityIdentifier("journal.action.\(item.id)")
                                 .offset(x: position.x, y: position.y)
                                 .glassEffectID(item.id, in: glassNamespace)
                                 // Scale+opacity transition instead of matchedGeometry:
@@ -135,6 +138,8 @@ struct RadialMenuButton: View {
             .simultaneousGesture(longPressToggle)
             .sensoryFeedback(.impact(flexibility: .soft), trigger: isOpen)
             .sensoryFeedback(.selection, trigger: highlightedID)
+            .accessibilityLabel(isOpen ? "Close add menu" : "Add food")
+            .accessibilityIdentifier("journal.add")
     }
 
     // MARK: - Option Bubble
