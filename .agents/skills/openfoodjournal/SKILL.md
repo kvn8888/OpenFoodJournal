@@ -530,7 +530,8 @@ See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) 
 - **Settings: OFF contribute toggle/status** (`off.contributeEnabled`, default off; `off.contributionSuccessCount` and `off.lastContributionAt` show confirmed on-device upload history)
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
-- **NutritionDetailView macro cards**: circular progress rings (not linear ProgressView), showing value inside ring + percentage below
+- **NutritionDetailView**: `ScrollView` on `JournalCalorieBackground` (same page treatment as History/calendar). Macro summary and vitamin/mineral sections use `NutritionSurface` glass cards. Avoid `insetGrouped` List here — glass on grouped-list chrome creates a double-card halo.
+- **History micronutrient pins**: long-press chip → context menu Pin/Unpin. Persisted by `PinnedMicronutrientSettings` (`history.pinnedMicronutrientIDs`) and included in `AppSettingsRecord` backups.
 - **FoodNutrientBreakdownView**: inverse of NutrientBreakdownView — food → all nutrients. NavigationLink from NutrientBreakdownView "By Food" rows
 - **LogFoodSheet refresh**: selected app accent, deterministic amount-preserving unit controls, calorie/macro composition, daily-total preview, always-visible editable micronutrient table, factual saved-unit mappings, and sticky meal-aware Add action. Accent selection persists in app settings, backup, and the optional Turso mirror.
 - **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass

@@ -333,6 +333,7 @@ struct OpenFoodJournalTests {
         #expect(record.anthropicFastModel == AIProviderSettings.defaultAnthropicFastModel)
         #expect(record.anthropicSmartModel == AIProviderSettings.defaultAnthropicSmartModel)
         #expect(record.museSparkModel == AIProviderSettings.defaultMuseSparkModel)
+        #expect(record.pinnedMicronutrientIDs.isEmpty)
     }
 
     @MainActor
