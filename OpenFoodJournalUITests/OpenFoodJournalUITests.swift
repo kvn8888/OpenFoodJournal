@@ -19,7 +19,10 @@ final class OpenFoodJournalUITests: XCTestCase {
 
     @MainActor
     func testSeparateProvidersAzureConnectionAndContextPresets() throws {
-        app.tabBars.buttons["Settings"].tap()
+        app.tabBars.buttons["Journal"].tap()
+        let settings = app.buttons["journal.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
 
         let scanProvider = app.descendants(matching: .any)["settings.scan-provider"]
         XCTAssertTrue(scrollToElement(scanProvider))
