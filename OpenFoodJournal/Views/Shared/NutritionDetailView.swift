@@ -22,7 +22,10 @@ struct NutritionDetailView: View {
             let progress = calories.goal > 0 ? (calorieAverage ?? 0) / calories.goal : 0
             let unknown = analytics.trackedMicros.filter { $0.id.hasPrefix("custom:") }
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                // Lazy: the page carries up to 37 nutrient rows behind glass
+                // surfaces once "More Nutrients" is open. The List this replaced
+                // realized rows on demand; a plain VStack would not.
+                LazyVStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Period", selection: $selectedPeriod) {
                             Text("Day").tag(NutritionStore.TimePeriod.daily)
