@@ -25,7 +25,9 @@ enum ScreenshotConfiguration {
         environment["OFJ_UI_TEST_MODE"] == "1" && environment["OFJ_SCREENSHOT_MODE"] == "1"
     }
 
-    static var isEnabled: Bool { isEnabled(in: ProcessInfo.processInfo.environment) }
+    // Launch flags cannot change during a capture. Cache this because calendars
+    // ask for the presentation date once per visible day cell.
+    static let isEnabled: Bool = isEnabled(in: ProcessInfo.processInfo.environment)
 
     @MainActor
     static func prepare() {
