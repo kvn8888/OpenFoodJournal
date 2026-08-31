@@ -77,6 +77,7 @@ struct OFJDesignSystemTests {
         #expect(OFJLayout.calendarDayControlHeight >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.calendarDayRingSize < OFJLayout.calendarDayControlHeight)
         #expect(OFJLayout.calendarRingLineWidth > 0)
+        #expect(OFJLayout.cameraTopBarInset == OFJSpace.s16)
         #expect(OFJLayout.cameraTopControlSize >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.cameraUtilityControlSize >= OFJLayout.minimumHitTarget)
         #expect(OFJLayout.cameraModeControlHeight >= OFJLayout.minimumHitTarget)

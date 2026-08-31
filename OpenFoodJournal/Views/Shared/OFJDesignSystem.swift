@@ -329,6 +329,9 @@ enum OFJLayout {
     static let calendarDayControlHeight: CGFloat = 72
     static let calendarDayRingSize: CGFloat = 40
     static let calendarRingLineWidth: CGFloat = 3
+    /// Shared inset for the scan close/retry row. Top and leading stay equal
+    /// so the X is as far from the top safe-area edge as from the left edge.
+    static let cameraTopBarInset = OFJSpace.s16
     static let cameraTopControlSize: CGFloat = 50
     static let cameraUtilityControlSize: CGFloat = 52
     static let cameraModeControlHeight: CGFloat = 72

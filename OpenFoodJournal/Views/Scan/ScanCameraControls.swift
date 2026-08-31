@@ -92,8 +92,8 @@ struct ScanCameraControls: View {
                 }
             }
         }
-        .padding(.horizontal, OFJSpace.s16)
-        .padding(.top, OFJSpace.s8)
+        .padding(.horizontal, OFJLayout.cameraTopBarInset)
+        .padding(.top, OFJLayout.cameraTopBarInset)
     }
 
     private var bottomControls: some View {
