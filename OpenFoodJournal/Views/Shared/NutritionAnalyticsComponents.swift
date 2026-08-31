@@ -66,7 +66,7 @@ struct NutritionRangeArrows: ToolbarContent {
             Button("Next period", systemImage: "chevron.right") {
                 date = NutritionDateRange.next(date, direction: 1, days: days)
             }.labelStyle(.iconOnly)
-                .disabled(Calendar.current.startOfDay(for: date) >= Calendar.current.startOfDay(for: .now))
+                .disabled(Calendar.current.startOfDay(for: date) >= Calendar.current.startOfDay(for: AppPresentationDate.now))
         }
     }
 }
@@ -93,7 +93,7 @@ struct NutritionRangeControl: View {
             Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
                 .frame(width: 44, height: 44).contentShape(.circle)
         }.buttonStyle(.plain).glassEffect(.regular.interactive(), in: .circle)
-            .disabled(direction > 0 && Calendar.current.startOfDay(for: date) >= Calendar.current.startOfDay(for: .now))
+            .disabled(direction > 0 && Calendar.current.startOfDay(for: date) >= Calendar.current.startOfDay(for: AppPresentationDate.now))
             .accessibilityLabel(direction > 0 ? "Next date range" : "Previous date range")
     }
 }
