@@ -61,7 +61,7 @@ struct MacrosApp: App {
         let config: ModelConfiguration
         if isTest {
             // Tests use in-memory store without CloudKit
-            config = ModelConfiguration(isStoredInMemoryOnly: true)
+            config = ModelConfiguration(isStoredInMemoryOnly: true, cloudKitDatabase: .none)
         } else {
             // Sync via CloudKit private database. Debug builds ship a separate
             // entitlements file naming a different container, so a developer
