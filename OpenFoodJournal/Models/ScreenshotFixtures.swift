@@ -59,6 +59,10 @@ enum ScreenshotFixtures {
             return
         }
         let date = ScreenshotConfiguration.referenceDate
+        let preferences = Preferences.current(in: context)
+        preferences.shelfRecommendationsEnabled = false
+        preferences.ringSlot4 = "fiber"
+        preferences.ringSlot5 = "sodium"
         let emojis = ["🥣", "🥑", "🍲", "🥛", "🥗", "🫐"]
         let nutrition: [(Double, Double, Double, Double, Double)] = [
             (380, 27, 48, 10, 300), (320, 12, 34, 17, 160),
