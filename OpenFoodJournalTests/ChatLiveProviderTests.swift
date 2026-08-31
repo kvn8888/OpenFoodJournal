@@ -12,7 +12,10 @@ final class ChatLiveProviderTests: XCTestCase {
         guard environment("OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS") == "1" else {
             throw XCTSkip("Set OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS=1 to enable the billable Gemini image contract.")
         }
-        let key = try requireEnvironment("OFJ_GEMINI_API_KEY")
+        guard let key = environment("OFJ_GEMINI_API_KEY"), !key.isEmpty else {
+            XCTFail("The image contract was explicitly enabled but OFJ_GEMINI_API_KEY was not forwarded to XCTest.")
+            return
+        }
         let body = ScanService.foodIconImageRequest(
             prompt: #"{"item":"single blueberry"}"#
         )

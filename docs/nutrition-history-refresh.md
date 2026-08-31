@@ -73,3 +73,13 @@ Manual checklist (unexecuted on an iPhone):
 
 Release identifiers, CI counts and final processing state are recorded in the PR
 and immutable TestFlight release manifest after verification completes.
+
+### Release-gate correction
+
+The first release attempt was cancelled during archive creation after its detailed
+log revealed the protected image test had skipped despite a green job. It had not
+received the host's opt-in environment variable. The follow-up explicitly forwards
+`TEST_RUNNER_` variables into XCTest and requires the named test's passing event;
+missing/skipped/failed/duplicate executions fail closed. Secret-bearing xcresult
+bundles are no longer retained from this protected job. This corrects verification,
+not the image request or the UI. Ordinary unprivileged live tests still skip.
