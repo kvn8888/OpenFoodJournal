@@ -240,6 +240,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
 - **NutritionDetailView macro cards**: circular progress rings (not linear ProgressView), showing value inside ring + percentage below
+- **NutritionDetailView day changes**: date and nutrient values use directional numeric text transitions; macro rings and micronutrient bars animate to their new progress
 - **FoodNutrientBreakdownView**: inverse of NutrientBreakdownView — food → all nutrients. NavigationLink from NutrientBreakdownView "By Food" rows
 - **LogFoodSheet editable micronutrients**: collapsible DisclosureGroup with editable text fields for each micronutrient, values applied at log time
 - **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass

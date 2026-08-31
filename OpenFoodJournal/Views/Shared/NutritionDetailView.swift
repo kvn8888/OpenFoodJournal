@@ -98,7 +98,10 @@ struct NutritionDetailView: View {
                             .fontWeight(.medium)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .glassEffect(in: .capsule)
-                            .contentTransition(.numericText())
+                            .contentTransition(
+                                .numericText(value: selectedDate.timeIntervalSinceReferenceDate)
+                            )
+                            .animation(.easeInOut(duration: 0.35), value: selectedDate)
 
                         Button {
                             navigate(by: 1)
@@ -162,7 +165,6 @@ struct NutritionDetailView: View {
         .onAppear {
             refreshData()
         }
-        .animation(.easeInOut(duration: 0.2), value: selectedDate)
         .animation(.easeInOut(duration: 0.2), value: selectedPeriod)
     }
 
@@ -229,12 +231,15 @@ struct NutritionDetailView: View {
                         .trim(from: 0, to: displayFraction)
                         .stroke(color, style: StrokeStyle(lineWidth: 5, lineCap: .round))
                         .rotationEffect(.degrees(-90)) // Start from 12 o'clock
+                        .animation(.easeInOut(duration: 0.35), value: displayFraction)
                     // Value label inside the ring
                     VStack(spacing: 0) {
                         Text("\(Int(value))")
                             .font(.title3)
                             .fontWeight(.bold)
                             .foregroundStyle(color)
+                            .contentTransition(.numericText(value: value))
+                            .animation(.easeInOut(duration: 0.35), value: value)
                         Text(macro.unit)
                             .font(.system(size: 9))
                             .foregroundStyle(.secondary)
@@ -251,6 +256,8 @@ struct NutritionDetailView: View {
                     Text("\(Int(fraction * 100))%")
                         .font(.caption2)
                         .foregroundStyle(fraction >= 1.0 ? color : .secondary)
+                        .contentTransition(.numericText(value: fraction))
+                        .animation(.easeInOut(duration: 0.35), value: fraction)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -385,6 +392,8 @@ private struct NutrientProgressRow: View {
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                    .contentTransition(.numericText(value: consumed?.value ?? 0))
+                    .animation(.easeInOut(duration: 0.35), value: consumed?.value)
             }
 
             // Bottom: progress bar
@@ -402,6 +411,7 @@ private struct NutrientProgressRow: View {
                             width: min(geometry.size.width, geometry.size.width * fraction),
                             height: 6
                         )
+                        .animation(.easeInOut(duration: 0.35), value: fraction)
                 }
             }
             .frame(height: 6)
