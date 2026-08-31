@@ -16,7 +16,7 @@ struct FoodBankView: View {
     @Environment(UserGoals.self) private var goals
 
     /// Date to log foods to (passed from DailyLogView when opened via radial menu)
-    var logDate: Date = .now
+    var logDate: Date = AppPresentationDate.now
 
     // ── SwiftData Query: fetches all SavedFood sorted by most recently created ──
     @Query(sort: \SavedFood.createdAt, order: .reverse)
@@ -306,6 +306,7 @@ struct FoodBankView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("food-bank.food.\(food.id.uuidString)")
         .contextMenu {
             Button {
                 selectedLog = .standard(food)
