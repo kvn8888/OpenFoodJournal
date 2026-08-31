@@ -29,11 +29,15 @@ struct HistoryView: View {
                         Button { showDetail = true } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 5) {
-                                    Text(selectedDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                                    let dayLabel = selectedDate.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+                                    Text(dayLabel)
                                         .font(.headline)
+                                        .ofjNumericTextTransition(value: selectedDate.timeIntervalSinceReferenceDate, trigger: dayLabel)
                                     if let selectedCalories {
-                                        Text("\(NutritionFormat.number(selectedCalories)) kcal · \(Int((progress * 100).rounded()))% of goal · \(analytics.entries(on: selectedDate).count) entries")
+                                        let caption = "\(NutritionFormat.number(selectedCalories)) kcal · \(Int((progress * 100).rounded()))% of goal · \(analytics.entries(on: selectedDate).count) entries"
+                                        Text(caption)
                                             .font(.caption).foregroundStyle(.secondary)
+                                            .ofjNumericTextTransition(value: selectedCalories, trigger: caption)
                                     } else { Text("No entries recorded").font(.caption).foregroundStyle(.secondary) }
                                 }
                                 Spacer(minLength: 8)
