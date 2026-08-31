@@ -9,7 +9,7 @@ final class ScreenshotTests: XCTestCase {
             throw XCTSkip("Screenshot generation is an explicit CI action.")
         }
         continueAfterFailure = false
-        let supported: Set<String> = ["journal", "food-bank", "history", "assistant", "settings", "log-food"]
+        let supported: Set<String> = ["journal", "scan", "food-bank", "history", "assistant", "settings", "log-food"]
         let selection = environment["OFJ_SCREENSHOT_SCREENS"] ?? "all"
         let screens = selection == "all" ? supported : Set(selection.split(separator: ",").map(String.init))
         let appearance = environment["OFJ_SCREENSHOT_APPEARANCE"] ?? "light"
@@ -45,6 +45,42 @@ final class ScreenshotTests: XCTestCase {
         if screens.contains("journal") {
             XCTAssertTrue(app.navigationBars["August 2026"].waitForExistence(timeout: 10))
             capture("journal")
+        }
+        if screens.contains("scan") {
+            let add = app.descendants(matching: .any)["journal.add"]
+            XCTAssertTrue(add.waitForExistence(timeout: 10))
+            add.tap()
+            let scan = app.descendants(matching: .any)["journal.action.scan"]
+            XCTAssertTrue(scan.waitForExistence(timeout: 10))
+            scan.tap()
+            let preview = app.descendants(matching: .any)["scan.screenshot-preview"]
+            XCTAssertTrue(preview.waitForExistence(timeout: 10), "Expected camera-free screenshot mode")
+            for label in ["Scan Food", "Barcode", "Food Label", "Exit camera", "Capture photo",
+                          "Choose from photo library", "Turn torch on",
+                          "Set camera zoom to 0.5 times", "Set camera zoom to 1 time", "Set camera zoom to 2 times"] {
+                XCTAssertTrue(app.buttons[label].exists, "Missing camera control: \(label)")
+                XCTAssertTrue(app.buttons[label].isEnabled, "Unavailable preview control: \(label)")
+            }
+            // These actions only update local presentation state in this mode.
+            app.buttons["Barcode"].tap()
+            XCTAssertTrue(app.buttons["Barcode"].isSelected)
+            app.buttons["Food Label"].tap()
+            XCTAssertTrue(app.buttons["Food Label"].isSelected)
+            app.buttons["Scan Food"].tap()
+            app.buttons["Set camera zoom to 2 times"].tap()
+            XCTAssertTrue(app.buttons["Set camera zoom to 2 times"].isSelected)
+            app.buttons["Set camera zoom to 0.5 times"].tap()
+            XCTAssertTrue(app.buttons["Set camera zoom to 0.5 times"].isSelected)
+            app.buttons["Set camera zoom to 1 time"].tap()
+            app.buttons["Turn torch on"].tap()
+            XCTAssertTrue(app.buttons["Turn torch off"].waitForExistence(timeout: 5))
+            app.buttons["Turn torch off"].tap()
+            app.buttons["Capture photo"].tap()
+            app.buttons["Choose from photo library"].tap()
+            XCTAssertTrue(app.buttons["Exit camera"].isHittable, "Preview must not open hardware or permission UI")
+            capture("scan")
+            app.buttons["Exit camera"].tap()
+            XCTAssertTrue(app.buttons["journal.settings"].waitForExistence(timeout: 10))
         }
         if screens.contains("food-bank") || screens.contains("log-food") {
             tab("Food Bank")
