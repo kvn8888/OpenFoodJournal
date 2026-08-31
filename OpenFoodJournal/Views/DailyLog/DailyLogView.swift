@@ -15,15 +15,15 @@ struct DailyLogView: View {
 
     @Query private var journalLogs: [DailyLog]
 
-    @State private var selectedDate: Date = .now
+    @State private var selectedDate: Date = AppPresentationDate.now
     @State private var presentedSheet: DailyLogSheet?
     @State private var selectedEntry: NutritionEntry?
     // Captures the selected date when the user opens the scan camera,
     // so the result is logged to the correct day even if the calendar changes.
-    @State private var scanDate: Date = .now
+    @State private var scanDate: Date = AppPresentationDate.now
 
     init() {
-        _journalLogs = Query(JournalDayData.fetchDescriptor())
+        _journalLogs = Query(JournalDayData.fetchDescriptor(referenceDate: AppPresentationDate.now))
     }
 
     private var selectedMonthAndYear: String {
@@ -31,7 +31,7 @@ struct DailyLogView: View {
     }
 
     private var isShowingToday: Bool {
-        Calendar.current.isDateInToday(selectedDate)
+        Calendar.current.isDate(selectedDate, inSameDayAs: AppPresentationDate.now)
     }
 
     var body: some View {
@@ -232,7 +232,7 @@ struct DailyLogView: View {
 
     private func selectToday() {
         withAnimation(OFJMotion.standardSpring) {
-            selectedDate = .now
+            selectedDate = AppPresentationDate.now
         }
     }
 
