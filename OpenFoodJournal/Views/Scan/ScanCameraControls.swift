@@ -50,18 +50,22 @@ struct ScanCameraControls: View {
     let onLibrary: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            bottomLegibilityGradient
+        VStack(spacing: 0) {
+            topBar
 
-            VStack(spacing: 0) {
-                topBar
+            Spacer(minLength: OFJSpace.s20)
 
-                Spacer(minLength: OFJSpace.s20)
-
-                bottomControls
-            }
+            bottomControls
         }
         .foregroundStyle(.white)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Backgrounds are laid out in the un-inset container, so the fade
+        // reaches the home-indicator edge. A bottom-aligned ZStack sibling
+        // with `.ignoresSafeArea` still pins to the safe-area bottom — extra
+        // height grows upward and leaves a raw camera strip.
+        .background {
+            bottomLegibilityGradient
+        }
     }
 
     private var topBar: some View {
@@ -191,18 +195,20 @@ struct ScanCameraControls: View {
     }
 
     private var bottomLegibilityGradient: some View {
-        LinearGradient(
-            colors: [
-                .clear,
-                .black.opacity(0.22),
-                .black.opacity(0.72),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(height: 360)
-        .frame(maxWidth: .infinity)
-        .ignoresSafeArea(edges: .bottom)
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            LinearGradient(
+                colors: [
+                    .clear,
+                    .black.opacity(0.22),
+                    .black.opacity(0.72),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 360)
+            .frame(maxWidth: .infinity)
+        }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
