@@ -8,7 +8,7 @@ release state. It is not a required release check.
 ## Run it
 
 For a pull request targeting `testflight` or `app-store`, add the `ci:screenshots`
-label. The workflow captures all six screens in light and dark mode. New commits
+label. The workflow captures all seven screens in light and dark mode. New commits
 to a labeled PR refresh the gallery; unlabeled PRs skip the screenshot job.
 
 ```bash
@@ -24,7 +24,7 @@ Inputs are:
 
 | Input | Values | Default |
 | --- | --- | --- |
-| Screens | `all` or a comma-separated subset of `journal,food-bank,log-food,history,assistant,settings` | `all` |
+| Screens | `all` or a comma-separated subset of `journal,scan,food-bank,log-food,history,assistant,settings` | `all` |
 | Appearance | `both`, `light`, `dark` | `both` |
 | Device | `iPhone 17 Pro`, `iPhone 17 Pro Max` | `iPhone 17 Pro` |
 
@@ -65,6 +65,20 @@ are not retained.
 - Onboarding and What's New are dismissed by the existing UI-test setup. Automatic
   food-image generation and HealthKit export are off. Assistant requests use the
   existing local UI-test proxy; screenshot navigation never sends a model request.
+- `scan` opens through Journal's real add menu. The camera area is plain white
+  behind the unchanged production `ScanCameraControls`, including its normal
+  legibility gradient. All three scan modes and the 0.5×/1×/2× zoom controls are
+  visible. Zoom/torch changes are simulated locally; shutter and photo-library
+  actions are inert. No camera controller is created, no permissions are
+  requested, and no photo, barcode lookup, or AI request is made. The initial
+  capture uses Scan Food, 1×, torch off, and no retry button (no previous scan).
+
+To capture just the scan controls in both appearances:
+
+```bash
+gh workflow run screenshots.yml --repo kvn8888/OpenFoodJournal --ref YOUR_BRANCH \
+  -f screens=scan -f appearance=both
+```
 
 The existing generic UI tests keep their original fixture mode. Screenshot tests
 skip unless the runner receives `OFJ_CAPTURE_SCREENSHOTS=1`. The script uses
