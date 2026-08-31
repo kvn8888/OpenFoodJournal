@@ -28,7 +28,9 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(app.buttons["journal.settings"].waitForExistence(timeout: 15))
 
         func capture(_ screen: String) {
-            let attachment = XCTAttachment(screenshot: app.screenshot())
+            // Include system chrome as displayed, even when a sheet or a
+            // navigation destination owns a different app window.
+            let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
             attachment.name = "ofj--\(screen)--\(appearance)"
             attachment.lifetime = .keepAlways
             add(attachment)
