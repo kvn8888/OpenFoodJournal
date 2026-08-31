@@ -80,6 +80,9 @@ opening Xcode.
 This is visual evidence, not automatic pixel-diff regression testing. It does not
 validate real camera hardware, CloudKit delivery, live AI responses, or HealthKit.
 The supplied PNGs are app captures, not App Store marketing compositions.
+Each image captures the visible simulator screen, including system chrome, at
+the view's initial scroll position. Long views can be extended with additional
+named captures after scrolling; the workflow does not stitch a whole scroll view.
 
 To add a screen, extend the UI-test navigation and capture name, the script's
 `SCREENS` allowlist, and the workflow's input description. Add deterministic test
