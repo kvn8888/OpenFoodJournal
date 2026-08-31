@@ -10,6 +10,59 @@ import PhotosUI
 import Vision
 
 struct ScanCaptureView: View {
+    var logDate: Date = .now
+
+    var body: some View {
+        #if DEBUG
+        if ScreenshotConfiguration.isEnabled {
+            ScreenshotScanCaptureView()
+        } else {
+            LiveScanCaptureView(logDate: logDate)
+        }
+        #else
+        LiveScanCaptureView(logDate: logDate)
+        #endif
+    }
+}
+
+#if DEBUG
+/// Exercises the production controls without constructing CameraController,
+/// requesting permissions, opening Photos, or submitting an image for analysis.
+private struct ScreenshotScanCaptureView: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var mode = ScanMode.foodPhoto
+    @State private var zoom = CameraZoomLevel.one
+    @State private var torchOn = false
+
+    var body: some View {
+        ZStack {
+            Color.white
+                .ignoresSafeArea()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("White camera preview for screenshots")
+                .accessibilityIdentifier("scan.screenshot-preview")
+
+            ScanCameraControls(
+                mode: $mode,
+                zoomLevel: zoom,
+                availableZoomLevels: CameraZoomLevel.allCases,
+                torchOn: torchOn,
+                torchAvailable: true,
+                canRetry: false,
+                isBusy: false,
+                onExit: { dismiss() },
+                onRetry: {},
+                onZoom: { zoom = $0 },
+                onTorch: { torchOn.toggle() },
+                onCapture: {},
+                onLibrary: {}
+            )
+        }
+    }
+}
+#endif
+
+private struct LiveScanCaptureView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(OpenFoodFactsService.self) private var offService
