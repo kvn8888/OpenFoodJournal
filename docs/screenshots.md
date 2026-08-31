@@ -66,8 +66,8 @@ are not retained.
   food-image generation and HealthKit export are off. Assistant requests use the
   existing local UI-test proxy; screenshot navigation never sends a model request.
 - `scan` opens through Journal's real add menu. The camera area is plain white
-  behind the unchanged production `ScanCameraControls`, including its normal
-  legibility gradient. All three scan modes and the 0.5×/1×/2× zoom controls are
+  behind the unchanged production `ScanCameraControls`. All three scan modes and
+  the 0.5×/1×/2× zoom controls are
   visible. Zoom/torch changes are simulated locally; shutter and photo-library
   actions are inert. No camera controller is created, no permissions are
   requested, and no photo, barcode lookup, or AI request is made. The initial

@@ -50,16 +50,12 @@ struct ScanCameraControls: View {
     let onLibrary: () -> Void
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            bottomLegibilityGradient
+        VStack(spacing: 0) {
+            topBar
 
-            VStack(spacing: 0) {
-                topBar
+            Spacer(minLength: OFJSpace.s20)
 
-                Spacer(minLength: OFJSpace.s20)
-
-                bottomControls
-            }
+            bottomControls
         }
         .foregroundStyle(.white)
     }
@@ -188,23 +184,6 @@ struct ScanCameraControls: View {
             )
         }
         .padding(.horizontal, OFJSpace.s16)
-    }
-
-    private var bottomLegibilityGradient: some View {
-        LinearGradient(
-            colors: [
-                .clear,
-                .black.opacity(0.22),
-                .black.opacity(0.72),
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-        .frame(height: 360)
-        .frame(maxWidth: .infinity)
-        .ignoresSafeArea(edges: .bottom)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 }
 

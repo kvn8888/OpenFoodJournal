@@ -157,7 +157,7 @@ The optional `Generate Screenshots` workflow captures real simulator views using
 - The initial camera input is the physical wide-angle lens only. Selecting 0.5× swaps the single session input to the physical ultra-wide lens; 1× and 2× share the physical wide lens, with 2× applying a 2.0 device zoom factor. Never initialize a virtual triple/dual multi-camera input.
 - Place circular torch and photo-library controls to the left and right of the centered shutter.
 - The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
-- Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over a bottom legibility gradient. The discrete zoom capsules are the deliberate non-glass exception. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
+- Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over the live preview, with no bottom legibility gradient. The discrete zoom capsules are the deliberate non-glass exception. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
 - The full-screen preview uses `.resizeAspectFill`, so it must publish its normalized visible camera rectangle through `metadataOutputRectConverted(fromLayerRect:)`. Snapshot that rectangle at shutter time and crop the still before review, barcode detection, or AI submission; never show or analyze uncropped sensor content that was outside the viewfinder.
 - `ScanCameraModeDescriptor.supported` is the executable order/label contract; `OFJLayout` owns camera control geometry.
 
