@@ -267,10 +267,11 @@ enum OFJMotion {
 /// place. Passing the underlying number (instead of only the rendered string)
 /// lets SwiftUI choose the correct counting direction. Reduce Motion keeps the
 /// value update immediate without the rolling glyph animation.
-private struct OFJNumericTextTransitionModifier: ViewModifier {
+private struct OFJNumericTextTransitionModifier<Trigger: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let value: Double
+    let trigger: Trigger
 
     func body(content: Content) -> some View {
         content
@@ -279,7 +280,7 @@ private struct OFJNumericTextTransitionModifier: ViewModifier {
             )
             .animation(
                 reduceMotion ? nil : OFJMotion.standardFade,
-                value: value
+                value: trigger
             )
     }
 }
@@ -288,13 +289,22 @@ extension View {
     func ofjNumericTextTransition<Value: BinaryInteger>(
         value: Value
     ) -> some View {
-        modifier(OFJNumericTextTransitionModifier(value: Double(value)))
+        modifier(OFJNumericTextTransitionModifier(value: Double(value), trigger: value))
     }
 
     func ofjNumericTextTransition<Value: BinaryFloatingPoint>(
         value: Value
     ) -> some View {
-        modifier(OFJNumericTextTransitionModifier(value: Double(value)))
+        modifier(OFJNumericTextTransitionModifier(value: Double(value), trigger: value))
+    }
+
+    /// Composite captions/dates can change even when their primary number does
+    /// not. Animate only this text when its full content changes, using the
+    /// numeric value to retain the correct counting direction.
+    func ofjNumericTextTransition<Value: BinaryFloatingPoint, Trigger: Equatable>(
+        value: Value, trigger: Trigger
+    ) -> some View {
+        modifier(OFJNumericTextTransitionModifier(value: Double(value), trigger: trigger))
     }
 }
 

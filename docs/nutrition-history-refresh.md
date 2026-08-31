@@ -10,7 +10,7 @@ branch starts at TestFlight 1.4 (29), not at the unrelated Journal-icon work.
 - Nutrient drill-down: deterministic goal difference, 7/30-day chart, and food
   contributions. The selected historical date is retained through each level.
 - History: monthly calendar, selected-day link directly beneath it, Week/Month
-  only, one alphabetical tracked-micro row, and a consolidated comparison chart.
+  only, one alphabetical tracked-micro row (without edge-arrow controls), and a consolidated comparison chart.
 - Calendar cells use the reviewed 36pt ring, 2.5pt stroke and 16pt date number;
   progression uses the Journal's black/white, light green, green and D86669 red.
 - Day detail includes all recorded micros in an expandable section, including
@@ -21,6 +21,22 @@ branch starts at TestFlight 1.4 (29), not at the unrelated Journal-icon work.
 - Journal List rows explicitly use a clear background. History meal sections
   do not add a solid card fill or full-section material over the page gradient.
   Macro pills retain their own Liquid Glass surfaces.
+
+### Follow-up polish
+
+The Nutrition picker, date label and macro card now share one List row with
+explicit 10/14pt spacing; separate inset-grouped section/row gaps must not be
+reintroduced between them. History's selected-day label, composite totals caption
+and date-range label use the existing numeric text transition. A full-content
+trigger handles changes in entry count, goal percentage or range length even if
+the primary numeric value stays equal. Animation stays on text, respects Reduce
+Motion, and does not animate the enclosing glass card.
+
+Completed tracked containers now carry their existing `savedFoodID` into the
+journal entry, matching immediate tare logging. Images are resolved by this UUID
+from the Food Bank; nutrition remains the original tracking snapshot. No schema
+or image-byte migration is needed. Previously orphaned entries cannot be safely
+repaired from names alone and are not automatically relinked by this fix.
 
 ## Live-data contract
 

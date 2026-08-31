@@ -206,7 +206,10 @@ extension TrackedContainer {
             carbs: carbsPerServing * servings,
             fat: fatPerServing * servings,
             micronutrients: consumedMicronutrients ?? [:],
-            brand: foodBrand
+            brand: foodBrand,
+            // Keep the stable source link for icons and future Food Bank actions.
+            // Nutrition remains the tracking-time snapshot, not the current food.
+            savedFoodID: savedFoodID
         )
     }
 }

@@ -78,8 +78,11 @@ struct NutritionRangeControl: View {
         GlassEffectContainer(spacing: 8) {
             HStack(spacing: 8) {
                 arrow("chevron.left", direction: -1)
-                Text(NutritionDateRange.label(ending: date, days: days))
-                    .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                let rangeLabel = NutritionDateRange.label(ending: date, days: days)
+                Text(rangeLabel)
+                    .font(.subheadline.weight(.semibold))
+                    .ofjNumericTextTransition(value: date.timeIntervalSinceReferenceDate, trigger: rangeLabel)
+                    .frame(maxWidth: .infinity, minHeight: 44)
                     .glassEffect(.regular, in: .capsule)
                 arrow("chevron.right", direction: 1)
             }
@@ -295,10 +298,6 @@ struct NutritionMetricPicker: View {
     let macros: [NutritionMetric]
     let micros: [NutritionMetric]
     @Binding var selectedID: String
-    @State private var position = ScrollPosition(x: 0)
-    @State private var edges = Edges()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private struct Edges: Equatable { var left = false; var right = false; var column = 0 }
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal) {
@@ -310,21 +309,12 @@ struct NutritionMetricPicker: View {
                     Spacer()
                     Text("\(micros.count) tracked").font(.caption2)
                 }.foregroundStyle(.secondary)
-                HStack(spacing: 0) {
-                    arrow(forward: false)
-                    ScrollView(.horizontal) {
-                        GlassEffectContainer(spacing: 6) {
-                            LazyHStack(spacing: 6) { ForEach(micros) { chip($0).frame(width: 112) } }.padding(.vertical, 2)
-                        }
-                    }.scrollIndicators(.hidden).scrollPosition($position)
-                        .onScrollGeometryChange(for: Edges.self) { geometry in
-                            Edges(left: geometry.contentOffset.x > 2,
-                                  right: geometry.contentOffset.x + geometry.containerSize.width < geometry.contentSize.width - 2,
-                                  column: Int(max(0, geometry.contentOffset.x) / 118))
-                        } action: { _, value in edges = value }
-                        .frame(height: 52)
-                    arrow(forward: true)
-                }
+                ScrollView(.horizontal) {
+                    GlassEffectContainer(spacing: 6) {
+                        LazyHStack(spacing: 6) { ForEach(micros) { chip($0).frame(width: 112) } }
+                            .padding(.vertical, 2)
+                    }
+                }.scrollIndicators(.hidden).frame(height: 52)
             }
         }.onChange(of: (macros + micros).map(\.id), initial: true) { _, ids in
             if !ids.contains(selectedID), let first = macros.first { selectedID = first.id }
@@ -341,18 +331,7 @@ struct NutritionMetricPicker: View {
             .glassEffect(.regular.tint(selectedID == metric.id ? Color.accentColor.opacity(0.15) : .clear).interactive(), in: .capsule)
             .accessibilityAddTraits(selectedID == metric.id ? .isSelected : [])
     }
-    private func arrow(forward: Bool) -> some View {
-        let available = forward ? edges.right : edges.left
-        return Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                position.scrollTo(x: CGFloat(max(0, edges.column + (forward ? 2 : -2))) * 118)
-            }
-        } label: {
-            Image(systemName: forward ? "chevron.right" : "chevron.left").font(.caption.weight(.bold))
-                .frame(width: 44, height: 44).contentShape(.rect)
-        }.buttonStyle(.plain).opacity(available ? 1 : 0).disabled(!available).accessibilityHidden(!available)
-            .accessibilityLabel(forward ? "More micronutrients" : "Previous micronutrients")
-    }
+
 }
 
 struct NutritionCitation: View {

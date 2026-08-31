@@ -18,19 +18,24 @@ struct NutritionDetailView: View {
         NutritionLogQuery(from: NutritionDateRange.start(ending: selectedDate, days: days), through: selectedDate) { analytics in
             List {
                 Section {
-                    Picker("Period", selection: $selectedPeriod) {
-                        Text("Day").tag(NutritionStore.TimePeriod.daily)
-                        Text("Week").tag(NutritionStore.TimePeriod.weekly)
-                        Text("Month").tag(NutritionStore.TimePeriod.monthly)
-                    }.pickerStyle(.segmented)
-                    Text(NutritionDateRange.label(ending: selectedDate, days: days))
-                        .font(.caption).foregroundStyle(.secondary)
+                    // One List row: native section gaps/minimum row heights must
+                    // not accumulate between the date label and the glass card.
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Picker("Period", selection: $selectedPeriod) {
+                                Text("Day").tag(NutritionStore.TimePeriod.daily)
+                                Text("Week").tag(NutritionStore.TimePeriod.weekly)
+                                Text("Month").tag(NutritionStore.TimePeriod.monthly)
+                            }.pickerStyle(.segmented)
+                            let label = NutritionDateRange.label(ending: selectedDate, days: days)
+                            Text(label).font(.caption).foregroundStyle(.secondary)
+                                .ofjNumericTextTransition(value: selectedDate.timeIntervalSinceReferenceDate, trigger: label)
+                        }.padding(.horizontal, 16)
+                        NutritionSummaryCard(analytics: analytics, metrics: NutritionMetric.macros(goals: goals),
+                                             date: selectedDate, days: days) { selectedMetric = $0 }
+                    }
                 }.listRowBackground(Color.clear).listRowSeparator(.hidden)
-
-                Section {
-                    NutritionSummaryCard(analytics: analytics, metrics: NutritionMetric.macros(goals: goals),
-                                         date: selectedDate, days: days) { selectedMetric = $0 }
-                }.listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
 
                 ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
                     Section(category.rawValue) {

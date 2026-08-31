@@ -226,7 +226,12 @@ Every sheet must include:
   the Journal 80/95/105% palette. History month cells retain the owner's 36pt ring,
   2.5pt stroke and 16pt date numbers, with dotted future dates.
 - History's selected-day card belongs directly under the calendar. Week/Month only;
-  micros occupy one alphabetical horizontal row with overflow chevrons.
+  micros occupy one alphabetical horizontal row without edge-arrow controls;
+  partially visible chips imply horizontal scrolling.
+- Nutrition's picker/date/summary are one List row with explicit spacing, not
+  separate native sections. History date labels and composite captions use the
+  shared numeric transition with a full-content trigger; never animate the whole
+  glass card just to animate its text. Respect Reduce Motion.
 - `JournalEntryButton` owns tap and long-press actions for both Journal and History.
   Only the Journal's List wrapper adds swipe actions. Food-row fills are clear;
   do not cover the page gradient with a solid meal card or blanket row opacity.
