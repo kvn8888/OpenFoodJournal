@@ -39,6 +39,14 @@ struct SettingsView: View {
     @AppStorage(AIProviderSettings.anthropicFastModelKey) private var anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel
     @AppStorage(AIProviderSettings.anthropicSmartModelKey) private var anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel
     @AppStorage(AIProviderSettings.museSparkModelKey) private var museSparkModel: String = AIProviderSettings.defaultMuseSparkModel
+    @AppStorage(AIProviderSettings.openAICompatibleBaseURLKey) private var openAICompatibleBaseURL: String = AIProviderSettings.defaultOpenAICompatibleBaseURL
+    @AppStorage(AIProviderSettings.openAICompatibleLiteModelKey) private var openAICompatibleLiteModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleProModelKey) private var openAICompatibleProModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleEmojiModelKey) private var openAICompatibleEmojiModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleFastModelKey) private var openAICompatibleFastModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleSmartModelKey) private var openAICompatibleSmartModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleImageModelKey) private var openAICompatibleImageModel: String = AIProviderSettings.defaultOpenAICompatibleImageModel
+    @AppStorage(AIProviderSettings.foodIconImageProviderKey) private var foodIconImageProviderRawValue: String = FoodIconImageProvider.gemini.rawValue
     @AppStorage(AIProviderSettings.chatContextBudgetKey) private var chatContextBudgetRawValue: String = ChatContextBudget.balanced.rawValue
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
@@ -57,6 +65,7 @@ struct SettingsView: View {
     @State private var openAIAPIKeyInput: String = ""
     @State private var anthropicAPIKeyInput: String = ""
     @State private var museSparkAPIKeyInput: String = ""
+    @State private var openAICompatibleAPIKeyInput: String = ""
     @State private var exaAPIKeyInput: String = ""
     /// Whether the saved key is currently masked (showing dots instead of the key).
     @State private var isKeyMasked: Bool = true
@@ -69,6 +78,7 @@ struct SettingsView: View {
     @State private var hasOpenAIAPIKey: Bool = false
     @State private var hasAnthropicAPIKey: Bool = false
     @State private var hasMuseSparkAPIKey: Bool = false
+    @State private var hasOpenAICompatibleAPIKey: Bool = false
     @State private var hasExaAPIKey: Bool = false
     @State private var azureConnectionStatus: [AzureAssistantModel: String] = [:]
     @State private var azureConnectionsInProgress: Set<AzureAssistantModel> = []
@@ -185,7 +195,8 @@ struct SettingsView: View {
                     }
                     .accessibilityIdentifier("settings.scan-provider")
 
-                    if selectedAIProvider == .gemini {
+                    switch selectedAIProvider {
+                    case .gemini:
                         apiKeyRow(
                             providerName: "Gemini",
                             placeholder: "Paste your Gemini API key",
@@ -197,7 +208,7 @@ struct SettingsView: View {
                         Link(destination: URL(string: "https://aistudio.google.com/apikey")!) {
                             Label("Get Gemini API Key", systemImage: "safari")
                         }
-                    } else {
+                    case .openRouter:
                         apiKeyRow(
                             providerName: "OpenRouter",
                             placeholder: "Paste your OpenRouter API key",
@@ -231,11 +242,25 @@ struct SettingsView: View {
                         Text(selectedOpenRouterRoutingMode.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    case .openAICompatible:
+                        openAICompatibleEndpointRows
+
+                        TextField("Lite / label model", text: $openAICompatibleLiteModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Pro / estimate model", text: $openAICompatibleProModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Food emoji model", text: $openAICompatibleEmojiModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
                     }
                 } header: {
                     Text("Scan Provider")
                 } footer: {
-                    Text("Used for food scans, OCR, and generated food icons. API keys stay in Keychain and are never exported.")
+                    Text(scanProviderFooterText)
                 }
 
                 // MARK: Scanning
@@ -372,6 +397,16 @@ struct SettingsView: View {
                         Link(destination: URL(string: "https://dev.meta.ai")!) {
                             Label("Manage Meta Model API", systemImage: "safari")
                         }
+
+                    case .openAICompatible:
+                        openAICompatibleEndpointRows
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $openAICompatibleFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $openAICompatibleSmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
                     }
 
                     Picker("Context", selection: $chatContextBudgetRawValue) {
@@ -569,6 +604,27 @@ struct SettingsView: View {
                         }
                     }
 
+                    if useGeneratedFoodIconImages {
+                        Picker("Image Provider", selection: $foodIconImageProviderRawValue) {
+                            ForEach(FoodIconImageProvider.allCases) { provider in
+                                Text(provider.displayName).tag(provider.rawValue)
+                            }
+                        }
+                        .onChange(of: foodIconImageProviderRawValue) {
+                            if autoGenerateFoodEmojis {
+                                scanService.resumeQueuedFoodIconImageGeneration()
+                            }
+                        }
+
+                        if selectedFoodIconImageProvider == .openAICompatible {
+                            openAICompatibleEndpointRows
+
+                            TextField("Image model slug", text: $openAICompatibleImageModel)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
+                    }
+
                     LabeledContent(missingFoodIconLabel, value: missingFoodIconCount.formatted())
                     LabeledContent("Image Storage", value: generatedFoodIconStorageText)
 
@@ -607,7 +663,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Food Bank")
                 } footer: {
-                    Text("When icon generation and generated images are enabled, each newly saved Food Bank item is queued automatically. Generate Missing handles older items. Emoji mode uses the selected AI provider. Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails.")
+                    Text(foodBankFooterText)
                 }
 
                 // MARK: AI Usage
@@ -835,6 +891,7 @@ struct SettingsView: View {
             hasOpenAIAPIKey = KeychainService.hasOpenAIAPIKey
             hasAnthropicAPIKey = KeychainService.hasAnthropicAPIKey
             hasMuseSparkAPIKey = KeychainService.hasMuseSparkAPIKey
+            hasOpenAICompatibleAPIKey = KeychainService.hasOpenAICompatibleAPIKey
             hasExaAPIKey = KeychainService.hasExaAPIKey
             _ = GeminiCostAccumulator.current(in: modelContext)
             try? modelContext.save()
@@ -974,7 +1031,13 @@ struct SettingsView: View {
             return hasAPIKey
         case .openRouter:
             return hasOpenRouterAPIKey
+        case .openAICompatible:
+            return hasOpenAICompatibleAPIKey
         }
+    }
+
+    private var selectedFoodIconImageProvider: FoodIconImageProvider {
+        FoodIconImageProvider(rawValue: foodIconImageProviderRawValue) ?? .gemini
     }
 
     @ViewBuilder
@@ -985,6 +1048,38 @@ struct SettingsView: View {
             }
         }
         .pickerStyle(.segmented)
+    }
+
+    /// Base URL + API key rows shared by every place that can target a custom
+    /// OpenAI-compatible endpoint (scan, Assistant, food icon images). All
+    /// three intentionally share one credential and one base URL.
+    @ViewBuilder
+    private var openAICompatibleEndpointRows: some View {
+        apiKeyRow(
+            providerName: "OpenAI-Compatible",
+            placeholder: "Paste your API key",
+            input: $openAICompatibleAPIKeyInput,
+            hasKey: $hasOpenAICompatibleAPIKey,
+            account: KeychainService.openAICompatibleAPIKeyAccount
+        )
+
+        TextField("https://api.meta.ai/v1", text: $openAICompatibleBaseURL)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+
+        Link(destination: URL(string: "https://dev.meta.ai")!) {
+            Label("Get a Meta Model API Key", systemImage: "safari")
+        }
+    }
+
+    private var scanProviderFooterText: String {
+        switch selectedAIProvider {
+        case .gemini, .openRouter:
+            "Used for food scans, OCR, and generated food emojis. API keys stay in Keychain and are never exported."
+        case .openAICompatible:
+            "Works with any OpenAI-compatible /chat/completions endpoint — Meta Model API (Muse Spark), LiteLLM, or a self-hosted vLLM server. Enter the base URL ending in /v1; models must accept images for scans. API keys stay in Keychain and are never exported."
+        }
     }
 
     private var assistantFooterText: String {
@@ -999,6 +1094,8 @@ struct SettingsView: View {
             "Anthropic uses the Messages API. Signed thinking blocks and tool IDs are preserved for later turns; model slugs remain editable."
         case .museSpark:
             "Muse Spark uses Meta's OpenAI-compatible Model API. The model slug is runtime-editable so app updates are not required when Meta changes models."
+        case .openAICompatible:
+            "Connects to any OpenAI-compatible /chat/completions endpoint via the base URL above — Meta Model API, LiteLLM, OpenRouter-style gateways, or self-hosted vLLM. Fast and Smart slugs are runtime-editable."
         }
     }
 
@@ -1263,11 +1360,27 @@ struct SettingsView: View {
     }
 
     private var selectedFoodIconModeHasKey: Bool {
-        useGeneratedFoodIconImages ? hasAPIKey : selectedAIProviderHasKey
+        guard useGeneratedFoodIconImages else { return selectedAIProviderHasKey }
+        switch selectedFoodIconImageProvider {
+        case .gemini: return hasAPIKey
+        case .openAICompatible: return hasOpenAICompatibleAPIKey
+        }
     }
 
     private var selectedFoodIconModeKeyName: String {
-        useGeneratedFoodIconImages ? "Gemini" : selectedAIProvider.displayName
+        useGeneratedFoodIconImages
+            ? selectedFoodIconImageProvider.displayName
+            : selectedAIProvider.displayName
+    }
+
+    private var foodBankFooterText: String {
+        let base = "When icon generation and generated images are enabled, each newly saved Food Bank item is queued automatically. Generate Missing handles older items. Emoji mode uses the selected AI provider."
+        switch selectedFoodIconImageProvider {
+        case .gemini:
+            return base + " Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails."
+        case .openAICompatible:
+            return base + " Image mode calls the OpenAI-compatible /images/generations endpoint (e.g. Meta's Muse Image) with your key and stores compact 160 px thumbnails."
+        }
     }
 
     private var foodEmojiProgressText: String {
@@ -1486,6 +1599,14 @@ struct SettingsView: View {
                     anthropicFastModel: anthropicFastModel,
                     anthropicSmartModel: anthropicSmartModel,
                     museSparkModel: museSparkModel,
+                    openAICompatibleBaseURL: openAICompatibleBaseURL,
+                    openAICompatibleLiteModel: openAICompatibleLiteModel,
+                    openAICompatibleProModel: openAICompatibleProModel,
+                    openAICompatibleEmojiModel: openAICompatibleEmojiModel,
+                    openAICompatibleFastModel: openAICompatibleFastModel,
+                    openAICompatibleSmartModel: openAICompatibleSmartModel,
+                    openAICompatibleImageModel: openAICompatibleImageModel,
+                    foodIconImageProvider: foodIconImageProviderRawValue,
                     chatContextBudget: chatContextBudgetRawValue,
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
                     showJournalFoodImages: showJournalFoodImages,
@@ -1552,6 +1673,14 @@ struct SettingsView: View {
             anthropicFastModel = backup.appSettings.anthropicFastModel
             anthropicSmartModel = backup.appSettings.anthropicSmartModel
             museSparkModel = backup.appSettings.museSparkModel
+            openAICompatibleBaseURL = backup.appSettings.openAICompatibleBaseURL
+            openAICompatibleLiteModel = backup.appSettings.openAICompatibleLiteModel
+            openAICompatibleProModel = backup.appSettings.openAICompatibleProModel
+            openAICompatibleEmojiModel = backup.appSettings.openAICompatibleEmojiModel
+            openAICompatibleFastModel = backup.appSettings.openAICompatibleFastModel
+            openAICompatibleSmartModel = backup.appSettings.openAICompatibleSmartModel
+            openAICompatibleImageModel = backup.appSettings.openAICompatibleImageModel
+            foodIconImageProviderRawValue = backup.appSettings.foodIconImageProvider
             chatContextBudgetRawValue = backup.appSettings.chatContextBudget
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
             showJournalFoodImages = backup.appSettings.showJournalFoodImages
