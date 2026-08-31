@@ -15,9 +15,12 @@ to a labeled PR refresh the gallery; unlabeled PRs skip the screenshot job.
 gh pr edit PR_NUMBER --repo kvn8888/OpenFoodJournal --add-label ci:screenshots
 ```
 
-Once `screenshots.yml` is present on the repository's default branch, it also
-appears under **Actions → Generate Screenshots → Run workflow**. Select the source
-branch there. Inputs are:
+CLI dispatch on the feature branch was verified after the first labeled PR run
+registered the workflow. The command below can be used without merging a release.
+Once `screenshots.yml` is present on the repository's default branch, the web UI
+also exposes **Actions → Generate Screenshots → Run workflow**. Select the source
+branch there; use the CLI or PR label if the web button is not yet available.
+Inputs are:
 
 | Input | Values | Default |
 | --- | --- | --- |
