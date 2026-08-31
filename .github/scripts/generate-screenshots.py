@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-SCREENS = ("journal", "food-bank", "log-food", "history", "assistant", "settings")
+SCREENS = ("journal", "scan", "food-bank", "log-food", "history", "assistant", "settings")
 DEVICES = ("iPhone 17 Pro", "iPhone 17 Pro Max")
 
 
@@ -99,6 +99,8 @@ def main():
                 "fixtureDate": "2026-08-12T12:00:00Z", "locale": "en_US", "dynamicType": "Large",
                 "generatedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "complete": False, "images": [], "tests": {}}
+    if "scan" in selected:
+        manifest["scanPreview"] = "White placeholder; simulated zoom/torch; no camera, Photos, or inference access"
 
     def run(name, arguments, environment=None, check=True):
         print(f"SCREENSHOTS: {name}", flush=True)
