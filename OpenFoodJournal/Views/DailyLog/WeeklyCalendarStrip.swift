@@ -126,7 +126,7 @@ struct WeeklyCalendarStrip: View {
     /// Each entry represents one Sunday–Saturday week.
     private var weeks: [WeekID] {
         // Find the Sunday that starts the current week
-        guard let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: Date.now)?.start else {
+        guard let currentWeekStart = calendar.dateInterval(of: .weekOfYear, for: AppPresentationDate.now)?.start else {
             return []
         }
         // Generate weeksOfHistory weeks back + current week
@@ -224,7 +224,7 @@ struct WeeklyCalendarStrip: View {
     /// Computes calorie progress as a fraction of the daily goal.
     private func cellState(for date: Date) -> DayCellState {
         let startOfDate = calendar.startOfDay(for: date)
-        let today = calendar.startOfDay(for: .now)
+        let today = calendar.startOfDay(for: AppPresentationDate.now)
 
         // Future days get the dimmed state
         if startOfDate > today {
