@@ -43,6 +43,7 @@ struct MacrosApp: App {
         let isUITest = environment["OFJ_UI_TEST_MODE"] == "1"
         let isTest = environment["XCTestConfigurationFilePath"] != nil || isUITest
         #if DEBUG
+        ScreenshotConfiguration.prepare()
         if isUITest {
             let defaults = UserDefaults.standard
             defaults.set(true, forKey: "hasCompletedOnboarding")
@@ -122,32 +123,34 @@ struct MacrosApp: App {
         _userGoals = State(initialValue: goals)
         #if DEBUG
         if isUITest {
-            let thread = ChatThread(title: "Interrupted research")
-            container.mainContext.insert(thread)
-            let base = Date(timeIntervalSince1970: 1_700_200_000)
-            for index in 0..<6 {
-                let message = ChatMessage(
-                    role: index.isMultiple(of: 2) ? .user : .model,
-                    text: "Saved turn \(index + 1)",
-                    timestamp: base.addingTimeInterval(Double(index))
-                )
-                message.thread = thread
-                container.mainContext.insert(message)
-                let attachment = ChatAttachment(
-                    data: Data(repeating: 0x20, count: 60_000),
-                    mimeType: "application/pdf",
-                    filename: "context-\(index + 1).pdf"
-                )
-                attachment.message = message
-                container.mainContext.insert(attachment)
-                message.attachments?.append(attachment)
-                thread.messages?.append(message)
+            if !ScreenshotConfiguration.isEnabled {
+                let thread = ChatThread(title: "Interrupted research")
+                container.mainContext.insert(thread)
+                let base = Date(timeIntervalSince1970: 1_700_200_000)
+                for index in 0..<6 {
+                    let message = ChatMessage(
+                        role: index.isMultiple(of: 2) ? .user : .model,
+                        text: "Saved turn \(index + 1)",
+                        timestamp: base.addingTimeInterval(Double(index))
+                    )
+                    message.thread = thread
+                    container.mainContext.insert(message)
+                    let attachment = ChatAttachment(
+                        data: Data(repeating: 0x20, count: 60_000),
+                        mimeType: "application/pdf",
+                        filename: "context-\(index + 1).pdf"
+                    )
+                    attachment.message = message
+                    container.mainContext.insert(attachment)
+                    message.attachments?.append(attachment)
+                    thread.messages?.append(message)
+                }
+                let interrupted = ChatAgentRun(providerID: "gemini", modelID: "ui-test")
+                interrupted.thread = thread
+                container.mainContext.insert(interrupted)
+                thread.agentRuns?.append(interrupted)
+                try? container.mainContext.save()
             }
-            let interrupted = ChatAgentRun(providerID: "gemini", modelID: "ui-test")
-            interrupted.thread = thread
-            container.mainContext.insert(interrupted)
-            thread.agentRuns?.append(interrupted)
-            try? container.mainContext.save()
 
             _chatService = State(initialValue: ChatService(
                 modelContext: container.mainContext,
@@ -192,6 +195,16 @@ struct MacrosApp: App {
             // older CloudKit-backed rows migrate to append-only Turso events.
             try? container.mainContext.save()
         }
+        #if DEBUG
+        if ScreenshotConfiguration.isEnabled {
+            do {
+                try ScreenshotFixtures.seed(in: container.mainContext)
+            } catch {
+                // Never silently produce an empty gallery when fixture setup fails.
+                fatalError("Screenshot fixture setup failed: \(error)")
+            }
+        }
+        #endif
     }
 
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
