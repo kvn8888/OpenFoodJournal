@@ -53,7 +53,7 @@ struct LogFoodSheet: View {
 
     init(
         food: SavedFood,
-        logDate: Date = .now,
+        logDate: Date = AppPresentationDate.now,
         initialQuantity: Double? = nil,
         initialUnit: String? = nil
     ) {
@@ -314,7 +314,7 @@ struct LogFoodSheet: View {
                 Text("Log as")
                     .font(.headline)
                 Spacer()
-                Text("Suggested for \(Date.now.formatted(date: .omitted, time: .shortened))")
+                Text("Suggested for \(AppPresentationDate.now.formatted(date: .omitted, time: .shortened))")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
@@ -374,12 +374,12 @@ struct LogFoodSheet: View {
     }
 
     private var mealTypeForLog: MealType {
-        mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType()
+        mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType(for: AppPresentationDate.now)
     }
 
     private func applyDefaultMealTypeIfNeeded() {
         guard !didApplyDefaultMealType else { return }
-        selectedMealType = mealTimeSettings.mealType()
+        selectedMealType = mealTimeSettings.mealType(for: AppPresentationDate.now)
         didApplyDefaultMealType = true
     }
 
