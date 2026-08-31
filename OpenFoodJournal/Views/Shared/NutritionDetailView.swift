@@ -64,6 +64,7 @@ struct NutritionDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { dismiss() } label: { Label("Journal", systemImage: "chevron.left") }
+                    .labelStyle(.titleAndIcon)
             }
             NutritionRangeArrows(date: $selectedDate, days: days)
         }
