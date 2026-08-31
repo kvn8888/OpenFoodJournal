@@ -129,6 +129,10 @@ Each tab wraps its content in `NavigationStack`.
 
 Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `NavigationLink` and pushes `SettingsView` on the Journal's existing stack. `SettingsView` must not create a nested `NavigationStack`; previews or other standalone hosts wrap it when needed.
 
+### Screenshot evidence
+
+The optional `Generate Screenshots` workflow captures real simulator views using Debug-only sample data. Preserve `journal.settings` and `food-bank.food.<UUID>` accessibility identifiers when refactoring navigation. Calendar/date controls use `AppPresentationDate.now`, which remains real time outside explicitly enabled screenshot mode; do not move persistence or network-service clocks onto it. The six initial captures are Journal, Food Bank, Log Food, History, Assistant, and Settings, at Large text size in light/dark appearance. Extend the capture routes and deterministic fixtures together; never replace a production view with a mock screenshot-only layout. See `docs/screenshots.md`.
+
 ### Journal Calendar/Header
 
 - Owner-approved playground transfer: Journal and Food Bank food rows use the shared `FoodMacroPill` (110×40pt at standard text size, lavender/green/amber stacked values/G on neutral glass). Do not restore separate row chips or port the RGB/overlapping-circle experiments. Journal food-image slots use Food Bank's 51pt image/58pt column and a separate Settings toggle; hiding them removes their layout space. Missing images are placeholders, not generation triggers. At accessibility text sizes the pill moves below row content.
