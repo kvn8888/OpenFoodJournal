@@ -301,10 +301,11 @@ struct NutritionMetricPicker: View {
     let micros: [NutritionMetric]
     @Binding var selectedID: String
     @AppStorage(PinnedMicronutrientSettings.idsKey) private var pinnedIDsRaw = ""
+    @Namespace private var glassNamespace
 
     private var pinnedIDs: [String] { PinnedMicronutrientSettings.decode(pinnedIDsRaw) }
     private var pinnedMicros: [NutritionMetric] {
-        let lookup = Dictionary(uniqueKeysWithValues: micros.map { ($0.id, $0) })
+        let lookup = Dictionary(micros.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return pinnedIDs.compactMap { lookup[$0] }
     }
     private var unpinnedMicros: [NutritionMetric] {
@@ -318,17 +319,12 @@ struct NutritionMetricPicker: View {
                 GlassEffectContainer(spacing: 6) { HStack(spacing: 6) { ForEach(macros) { chip($0, allowsPinning: false) } } }
             }.scrollIndicators(.hidden)
             if !pinnedMicros.isEmpty {
-                chipRow(title: "Pinned", accessory: "\(pinnedMicros.count)", metrics: pinnedMicros)
+                chipRow(title: "Pinned", accessory: "\(pinnedMicros.count) pinned", metrics: pinnedMicros)
             }
-            if !micros.isEmpty {
-                HStack {
-                    Text("Micronutrients").font(.caption.weight(.semibold))
-                    Spacer()
-                    Text("\(micros.count) tracked").font(.caption2)
-                }.foregroundStyle(.secondary)
-                if !unpinnedMicros.isEmpty {
-                    chipScroller(unpinnedMicros)
-                }
+            // Each header counts only the row beneath it, so pinning everything
+            // cannot leave a "Micronutrients" heading standing over empty space.
+            if !unpinnedMicros.isEmpty {
+                chipRow(title: "Micronutrients", accessory: "\(unpinnedMicros.count) tracked", metrics: unpinnedMicros)
             }
         }
         .sensoryFeedback(.impact(flexibility: .soft), trigger: pinnedIDsRaw)
@@ -365,7 +361,7 @@ struct NutritionMetricPicker: View {
                     Image(systemName: "pin.fill").font(.caption2)
                 }
                 Text(metric.name).font(.caption.weight(selectedID == metric.id ? .semibold : .regular))
-                    .lineLimit(2).multilineTextAlignment(.center)
+                    .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
             }
             .padding(.horizontal, 10)
             .frame(minWidth: 58, minHeight: 44).frame(maxWidth: .infinity)
@@ -378,6 +374,7 @@ struct NutritionMetricPicker: View {
 
         if allowsPinning {
             button
+                .glassEffectID(metric.id, in: glassNamespace)
                 .contextMenu {
                     if pinned {
                         Button { unpin(metric.id) } label: { Label("Unpin", systemImage: "pin.slash") }
