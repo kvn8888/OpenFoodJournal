@@ -43,7 +43,7 @@ struct CalendarGridView: View {
 
     /// Pre-computed array of MonthIDs from ~2 years ago to the current month.
     private var months: [MonthID] {
-        let currentMonth = startOfMonth(for: Date.now)
+        let currentMonth = startOfMonth(for: AppPresentationDate.now)
         return (-monthsOfHistory...0).compactMap { offset in
             guard let month = calendar.date(byAdding: .month, value: offset, to: currentMonth) else {
                 return nil
@@ -63,7 +63,7 @@ struct CalendarGridView: View {
 
     /// Whether the displayed month is the current month
     private var isCurrentMonth: Bool {
-        calendar.isDate(displayedMonth, equalTo: .now, toGranularity: .month)
+        calendar.isDate(displayedMonth, equalTo: AppPresentationDate.now, toGranularity: .month)
     }
 
     var body: some View {
@@ -205,7 +205,7 @@ struct CalendarGridView: View {
     /// A single day cell with a progress ring and day number.
     private func dayCell(for date: Date) -> some View {
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
-        let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: .now)
+        let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: AppPresentationDate.now)
         let progress = progressForDay(date)
 
         return Button {
