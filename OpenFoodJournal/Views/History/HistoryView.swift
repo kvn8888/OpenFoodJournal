@@ -33,12 +33,12 @@ struct HistoryView: View {
                                     Text(dayLabel)
                                         .font(.headline)
                                         .ofjNumericTextTransition(value: selectedDate.timeIntervalSinceReferenceDate, trigger: dayLabel)
-                                    if let selectedCalories {
-                                        let caption = "\(NutritionFormat.number(selectedCalories)) kcal · \(Int((progress * 100).rounded()))% of goal · \(analytics.entries(on: selectedDate).count) entries"
-                                        Text(caption)
-                                            .font(.caption).foregroundStyle(.secondary)
-                                            .ofjNumericTextTransition(value: selectedCalories, trigger: caption)
-                                    } else { Text("No entries recorded").font(.caption).foregroundStyle(.secondary) }
+                                    let caption = selectedCalories.map {
+                                        "\(NutritionFormat.number($0)) kcal · \(Int((progress * 100).rounded()))% of goal · \(analytics.entries(on: selectedDate).count) entries"
+                                    } ?? "No entries recorded"
+                                    Text(caption)
+                                        .font(.caption).foregroundStyle(.secondary)
+                                        .ofjNumericTextTransition(value: selectedCalories ?? 0, trigger: caption)
                                 }
                                 Spacer(minLength: 8)
                                 Image(systemName: "chevron.right").foregroundStyle(.secondary)
