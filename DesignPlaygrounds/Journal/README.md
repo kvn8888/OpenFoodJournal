@@ -4,6 +4,30 @@ A disposable **native macOS SwiftUI mock** for fine-tuning the Journal like CSS.
 The layout, styling, sample food, and previews live in **JournalDesign.swift**.
 It intentionally duplicates presentation. It does not import the iPhone app.
 
+**Design history and next screen:** see [DESIGN_HISTORY.md](DESIGN_HISTORY.md)
+for named Git checkpoints, safe compare/export commands, and the separate
+`NutritionDesign.swift` playground. Use Designs → Nutrition when running on Mac,
+or open that file directly in Canvas.
+
+**History concept:** open `HistoryDesign.swift` in Canvas (My Mac), or choose
+Designs → History (⌥⌘3) in the running playground. This separate mock explores
+the monthly calendar → selected-day link → one range/nutrient chart
+hierarchy. Its calendar reuses `JournalStyle` ring sizing and progress colors.
+Micronutrients scroll horizontally in one alphabetical row; edge chevrons page through
+the choices and disappear when that edge is reached. All 37 sample micros can
+be selected, including zero-goal nutrients, without importing the app's store.
+Week/Month use trailing 7/30-day windows; Custom has been removed. The glass
+range label is read-only, with arrows for navigation up to the fixed sample today.
+Chart bars occupy explicit day slots so UTC fixtures cannot shift into the
+previous local day or draw outside the plot; missing dates retain empty slots.
+The sample has missing days: chart averages use recorded values, and coverage
+is shown explicitly. No-data days are not silently treated as zero intake.
+This is not yet a change to the shipping History screen.
+
+Day-detail food entries reuse `JournalFoodRow` from `JournalDesign.swift` rather
+than a copied layout: the same icon placeholder, brand/name, calories/time and
+always-visible macro pill. Editing that shared row updates both playgrounds.
+
 ## Open and edit
 
 1. This checkout is already prepared. On a fresh checkout, first run
