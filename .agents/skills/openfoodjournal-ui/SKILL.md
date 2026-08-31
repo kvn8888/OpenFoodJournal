@@ -217,6 +217,20 @@ Every sheet must include:
 
 ## Component Catalog
 
+### Nutrition and History (2026-08-30)
+
+- Port the approved concepts using native iOS navigation, real date-scoped queries,
+  and shared `NutritionAnalyticsComponents`; never ship playground fixtures.
+- Nutrition uses a 104pt/10pt rounded calorie ring beside macro bars; macro identity
+  colors remain until over goal, then D86669. Calorie/micro goal progression uses
+  the Journal 80/95/105% palette. History month cells retain the owner's 36pt ring,
+  2.5pt stroke and 16pt date numbers, with dotted future dates.
+- History's selected-day card belongs directly under the calendar. Week/Month only;
+  micros occupy one alphabetical horizontal row with overflow chevrons.
+- `JournalEntryButton` owns tap and long-press actions for both Journal and History.
+  Only the Journal's List wrapper adds swipe actions. Food-row fills are clear;
+  do not cover the page gradient with a solid meal card or blanket row opacity.
+
 ### Shared Components (Views/Shared/)
 | Component | Purpose | Size/Shape |
 |-----------|---------|------------|

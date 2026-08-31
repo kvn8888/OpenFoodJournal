@@ -69,7 +69,7 @@ struct DailyLogView: View {
                     // Macro summary card — tap to view full nutrition details
                     MacroSummaryBar(totals: totals, goals: goals)
                         .background {
-                            NavigationLink("", destination: NutritionDetailView())
+                            NavigationLink("", destination: NutritionDetailView(referenceDate: selectedDate))
                                 .opacity(0)
                         }
                         .listRowBackground(Color.clear)
@@ -241,7 +241,7 @@ struct DailyLogView: View {
     }
 }
 
-private struct JournalCalorieBackground: View {
+struct JournalCalorieBackground: View {
     let state: OFJColor.JournalCalorieState
     @Environment(\.colorScheme) private var colorScheme
 

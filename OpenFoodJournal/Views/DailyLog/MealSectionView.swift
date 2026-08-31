@@ -20,13 +20,9 @@ struct MealSectionView: View {
         if !entries.isEmpty {
             Section {
                 ForEach(entries) { entry in
-                    Button {
-                        onSelect(entry)
-                    } label: {
-                        EntryRowView(entry: entry, onDelete: { onDelete(entry) })
-                    }
-                    .buttonStyle(.plain)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    JournalEntryButton(entry: entry, onSelect: onSelect, onDelete: onDelete)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                        .listRowBackground(Color.clear)
                     // Swipe left (trailing) — Delete action (moved here from EntryRowView
                     // to avoid double swipeActions registration which causes gesture lag)
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -51,40 +47,7 @@ struct MealSectionView: View {
                         }
                         .tint(.green)
                     }
-                    // Swipe left (trailing) — Delete, already defined in EntryRowView,
-                    // rendered here because DailyLogView now uses a List (where
-                    // swipeActions fire correctly).
-                    .contextMenu {
-                        // Edit — opens the full edit sheet
-                        Button {
-                            onSelect(entry)
-                        } label: {
-                            Label("Edit", systemImage: "pencil")
-                        }
 
-                        Button {
-                            saveToFoodBank(entry)
-                        } label: {
-                            Label("Save to Food Bank", systemImage: "tray.and.arrow.down")
-                        }
-
-                        // Quick info — shows macros inline
-                        Button {} label: {
-                            Label("\(Int(entry.calories)) kcal • P\(Int(entry.protein))g C\(Int(entry.carbs))g F\(Int(entry.fat))g", systemImage: "info.circle")
-                        }
-                        .disabled(true)
-
-                        Divider()
-
-                        // Delete
-                        Button(role: .destructive) {
-                            onDelete(entry)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    } preview: {
-                        EntryContextMenuPreview(entry: entry)
-                    }
                 }
             } header: {
                 HStack {
@@ -121,6 +84,47 @@ struct MealSectionView: View {
         case .failed:
             foodBankMessage = "Could not save this food. Please try again."
         }
+    }
+}
+
+
+/// Tap and long-press behavior shared by Journal and History. Swipe actions
+/// intentionally live ONLY in MealSectionView, the Journal's List wrapper.
+struct JournalEntryButton: View {
+    @Environment(NutritionStore.self) private var nutritionStore
+    @State private var foodBankMessage: String?
+    let entry: NutritionEntry
+    let onSelect: (NutritionEntry) -> Void
+    let onDelete: (NutritionEntry) -> Void
+
+    var body: some View {
+        Button { onSelect(entry) } label: {
+            EntryRowView(entry: entry, onDelete: { onDelete(entry) })
+        }
+        .buttonStyle(.plain)
+        // Hiding the List's overall background is not enough: each row otherwise
+        // paints an opaque system fill over the selected-day gradient.
+        .listRowBackground(Color.clear)
+        .contextMenu {
+            Button { onSelect(entry) } label: { Label("Edit", systemImage: "pencil") }
+            Button {
+                switch nutritionStore.saveJournalEntryToFoodBank(entry) {
+                case .saved(let food): foodBankMessage = "Saved \(food.name) to Food Bank."
+                case .alreadySaved(let food): foodBankMessage = "\(food.name) is already saved. No duplicate was created."
+                case .failed: foodBankMessage = "Could not save this food. Please try again."
+                }
+            } label: { Label("Save to Food Bank", systemImage: "tray.and.arrow.down") }
+            Button {} label: {
+                Label("\(Int(entry.calories)) kcal • P\(Int(entry.protein))g C\(Int(entry.carbs))g F\(Int(entry.fat))g", systemImage: "info.circle")
+            }.disabled(true)
+            Divider()
+            Button(role: .destructive) { onDelete(entry) } label: { Label("Delete", systemImage: "trash") }
+        } preview: { EntryContextMenuPreview(entry: entry) }
+        .alert("Food Bank", isPresented: Binding(
+            get: { foodBankMessage != nil }, set: { if !$0 { foodBankMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) { foodBankMessage = nil }
+        } message: { Text(foodBankMessage ?? "") }
     }
 }
 

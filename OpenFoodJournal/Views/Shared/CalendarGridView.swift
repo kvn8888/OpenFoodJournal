@@ -23,8 +23,7 @@ private struct MonthID: Hashable, Identifiable {
 struct CalendarGridView: View {
     // ── Bindings & Environment ────────────────────────────────────
     @Binding var selectedDate: Date
-    @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(UserGoals.self) private var goals
+    let calorieProgressByDate: [Date: Double]
 
     // ── Local State ───────────────────────────────────────────────
     @State private var scrolledMonth: MonthID.ID?
@@ -77,10 +76,22 @@ struct CalendarGridView: View {
 
             // Horizontally scrollable month grids with snap-to-month
             monthScroller
+
+            Divider()
+            HStack(spacing: 10) {
+                legend("Below", .primary)
+                legend("Near", .green.opacity(0.5))
+                legend("Met", .green)
+                legend("Over", OFJColor.calendarOverGoalRGB.color)
+                legend("No log", .secondary.opacity(0.25))
+            }
         }
         .padding()
         .glassEffect(in: .rect(cornerRadius: 20))
         .padding(.horizontal)
+        .onChange(of: selectedDate) { _, date in
+            scrolledMonth = startOfMonth(for: date).timeIntervalSinceReferenceDate
+        }
         .onAppear {
             let initial = startOfMonth(for: selectedDate)
             scrolledMonth = initial.timeIntervalSinceReferenceDate
@@ -91,14 +102,19 @@ struct CalendarGridView: View {
 
     /// Shows "March 2026" with left/right arrows to navigate months.
     private var monthHeader: some View {
-        HStack {
+        GlassEffectContainer(spacing: 8) {
+          HStack {
             Button {
                 navigateMonth(by: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
+            .disabled(displayedMonth <= (months.first?.startDate ?? displayedMonth))
+            .accessibilityLabel("Previous month")
 
             Spacer()
 
@@ -115,11 +131,22 @@ struct CalendarGridView: View {
             } label: {
                 Image(systemName: "chevron.right")
                     .font(.body.weight(.semibold))
+                    .frame(width: 44, height: 44)
             }
             .buttonStyle(.plain)
+            .glassEffect(.regular.interactive(), in: .circle)
             .disabled(isCurrentMonth)
+            .accessibilityLabel("Next month")
+          }
         }
         .padding(.horizontal, 4)
+    }
+
+    private func legend(_ label: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Circle().fill(color).frame(width: 5, height: 5)
+            Text(label).font(.caption2)
+        }.foregroundStyle(.secondary)
     }
 
     // MARK: - Weekday Header
@@ -129,8 +156,7 @@ struct CalendarGridView: View {
         LazyVGrid(columns: columns, spacing: 0) {
             ForEach(Array(weekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                 Text(symbol)
-                    .font(.caption2)
-                    .fontWeight(.semibold)
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
             }
@@ -153,6 +179,7 @@ struct CalendarGridView: View {
         }
         .scrollTargetBehavior(.viewAligned)
         .scrollPosition(id: $scrolledMonth)
+        .frame(height: 6 * 44 + 5 * 6)
     }
 
     // MARK: - Month Grid
@@ -167,7 +194,7 @@ struct CalendarGridView: View {
                     dayCell(for: date)
                 } else {
                     Color.clear
-                        .frame(height: 36)
+                        .frame(height: 44)
                 }
             }
         }
@@ -177,56 +204,40 @@ struct CalendarGridView: View {
 
     /// A single day cell with a progress ring and day number.
     private func dayCell(for date: Date) -> some View {
-        let isToday = calendar.isDateInToday(date)
         let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
         let isFuture = calendar.startOfDay(for: date) > calendar.startOfDay(for: .now)
         let progress = progressForDay(date)
 
         return Button {
             guard !isFuture else { return }
-            withAnimation(.spring(duration: 0.3)) {
-                selectedDate = date
-            }
+            selectedDate = date
         } label: {
             ZStack {
-                // Background track ring
+                Circle().stroke(.secondary.opacity(isFuture ? 0.28 : 0.15),
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: isFuture ? [2.5, 4] : []))
                 if !isFuture {
-                    Circle()
-                        .stroke(.secondary.opacity(0.15), lineWidth: 2)
-                }
-
-                // Progress ring — fills clockwise from top
-                if progress > 0 && !isFuture {
-                    Circle()
-                        .trim(from: 0, to: min(progress, 1.0))
-                        .stroke(
-                            ringColor(for: progress),
-                            style: StrokeStyle(lineWidth: 2, lineCap: .round)
-                        )
+                    Circle().trim(from: 0, to: min(max(progress, 0), 1))
+                        .stroke(OFJColor.journalCalorieState(for: progress).ringColor,
+                                style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                         .rotationEffect(.degrees(-90))
                 }
-
-                // Selected day background
-                if isSelected {
-                    Circle()
-                        .fill(.regularMaterial)
-                        .padding(2)
-                }
-
-                // Day number
                 Text("\(calendar.component(.day, from: date))")
-                    .font(.caption)
-                    .fontWeight(isSelected || isToday ? .bold : .regular)
-                    .foregroundStyle(
-                        isFuture ? Color.secondary.opacity(0.4) :
-                        isSelected ? Color.primary :
-                        isToday ? Color.blue : Color.primary
-                    )
+                    .font(.system(size: 16, weight: isSelected ? .bold : .regular))
+                    .foregroundStyle(isFuture ? Color.secondary.opacity(0.42) : isSelected ? .primary : .secondary)
+                    .transaction { $0.animation = nil }
             }
-            .frame(height: 36)
-        }
-        .buttonStyle(.plain)
-        .disabled(isFuture)
+            .frame(width: 36, height: 36)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background {
+                RoundedRectangle(cornerRadius: 12).fill(.regularMaterial)
+                    .overlay { RoundedRectangle(cornerRadius: 12).stroke(.primary.opacity(0.08)) }
+                    .opacity(isSelected ? 1 : 0)
+            }
+            .contentShape(.rect(cornerRadius: 12))
+        }.buttonStyle(.plain).disabled(isFuture)
+            .accessibilityLabel(date.formatted(.dateTime.month(.wide).day()))
+            .accessibilityValue(isFuture ? "Future date, unavailable" : "\(Int((progress * 100).rounded())) percent of calorie goal")
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     // MARK: - Navigation
@@ -235,6 +246,7 @@ struct CalendarGridView: View {
     private func navigateMonth(by value: Int) {
         guard let newMonth = calendar.date(byAdding: .month, value: value, to: displayedMonth) else { return }
         let target = startOfMonth(for: newMonth)
+        guard months.contains(where: { $0.startDate == target }) else { return }
         withAnimation(.spring(duration: 0.3)) {
             scrolledMonth = target.timeIntervalSinceReferenceDate
         }
@@ -275,26 +287,8 @@ struct CalendarGridView: View {
         return days
     }
 
-    /// Calculates calorie progress (0.0–1.0+) for a given day
+    /// Shared live values from History's query; never fetch inside each cell.
     private func progressForDay(_ date: Date) -> Double {
-        guard goals.dailyCalories > 0,
-              let log = nutritionStore.fetchLog(for: date) else {
-            return 0
-        }
-        let totalCalories = log.safeEntries.reduce(0.0) { $0 + $1.calories }
-        return totalCalories / goals.dailyCalories
-    }
-
-    /// Maps a progress fraction to a color using the same thresholds as WeeklyCalendarStrip.
-    /// < 50% red, 50-80% yellow, 80-95% light green, 95-105% green, 105-120% orange, >120% purple
-    private func ringColor(for progress: Double) -> Color {
-        switch progress {
-        case ..<0.50:      return .red
-        case 0.50..<0.80:  return .yellow
-        case 0.80..<0.95:  return Color.green.opacity(0.6)
-        case 0.95..<1.05:  return .green
-        case 1.05..<1.20:  return .orange
-        default:           return .purple
-        }
+        calorieProgressByDate[calendar.startOfDay(for: date)] ?? 0
     }
 }

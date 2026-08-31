@@ -391,7 +391,9 @@ private struct JournalMealSection: View {
     }
 }
 
-private struct JournalFoodRow: View {
+// Shared by Journal and History day detail in this isolated playground.
+// Keep one presentation so icon, typography and macro-pill tuning cannot drift.
+struct JournalFoodRow: View {
     let food: SampleFood
 
     var body: some View {
@@ -606,7 +608,7 @@ private struct SampleNutrient: Identifiable {
     var id: String { name }
 }
 
-private struct SampleFood: Identifiable {
+struct SampleFood: Identifiable {
     let name: String
     let brand: String
     let calories: Int
