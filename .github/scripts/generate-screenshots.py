@@ -51,6 +51,7 @@ def export_images(export_root, output, selected, appearance):
                             "sha256": hashlib.sha256(data).hexdigest()})
     if {record["screen"] for record in records} != set(selected):
         raise ValueError("Some requested screenshots are missing from the test attachments")
+    records.sort(key=lambda record: selected.index(record["screen"]))
     return records
 
 
