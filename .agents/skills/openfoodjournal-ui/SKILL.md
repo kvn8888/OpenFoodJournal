@@ -131,7 +131,7 @@ Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `Na
 
 ### Screenshot evidence
 
-The optional `Generate Screenshots` workflow captures real simulator views using Debug-only sample data. Preserve `journal.settings` and `food-bank.food.<UUID>` accessibility identifiers when refactoring navigation. Calendar/date controls use `AppPresentationDate.now`, which remains real time outside explicitly enabled screenshot mode; do not move persistence or network-service clocks onto it. The six initial captures are Journal, Food Bank, Log Food, History, Assistant, and Settings, at Large text size in light/dark appearance. Extend the capture routes and deterministic fixtures together; never replace a production view with a mock screenshot-only layout. See `docs/screenshots.md`.
+The optional `Generate Screenshots` workflow captures real simulator views using Debug-only sample data. Preserve `journal.settings` and `food-bank.food.<UUID>` accessibility identifiers when refactoring navigation. Calendar/date controls use `AppPresentationDate.now`, which remains real time outside explicitly enabled screenshot mode; do not move persistence or network-service clocks onto it. The seven captures are Journal, Scan, Food Bank, Log Food, History, Assistant, and Settings, at Large text size in light/dark appearance. Extend the capture routes and deterministic fixtures together; never replace a production view with a mock screenshot-only layout. See `docs/screenshots.md`.
 
 ### Journal Calendar/Header
 
@@ -148,6 +148,8 @@ The optional `Generate Screenshots` workflow captures real simulator views using
 - Calendar progress is required value input from `DailyLogView`'s shared query-backed `JournalDayTotals`, also used by the macro bar. Do not add per-cell store fetches, `@State` total caches, or `.id` refresh hacks. Animate only the ring's progress/color on data changes, respect Reduce Motion, and preserve the nonanimated date-number weight transition.
 
 ### Scan Camera
+
+- In Debug screenshot mode only, `ScanCaptureView` selects a white preview with the same production `ScanCameraControls` and simulated zoom/torch state. It never constructs `CameraController`; capture/library callbacks are inert. Release and ordinary Debug launches still use the unchanged live camera implementation. `journal.add` and `journal.action.scan` provide nonvisual navigation hooks for the capture test.
 
 - The live camera is the mode-selection surface; do not add a separate full-screen mode chooser.
 - Show exactly three labeled rectangular controls in this order: Scan Food, Barcode, Food Label.
