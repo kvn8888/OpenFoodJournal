@@ -9,7 +9,7 @@ final class ScreenshotTests: XCTestCase {
             throw XCTSkip("Screenshot generation is an explicit CI action.")
         }
         continueAfterFailure = false
-        let supported: Set<String> = ["journal", "scan", "food-bank", "history", "assistant", "settings", "log-food"]
+        let supported: Set<String> = ["journal", "nutrition", "scan", "food-bank", "history", "assistant", "settings", "log-food"]
         let selection = environment["OFJ_SCREENSHOT_SCREENS"] ?? "all"
         let screens = selection == "all" ? supported : Set(selection.split(separator: ",").map(String.init))
         let appearance = environment["OFJ_SCREENSHOT_APPEARANCE"] ?? "light"
@@ -45,6 +45,18 @@ final class ScreenshotTests: XCTestCase {
         if screens.contains("journal") {
             XCTAssertTrue(app.navigationBars["August 2026"].waitForExistence(timeout: 10))
             capture("journal")
+        }
+        if screens.contains("nutrition") {
+            // The macro summary card carries an invisible NavigationLink to the
+            // Nutrition page, so tapping the row is what opens it.
+            let summary = app.descendants(matching: .any)["journal.nutrition"]
+            XCTAssertTrue(summary.waitForExistence(timeout: 10), "Missing journal macro summary")
+            summary.tap()
+            XCTAssertTrue(app.navigationBars["Nutrition"].waitForExistence(timeout: 10))
+            capture("nutrition")
+            // NutritionDetailView hides the system back button for a custom one.
+            app.buttons["Journal"].firstMatch.tap()
+            XCTAssertTrue(app.buttons["journal.settings"].waitForExistence(timeout: 10))
         }
         if screens.contains("scan") {
             let add = app.descendants(matching: .any)["journal.add"]

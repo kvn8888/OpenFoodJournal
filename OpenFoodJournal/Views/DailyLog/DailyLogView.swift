@@ -72,6 +72,7 @@ struct DailyLogView: View {
                             NavigationLink("", destination: NutritionDetailView(referenceDate: selectedDate))
                                 .opacity(0)
                         }
+                        .accessibilityIdentifier("journal.nutrition")
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                         .listRowInsets(OFJLayout.standardListRowInsets)
