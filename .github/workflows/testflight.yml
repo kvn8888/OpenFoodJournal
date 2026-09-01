@@ -244,14 +244,27 @@ jobs:
             --timeout 20m \
             --output json
 
-      - name: Upload and distribute to internal TestFlight
+      - name: Upload and distribute to TestFlight
         run: |
+          groups="$(jq -r '.testFlightGroupID' ci/release-config.json)"
+          external="$(jq -r '.externalTestFlightGroupID // ""' ci/release-config.json)"
+          if [[ -n "${external}" && "${external}" != "null" ]]; then
+            groups="${groups},${external}"
+          fi
+
+          # Apple requires Beta App Review before an external group can install,
+          # so ask for it here. asc skips the submission when no external group
+          # was added, which keeps this a no-op while externalTestFlightGroupID
+          # is empty, and it reuses an existing submission rather than creating
+          # a second one.
           asc publish testflight \
             --app "${{ steps.release.outputs.app_id }}" \
             --ipa "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
-            --group "$(jq -r '.testFlightGroupID' ci/release-config.json)" \
+            --group "${groups}" \
             --test-notes "$(cat "${RUNNER_TEMP}/what-to-test.txt")" \
             --locale "${{ steps.release.outputs.locale }}" \
+            --submit \
+            --confirm \
             --wait \
             --timeout 45m \
             --output json \

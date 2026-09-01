@@ -1,0 +1,15 @@
+App: OpenFoodJournal
+Version: {{VERSION}}
+
+The current public description is between the markers. Keep what is still true,
+rewrite what this release changes, and drop anything the evidence contradicts.
+
+<<<CURRENT_DESCRIPTION
+{{CURRENT_DESCRIPTION}}
+CURRENT_DESCRIPTION
+
+Changes shipping in this version:
+
+{{EVIDENCE}}
+
+Return the JSON object only. No prose, no code fence.

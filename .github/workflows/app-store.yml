@@ -32,12 +32,14 @@ jobs:
     timeout-minutes: 10
     env:
       GH_TOKEN: ${{ github.token }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
     outputs:
       build_id: ${{ steps.promotion.outputs.build_id }}
       build_number: ${{ steps.promotion.outputs.build_number }}
       tag: ${{ steps.promotion.outputs.tag }}
       version: ${{ steps.promotion.outputs.version }}
+      store_metadata_source: ${{ steps.store_metadata.outputs.source }}
 
     steps:
       - name: Check out App Store source and tags
@@ -76,6 +78,78 @@ jobs:
           printf 'tag=%s\n' "${testflight_tag}" >> "${GITHUB_OUTPUT}"
           printf 'version=%s\n' "$(jq -r '.version' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
 
+      - name: Collect product-page evidence
+        run: |
+          locale="$(jq -r '.primaryLocale' ci/release-config.json)"
+
+          # The reviewed What's New already describes this release in
+          # user-facing terms and was validated before the TestFlight tag was
+          # cut, so it is the evidence of record for the rest of the page.
+          cp "${RUNNER_TEMP}/promotion-manifest/whats-new.txt" \
+            "${RUNNER_TEMP}/store-evidence.txt"
+
+          # `asc metadata pull` writes this tree. Without a committed snapshot
+          # the generator writes fresh copy rather than editing what is live,
+          # so the approval summary calls that case out explicitly.
+          : > "${RUNNER_TEMP}/store-current-description.txt"
+          current="metadata/version/${{ steps.promotion.outputs.version }}/${locale}.json"
+          if [[ ! -f "${current}" ]]; then
+            latest="$(ls -1d metadata/version/*/ 2>/dev/null | sort -V | tail -n 1)"
+            [[ -n "${latest}" ]] && current="${latest}${locale}.json"
+          fi
+          if [[ -f "${current}" ]]; then
+            jq -r '.description // ""' "${current}" \
+              > "${RUNNER_TEMP}/store-current-description.txt"
+          fi
+
+      - name: Draft product-page copy with the agentic harness
+        if: env.ANTHROPIC_API_KEY != ''
+        continue-on-error: true
+        uses: anthropics/claude-code-action@cf44f7fa4886f7aea5dae9774caef8ae6ccebf81 # v1.0.211
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: '--allowedTools "Read,Grep,Glob,Write"'
+          prompt: |
+            Write the App Store product page copy for OpenFoodJournal ${{ steps.promotion.outputs.version }}.
+
+            Read these first, in order:
+              1. ci/prompts/store-metadata-system.txt - the rules you must follow
+              2. ${{ runner.temp }}/store-evidence.txt - what actually ships in this version
+              3. ${{ runner.temp }}/store-current-description.txt - the current page, may be empty
+              4. The repository itself, to check that every claim you make is supported by code
+
+            You have the repository, so verify rather than assume: if you want to
+            claim a capability, find it in the source first. Drop any claim you
+            cannot ground. Do not describe anything gated behind a Debug build.
+
+            Write the result to ${{ runner.temp }}/store-metadata.agent.json as a
+            single JSON object with exactly the keys description, keywords and
+            promotionalText, obeying every limit in the rules file. Write nothing
+            else, create no branch, and open no pull request.
+
+      - name: Resolve App Store product-page copy
+        id: store_metadata
+        env:
+          BIFROST_BASE_URL: ${{ vars.BIFROST_BASE_URL }}
+          BIFROST_VIRTUAL_KEY: ${{ secrets.BIFROST_VIRTUAL_KEY }}
+          BIFROST_AUTHORIZATION: ${{ secrets.BIFROST_AUTHORIZATION }}
+          STORE_METADATA_AGENT_MODEL: ${{ vars.STORE_METADATA_AGENT_MODEL }}
+        run: |
+          model="${{ vars.STORE_METADATA_MODEL }}"
+          if [[ -z "${model}" ]]; then
+            model="$(jq -r '.storeMetadataModel' ci/release-config.json)"
+          fi
+
+          bash .github/scripts/generate-store-metadata.sh \
+            "${{ steps.promotion.outputs.version }}" \
+            "$(jq -r '.primaryLocale' ci/release-config.json)" \
+            "${RUNNER_TEMP}/store-evidence.txt" \
+            "${RUNNER_TEMP}/store-current-description.txt" \
+            "${RUNNER_TEMP}/store-metadata.agent.json" \
+            "${RUNNER_TEMP}/promotion-manifest/store-metadata.json" \
+            "${RUNNER_TEMP}/promotion-manifest/store-metadata-source.json" \
+            "${model}" >> "${GITHUB_OUTPUT}"
+
       - name: Retain the immutable promotion plan
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -95,7 +169,35 @@ jobs:
             echo "- Exact TestFlight binary: yes; no rebuild"
             echo "- Requested action: ${{ inputs.submit_for_review == true && 'stage, validate, and submit to App Review' || 'stage and validate only' }}"
             echo "- Release-note source: \`$(jq -r '.releaseNotes.source' "${manifest}")\`"
+            echo "- Product-page source: \`${{ steps.store_metadata.outputs.source }}\`"
             echo
+            store="${RUNNER_TEMP}/promotion-manifest/store-metadata.json"
+            if [[ -s "${store}" ]]; then
+              if [[ ! -s "${RUNNER_TEMP}/store-current-description.txt" ]]; then
+                echo "> No committed \`metadata/\` snapshot was available, so this copy"
+                echo "> was written fresh rather than edited from the live page."
+                echo
+              fi
+              echo "### Proposed product page (${{ steps.promotion.outputs.version }})"
+              echo
+              echo "**Promotional text**"
+              echo
+              jq -r '.promotionalText' "${store}"
+              echo
+              echo "**Keywords**"
+              echo
+              printf '\`%s\`\n' "$(jq -r '.keywords' "${store}")"
+              echo
+              echo "**Description**"
+              echo
+              jq -r '.description' "${store}"
+              echo
+            else
+              echo "### Product page"
+              echo
+              echo "No copy was generated; the live App Store text is kept as-is."
+              echo
+            fi
             echo "### Reviewed What's New (${{ steps.promotion.outputs.version }})"
             echo
             cat "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
@@ -139,6 +241,15 @@ jobs:
             "${{ needs.prepare.outputs.tag }}" \
             "${RUNNER_TEMP}/promotion-manifest/release-manifest.json" \
             "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
+
+      - name: Reverify approved product-page copy
+        run: |
+          store="${RUNNER_TEMP}/promotion-manifest/store-metadata.json"
+          if [[ -s "${store}" ]]; then
+            bash .github/scripts/validate-store-metadata.sh "${store}"
+          else
+            echo "No generated product-page copy in the approved plan; keeping the live text."
+          fi
 
       - name: Verify pinned Xcode toolchain
         run: bash .github/scripts/verify-xcode.sh
@@ -186,12 +297,19 @@ jobs:
       - name: Stage exact TestFlight build for the App Store
         run: |
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+
+          # Fields the manifest replaces must not also be copied forward from
+          # the live version, or the copy would win over the reviewed text.
+          exclude_fields="whatsNew"
+          if [[ -s "${RUNNER_TEMP}/promotion-manifest/store-metadata.json" ]]; then
+            exclude_fields="whatsNew,description,keywords,promotionalText"
+          fi
           asc release stage \
             --app "${app_id}" \
             --version "${{ needs.prepare.outputs.version }}" \
             --build "${{ needs.prepare.outputs.build_id }}" \
             --copy-metadata-from "${{ steps.public_version.outputs.version }}" \
-            --exclude-fields whatsNew \
+            --exclude-fields "${exclude_fields}" \
             --checkpoint-file "${RUNNER_TEMP}/app-store-stage-checkpoint.json" \
             --confirm \
             --output json \
@@ -205,7 +323,13 @@ jobs:
           metadata_dir="${RUNNER_TEMP}/metadata"
           metadata_file="${metadata_dir}/version/${{ needs.prepare.outputs.version }}/${locale}.json"
           mkdir -p "$(dirname "${metadata_file}")"
-          jq '{whatsNew: .whatsNew}' "${manifest}" > "${metadata_file}"
+          store="${RUNNER_TEMP}/promotion-manifest/store-metadata.json"
+          if [[ -s "${store}" ]]; then
+            jq -s '{whatsNew: .[0].whatsNew} + .[1]' "${manifest}" "${store}" \
+              > "${metadata_file}"
+          else
+            jq '{whatsNew: .whatsNew}' "${manifest}" > "${metadata_file}"
+          fi
           asc metadata validate --dir "${metadata_dir}" --output json
           asc metadata push \
             --app "${app_id}" \
@@ -247,5 +371,6 @@ jobs:
             echo "- Build: ${{ needs.prepare.outputs.build_number }}"
             echo "- Tested manifest: \`${{ needs.prepare.outputs.tag }}\`"
             echo "- Rebuilt: no; exact TestFlight build promoted"
+            echo "- Product-page source: \`${{ needs.prepare.outputs.store_metadata_source }}\`"
             echo "- Submitted for review: ${{ inputs.submit_for_review || false }}"
           } >> "${GITHUB_STEP_SUMMARY}"
