@@ -180,6 +180,7 @@ if (!cols.includes("serving_type")) {
 16. **`KnownMicronutrient.Category` cases are `.vitamin`/`.mineral`** — not `.vitamins`/`.minerals`. The enum raw values are plural ("Vitamins"/"Minerals") but the Swift case names are singular.
 17. **Debug must remain a separate installed app and data domain** — Debug uses bundle ID `k3vnc.OpenFoodJournal.dev`, display name `OFJ Dev`, and CloudKit container `iCloud.k3vnc.OpenFoodJournal.dev`; Release uses `k3vnc.OpenFoodJournal` and `iCloud.k3vnc.OpenFoodJournal`. Do not collapse either the bundle IDs or container identifiers.
 18. **Gemini image thinking levels are a model-specific enum** — `gemini-3.1-flash-lite-image` officially supports exactly `minimal` and `high`: https://ai.google.dev/gemini-api/docs/models/gemini-3.1-flash-lite-image. Production uses the typed `GeminiFlashLiteImageThinkingLevel.high`. **Never send `low` to this image model or reuse a text-model thinking string.** The exact production request builder is covered by deterministic tests and a protected live TestFlight API contract.
+19. **`AVCaptureSession.startRunning()` / `stopRunning()` block** — they take hundreds of milliseconds to a second. `CameraController` runs them on `k3vnc.openfoodjournal.camera.session`, not the main actor. Calling them from `@MainActor setup()` freezes the scan sheet for ~1s.
 
 ## What's New Sheet Pattern
 

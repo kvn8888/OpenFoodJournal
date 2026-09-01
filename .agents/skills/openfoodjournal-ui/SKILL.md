@@ -152,6 +152,7 @@ The optional `Generate Screenshots` workflow captures real simulator views using
 - In Debug screenshot mode only, `ScanCaptureView` selects a white preview with the same production `ScanCameraControls` and simulated zoom/torch state. It never constructs `CameraController`; capture/library callbacks are inert. Release and ordinary Debug launches still use the unchanged live camera implementation. `journal.add` and `journal.action.scan` provide nonvisual navigation hooks for the capture test.
 
 - The live camera is the mode-selection surface; do not add a separate full-screen mode chooser.
+- `CameraController` starts and stops `AVCaptureSession` on a dedicated session queue. Never call `startRunning()` on the main actor; that is the ~1s scan-sheet hitch.
 - Show exactly three labeled rectangular controls in this order: Scan Food, Barcode, Food Label.
 - Show exactly three compact zoom steps—0.5×, 1×, and 2×—immediately above the mode row. They are ordinary camera-style capsules, not Liquid Glass. Unsupported hardware steps remain visible but disabled.
 - The initial camera input is the physical wide-angle lens only. Selecting 0.5× swaps the single session input to the physical ultra-wide lens; 1× and 2× share the physical wide lens, with 2× applying a 2.0 device zoom factor. Never initialize a virtual triple/dual multi-camera input.
