@@ -4206,6 +4206,26 @@ final class ChatService {
                 routingMode: .automatic
             )
             return ChatRequestConfig(primary: selection, fallback: selection)
+        case .openAICompatible:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.openAICompatibleFastModel(in: defaults)
+            let smart = AIProviderSettings.openAICompatibleSmartModel(in: defaults)
+            // A nil endpoint (unconfigured/malformed base URL) is rejected by
+            // the proxy factory with an actionable Settings message.
+            let endpoint = AIProviderSettings.openAICompatibleBaseURL(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAICompatible, model: primary),
+                    endpoint: endpoint,
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAICompatible, model: fast),
+                    endpoint: endpoint,
+                    routingMode: .automatic
+                )
+            )
         }
     }
 

@@ -20,7 +20,7 @@ This is the single source of truth for any LLM agent working on this project. Re
 | Build Verify Command | `xcodebuild -project OpenFoodJournal.xcodeproj -scheme OpenFoodJournal -destination generic/platform=iOS build` |
 | Build Notes | No iOS simulators installed. Use `generic/platform=iOS` for compile-only verification. Physical device (iPhone 18,3) available when connected. Device support symbols at `/Volumes/DevDisk/Developer/Xcode/iOS DeviceSupport/`. |
 | Release Automation | GitHub `macos-26` cloud CI pinned to stable Xcode 26.6; `testflight` builds once and uploads internally; `app-store` promotes the exact tested build |
-| AI Backend | BYOK direct AI calls: Gemini, OpenRouter, Azure OpenAI, OpenAI, Anthropic, or Muse Spark for Assistant; Gemini/OpenRouter for Scan; native, Tavily, Parallel, or Exa research |
+| AI Backend | BYOK direct AI calls: Gemini, OpenRouter, Azure OpenAI, OpenAI, Anthropic, Muse Spark, or any OpenAI-compatible endpoint (custom base URL + key, e.g. Meta Model API / LiteLLM / self-hosted vLLM) for Assistant; Gemini/OpenRouter/OpenAI-compatible for Scan; food icon images via Gemini or an OpenAI-compatible `/images/generations` endpoint (e.g. Muse Image, selected by `foodBank.iconImageProvider`); native, Tavily, Parallel, or Exa research |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
 ## Architecture Overview

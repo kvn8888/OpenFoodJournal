@@ -36,6 +36,11 @@ struct ScanCameraModeDescriptor: Identifiable, Equatable {
 struct ScanCameraControls: View {
     @Binding var mode: ScanMode
 
+    /// Shared namespace so the selected-mode glass morphs between buttons as
+    /// one element instead of two glass materials swapping tints, which makes
+    /// Liquid Glass re-resolve mid-frame and flicker.
+    @Namespace private var modeSelectionNamespace
+
     let zoomLevel: CameraZoomLevel
     let availableZoomLevels: [CameraZoomLevel]
     let torchOn: Bool
@@ -147,7 +152,8 @@ struct ScanCameraControls: View {
             ForEach(ScanCameraModeDescriptor.supported) { descriptor in
                 CameraModeButton(
                     descriptor: descriptor,
-                    isSelected: mode == descriptor.mode
+                    isSelected: mode == descriptor.mode,
+                    namespace: modeSelectionNamespace
                 ) {
                     withAnimation(OFJMotion.quickSpring) {
                         mode = descriptor.mode
@@ -190,6 +196,7 @@ struct ScanCameraControls: View {
 private struct CameraModeButton: View {
     let descriptor: ScanCameraModeDescriptor
     let isSelected: Bool
+    let namespace: Namespace.ID
     let action: () -> Void
 
     var body: some View {
@@ -216,6 +223,13 @@ private struct CameraModeButton: View {
                     )
                     .interactive(),
                 in: .rect(cornerRadius: OFJRadius.compactCard)
+            )
+            // The selected highlight keeps one stable glass identity, so on a
+            // mode change it morphs to the newly selected button instead of
+            // two buttons re-resolving their materials in the same frame.
+            .glassEffectID(
+                isSelected ? "mode-selected" : "mode-\(descriptor.id)",
+                in: namespace
             )
         }
         .buttonStyle(.plain)

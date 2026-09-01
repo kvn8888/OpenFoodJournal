@@ -678,6 +678,14 @@ struct AppSettingsRecord: Codable {
     var anthropicFastModel: String
     var anthropicSmartModel: String
     var museSparkModel: String
+    var openAICompatibleBaseURL: String
+    var openAICompatibleLiteModel: String
+    var openAICompatibleProModel: String
+    var openAICompatibleEmojiModel: String
+    var openAICompatibleFastModel: String
+    var openAICompatibleSmartModel: String
+    var openAICompatibleImageModel: String
+    var foodIconImageProvider: String
     var chatContextBudget: String
     var useGeneratedFoodIconImages: Bool
     var showJournalFoodImages: Bool
@@ -708,6 +716,14 @@ struct AppSettingsRecord: Codable {
         anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel,
         anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel,
         museSparkModel: String = AIProviderSettings.defaultMuseSparkModel,
+        openAICompatibleBaseURL: String = AIProviderSettings.defaultOpenAICompatibleBaseURL,
+        openAICompatibleLiteModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleProModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleEmojiModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleFastModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleSmartModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleImageModel: String = AIProviderSettings.defaultOpenAICompatibleImageModel,
+        foodIconImageProvider: String = FoodIconImageProvider.gemini.rawValue,
         chatContextBudget: String = ChatContextBudget.balanced.rawValue,
         useGeneratedFoodIconImages: Bool = false,
         showJournalFoodImages: Bool = JournalAppearanceSettings.defaultShowFoodImages,
@@ -737,6 +753,14 @@ struct AppSettingsRecord: Codable {
         self.anthropicFastModel = anthropicFastModel
         self.anthropicSmartModel = anthropicSmartModel
         self.museSparkModel = museSparkModel
+        self.openAICompatibleBaseURL = openAICompatibleBaseURL
+        self.openAICompatibleLiteModel = openAICompatibleLiteModel
+        self.openAICompatibleProModel = openAICompatibleProModel
+        self.openAICompatibleEmojiModel = openAICompatibleEmojiModel
+        self.openAICompatibleFastModel = openAICompatibleFastModel
+        self.openAICompatibleSmartModel = openAICompatibleSmartModel
+        self.openAICompatibleImageModel = openAICompatibleImageModel
+        self.foodIconImageProvider = foodIconImageProvider
         self.chatContextBudget = chatContextBudget
         self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
         self.showJournalFoodImages = showJournalFoodImages
@@ -768,6 +792,14 @@ struct AppSettingsRecord: Codable {
         case anthropicFastModel
         case anthropicSmartModel
         case museSparkModel
+        case openAICompatibleBaseURL
+        case openAICompatibleLiteModel
+        case openAICompatibleProModel
+        case openAICompatibleEmojiModel
+        case openAICompatibleFastModel
+        case openAICompatibleSmartModel
+        case openAICompatibleImageModel
+        case foodIconImageProvider
         case chatContextBudget
         case useGeneratedFoodIconImages
         case showJournalFoodImages
@@ -803,6 +835,14 @@ struct AppSettingsRecord: Codable {
         anthropicFastModel = try container.decodeIfPresent(String.self, forKey: .anthropicFastModel) ?? AIProviderSettings.defaultAnthropicFastModel
         anthropicSmartModel = try container.decodeIfPresent(String.self, forKey: .anthropicSmartModel) ?? AIProviderSettings.defaultAnthropicSmartModel
         museSparkModel = try container.decodeIfPresent(String.self, forKey: .museSparkModel) ?? AIProviderSettings.defaultMuseSparkModel
+        openAICompatibleBaseURL = try container.decodeIfPresent(String.self, forKey: .openAICompatibleBaseURL) ?? AIProviderSettings.defaultOpenAICompatibleBaseURL
+        openAICompatibleLiteModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleLiteModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleProModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleProModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleEmojiModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleEmojiModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleFastModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleFastModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleSmartModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleSmartModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleImageModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleImageModel) ?? AIProviderSettings.defaultOpenAICompatibleImageModel
+        foodIconImageProvider = try container.decodeIfPresent(String.self, forKey: .foodIconImageProvider) ?? FoodIconImageProvider.gemini.rawValue
         chatContextBudget = try container.decodeIfPresent(String.self, forKey: .chatContextBudget) ?? ChatContextBudget.balanced.rawValue
         useGeneratedFoodIconImages = try container.decodeIfPresent(Bool.self, forKey: .useGeneratedFoodIconImages) ?? false
         showJournalFoodImages = try container.decodeIfPresent(Bool.self, forKey: .showJournalFoodImages) ?? JournalAppearanceSettings.defaultShowFoodImages

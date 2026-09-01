@@ -316,6 +316,9 @@ final class RuntimeModelCatalog {
         case .openAI: "openai"
         case .anthropic: "anthropic"
         case .museSpark: "meta"
+        // Custom endpoints have no models.dev entry; an unmatched ID simply
+        // falls back to the conservative capability defaults.
+        case .openAICompatible: "openai-compatible"
         }
     }
 
