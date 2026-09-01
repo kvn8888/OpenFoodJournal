@@ -98,6 +98,10 @@ if grep -Fq -- '--exclude-fields' .github/workflows/app-store.yml; then
   echo "App Store staging must copy a complete localization before its readiness check." >&2
   exit 1
 fi
+if ! grep -Fq 'if: inputs.submit_for_review != true' .github/workflows/app-store.yml; then
+  echo "Prepared-version submission runs must not re-enter the staging lane." >&2
+  exit 1
+fi
 stage_line="$(grep -n 'asc release stage' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"
 metadata_line="$(grep -n 'asc metadata push' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"
 strict_line="$(grep -n 'asc validate' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"

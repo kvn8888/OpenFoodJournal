@@ -297,6 +297,7 @@ jobs:
           printf 'version=%s\n' "${source_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Stage exact TestFlight build for the App Store
+        if: inputs.submit_for_review != true
         run: |
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
 

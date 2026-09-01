@@ -173,7 +173,7 @@ After cloud CI succeeds, it:
 12. Prepares a private `vX.Y` GitHub release draft targeting the manifest commit, with the immutable TestFlight manifest and hash-bound “What’s New” text attached.
 13. Submits to App Review only when a manual dispatch explicitly sets `submit_for_review=true` and the protected job is approved.
 
-A normal push is the required staging run: it requests approval to stage and validate with `submit_for_review=false`. Public submission requires a separate intentional manual dispatch and protected-environment approval. Neither path recompiles the app.
+A normal push is the required staging run: it requests approval to stage and validate with `submit_for_review=false`. Public submission requires a separate intentional manual dispatch and protected-environment approval. The submission lane assumes the version is already prepared, skips `asc release stage`, reapplies reviewed metadata idempotently, validates strictly, and uses `asc review submit`. Neither path recompiles the app.
 
 ### `.github/workflows/app-store-release-sync.yml`
 
