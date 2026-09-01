@@ -300,18 +300,17 @@ jobs:
         run: |
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
 
-          # Fields the manifest replaces must not also be copied forward from
-          # the live version, or the copy would win over the reviewed text.
-          exclude_fields="whatsNew"
-          if [[ -s "${RUNNER_TEMP}/promotion-manifest/store-metadata.json" ]]; then
-            exclude_fields="whatsNew,description,keywords,promotionalText"
-          fi
+          # release stage performs its own readiness validation. Copy the
+          # complete public localization as a temporary valid baseline so a
+          # newly created version is not rejected for an empty What's New or
+          # description before the next step can apply the reviewed manifest.
+          # The reviewed fields are pushed immediately afterward, followed by
+          # the workflow's strict validation gate.
           asc release stage \
             --app "${app_id}" \
             --version "${{ needs.prepare.outputs.version }}" \
             --build "${{ needs.prepare.outputs.build_id }}" \
             --copy-metadata-from "${{ steps.public_version.outputs.version }}" \
-            --exclude-fields "${exclude_fields}" \
             --checkpoint-file "${RUNNER_TEMP}/app-store-stage-checkpoint.json" \
             --confirm \
             --output json \

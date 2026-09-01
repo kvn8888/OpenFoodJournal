@@ -94,6 +94,19 @@ if grep -Fq 'path: ${{ runner.temp }}/GeminiFoodImageContract.xcresult' .github/
   exit 1
 fi
 
+if grep -Fq -- '--exclude-fields' .github/workflows/app-store.yml; then
+  echo "App Store staging must copy a complete localization before its readiness check." >&2
+  exit 1
+fi
+stage_line="$(grep -n 'asc release stage' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"
+metadata_line="$(grep -n 'asc metadata push' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"
+strict_line="$(grep -n 'asc validate' .github/workflows/app-store.yml | head -n 1 | cut -d: -f1)"
+if [[ -z "${stage_line}" || -z "${metadata_line}" || -z "${strict_line}" ]] ||
+  (( stage_line >= metadata_line || metadata_line >= strict_line )); then
+  echo "App Store workflow must stage, apply reviewed metadata, then validate strictly." >&2
+  exit 1
+fi
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
