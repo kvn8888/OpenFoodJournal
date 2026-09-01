@@ -147,6 +147,7 @@ struct MacroSummaryBar: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Daily macro summary")
+        .accessibilityIdentifier("journal.nutrition")
     }
 
     // MARK: - Unified Slot View

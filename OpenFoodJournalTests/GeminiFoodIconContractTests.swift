@@ -90,4 +90,58 @@ struct GeminiFoodIconContractTests {
         #expect(envelope.error?.code == "400")
         #expect(envelope.error?.status == "INVALID_ARGUMENT")
     }
+
+    // MARK: - OpenAI-compatible images endpoint contract
+
+    @Test func openAICompatibleImageRequestUsesMinimalImagesAPIBody() throws {
+        let prompt = ScanService.foodIconImagePrompt(name: "Steamed White Rice", brand: nil)
+        let request = ScanService.openAICompatibleFoodIconImageRequest(
+            model: "muse-image-1.0",
+            prompt: prompt
+        )
+        let data = try JSONEncoder().encode(request)
+        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+
+        #expect(json["model"] as? String == "muse-image-1.0")
+        #expect(json["n"] as? Int == 1)
+        // Optional Images API parameters are rejected by some compatible
+        // servers, so the body must stay minimal.
+        #expect(json.keys.sorted() == ["model", "n", "prompt"])
+
+        // The Images API has no system-instruction field: style rules must
+        // travel inside the prompt, followed by the per-food JSON.
+        let sentPrompt = try #require(json["prompt"] as? String)
+        #expect(sentPrompt.contains("For a dark food"))
+        #expect(sentPrompt.contains("No gradient"))
+        #expect(sentPrompt.contains("Steamed White Rice"))
+    }
+
+    @Test func openAICompatibleImageResponseDecodesBase64AndURLVariants() throws {
+        let base64Body = Data(#"{"created":1,"data":[{"b64_json":"iVBORw0KGgo="}]}"#.utf8)
+        let urlBody = Data(#"{"created":1,"data":[{"url":"https://cdn.example.com/img.png"}]}"#.utf8)
+
+        let base64Envelope = try JSONDecoder().decode(OpenAICompatibleImageResponseEnvelope.self, from: base64Body)
+        let urlEnvelope = try JSONDecoder().decode(OpenAICompatibleImageResponseEnvelope.self, from: urlBody)
+
+        #expect(base64Envelope.data?.first?.b64JSON == "iVBORw0KGgo=")
+        #expect(base64Envelope.data?.first?.url == nil)
+        #expect(urlEnvelope.data?.first?.url == "https://cdn.example.com/img.png")
+        #expect(urlEnvelope.data?.first?.b64JSON == nil)
+    }
+
+    @Test func openAICompatibleBaseURLNormalizationAcceptsCommonShapes() {
+        #expect(
+            OpenAICompatibleEndpoint.normalizedBaseURL(from: " https://api.meta.ai/v1/ ")?.absoluteString
+                == "https://api.meta.ai/v1"
+        )
+        // Self-hosted LAN inference servers are a supported BYOK target.
+        #expect(
+            OpenAICompatibleEndpoint.normalizedBaseURL(from: "http://192.168.1.20:8000/v1")?.absoluteString
+                == "http://192.168.1.20:8000/v1"
+        )
+        #expect(OpenAICompatibleEndpoint.normalizedBaseURL(from: "") == nil)
+        #expect(OpenAICompatibleEndpoint.normalizedBaseURL(from: "   ") == nil)
+        #expect(OpenAICompatibleEndpoint.normalizedBaseURL(from: "api.meta.ai/v1") == nil)
+        #expect(OpenAICompatibleEndpoint.normalizedBaseURL(from: "ftp://api.meta.ai/v1") == nil)
+    }
 }

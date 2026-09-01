@@ -35,6 +35,11 @@ enum KeychainService {
     static let anthropicAPIKeyAccount = "anthropic-api-key"
     static let museSparkAPIKeyAccount = "muse-spark-api-key"
 
+    /// One key for the user's custom OpenAI-compatible endpoint (Meta Model
+    /// API, LiteLLM, self-hosted vLLM, …). Shared by scan, Assistant, and
+    /// food-icon image generation because they target the same base URL.
+    static let openAICompatibleAPIKeyAccount = "openai-compatible-api-key"
+
     /// Tavily is an independent Assistant research provider. Its credential
     /// is never shared with the selected conversation model or exported.
     static let tavilyAPIKeyAccount = "tavily-api-key"
@@ -160,6 +165,8 @@ enum KeychainService {
     static var anthropicAPIKey: String? { load(for: anthropicAPIKeyAccount) }
     static var hasMuseSparkAPIKey: Bool { load(for: museSparkAPIKeyAccount) != nil }
     static var museSparkAPIKey: String? { load(for: museSparkAPIKeyAccount) }
+    static var hasOpenAICompatibleAPIKey: Bool { load(for: openAICompatibleAPIKeyAccount) != nil }
+    static var openAICompatibleAPIKey: String? { load(for: openAICompatibleAPIKeyAccount) }
 
     static var hasTavilyAPIKey: Bool {
         load(for: tavilyAPIKeyAccount) != nil

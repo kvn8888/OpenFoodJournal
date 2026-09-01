@@ -41,6 +41,11 @@ enum ScreenshotConfiguration {
         defaults.set(true, forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey)
         defaults.set(true, forKey: JournalAppearanceSettings.showFoodImagesKey)
         defaults.set(OFJAccentTheme.systemBlue.rawValue, forKey: OFJAccentTheme.storageKey)
+        // The fixture tracks fiber, sodium and potassium, so pinning one leaves
+        // the other two in the full scroller and the History capture shows both
+        // the Pinned row and the unpinned one.
+        defaults.set(PinnedMicronutrientSettings.encode(["fiber"]),
+                     forKey: PinnedMicronutrientSettings.idsKey)
         defaults.set(2_200.0, forKey: "goals.calories")
         defaults.set(150.0, forKey: "goals.protein")
         defaults.set(250.0, forKey: "goals.carbs")
