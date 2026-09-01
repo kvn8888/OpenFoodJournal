@@ -346,7 +346,9 @@ struct NutritionMetricPicker: View {
     private func chipScroller(_ metrics: [NutritionMetric]) -> some View {
         ScrollView(.horizontal) {
             GlassEffectContainer(spacing: 6) {
-                LazyHStack(spacing: 6) { ForEach(metrics) { chip($0, allowsPinning: true).frame(width: 112) } }
+                // HStack, not LazyHStack: recycled lazy rows in a horizontal
+                // scroller drop the long-press recognizer Menu needs.
+                HStack(spacing: 6) { ForEach(metrics) { chip($0, allowsPinning: true).frame(width: 112) } }
                     .padding(.vertical, 2)
             }
         }.scrollIndicators(.hidden).frame(height: 52)
@@ -355,36 +357,46 @@ struct NutritionMetricPicker: View {
     @ViewBuilder
     private func chip(_ metric: NutritionMetric, allowsPinning: Bool) -> some View {
         let pinned = allowsPinning && PinnedMicronutrientSettings.isPinned(metric.id, in: pinnedIDs)
-        let button = Button { selectedID = metric.id } label: {
-            HStack(spacing: 4) {
-                if pinned {
-                    Image(systemName: "pin.fill").font(.caption2)
-                }
-                Text(metric.name).font(.caption.weight(selectedID == metric.id ? .semibold : .regular))
-                    .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
+        let selected = selectedID == metric.id
+        let label = HStack(spacing: 4) {
+            if pinned {
+                Image(systemName: "pin.fill").font(.caption2)
             }
-            .padding(.horizontal, 10)
-            .frame(minWidth: 58, minHeight: 44).frame(maxWidth: .infinity)
-            .foregroundStyle(selectedID == metric.id ? Color.accentColor : .primary)
-            .contentShape(.capsule)
+            Text(metric.name).font(.caption.weight(selected ? .semibold : .regular))
+                .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
         }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(selectedID == metric.id ? Color.accentColor.opacity(0.15) : .clear).interactive(), in: .capsule)
-        .accessibilityAddTraits(selectedID == metric.id ? .isSelected : [])
+        .padding(.horizontal, 10)
+        .frame(minWidth: 58, minHeight: 44).frame(maxWidth: .infinity)
+        .foregroundStyle(selected ? Color.accentColor : .primary)
+        .contentShape(.capsule)
 
+        // Button + contextMenu inside a horizontal ScrollView never presents:
+        // the scroller, the button highlight, and interactive Liquid Glass all
+        // claim the press first. Menu(primaryAction:) is the control that
+        // treats tap as select and hold as the pin/unpin menu.
         if allowsPinning {
-            button
-                .glassEffectID(metric.id, in: glassNamespace)
-                .contextMenu {
-                    if pinned {
-                        Button { unpin(metric.id) } label: { Label("Unpin", systemImage: "pin.slash") }
-                    } else {
-                        Button { pin(metric.id) } label: { Label("Pin", systemImage: "pin") }
-                    }
+            Menu {
+                if pinned {
+                    Button { unpin(metric.id) } label: { Label("Unpin", systemImage: "pin.slash") }
+                } else {
+                    Button { pin(metric.id) } label: { Label("Pin", systemImage: "pin") }
                 }
-                .accessibilityHint(pinned ? "Pinned. Touch and hold to unpin." : "Touch and hold to pin.")
+            } primaryAction: {
+                selectedID = metric.id
+            } label: {
+                label
+            }
+            .menuIndicator(.hidden)
+            .buttonStyle(.plain)
+            .glassEffect(.regular.tint(selected ? Color.accentColor.opacity(0.15) : .clear), in: .capsule)
+            .glassEffectID(metric.id, in: glassNamespace)
+            .accessibilityAddTraits(selected ? .isSelected : [])
+            .accessibilityHint(pinned ? "Pinned. Touch and hold to unpin." : "Touch and hold to pin.")
         } else {
-            button
+            Button { selectedID = metric.id } label: { label }
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(selected ? Color.accentColor.opacity(0.15) : .clear).interactive(), in: .capsule)
+                .accessibilityAddTraits(selected ? .isSelected : [])
         }
     }
 
