@@ -381,10 +381,10 @@ struct NutritionMetricPicker: View {
                 } else {
                     Button { pin(metric.id) } label: { Label("Pin", systemImage: "pin") }
                 }
-            } primaryAction: {
-                selectedID = metric.id
             } label: {
                 label
+            } primaryAction: {
+                selectedID = metric.id
             }
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
