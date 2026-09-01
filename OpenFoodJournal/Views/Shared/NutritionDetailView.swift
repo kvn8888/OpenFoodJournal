@@ -16,53 +16,62 @@ struct NutritionDetailView: View {
 
     var body: some View {
         NutritionLogQuery(from: NutritionDateRange.start(ending: selectedDate, days: days), through: selectedDate) { analytics in
-            List {
-                Section {
-                    // One List row: native section gaps/minimum row heights must
-                    // not accumulate between the date label and the glass card.
-                    VStack(alignment: .leading, spacing: 14) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Picker("Period", selection: $selectedPeriod) {
-                                Text("Day").tag(NutritionStore.TimePeriod.daily)
-                                Text("Week").tag(NutritionStore.TimePeriod.weekly)
-                                Text("Month").tag(NutritionStore.TimePeriod.monthly)
-                            }.pickerStyle(.segmented)
-                            let label = NutritionDateRange.label(ending: selectedDate, days: days)
-                            Text(label).font(.caption).foregroundStyle(.secondary)
-                                .ofjNumericTextTransition(value: selectedDate.timeIntervalSinceReferenceDate, trigger: label)
-                        }.padding(.horizontal, 16)
-                        NutritionSummaryCard(analytics: analytics, metrics: NutritionMetric.macros(goals: goals),
-                                             date: selectedDate, days: days) { selectedMetric = $0 }
+            let macros = NutritionMetric.macros(goals: goals)
+            let calories = macros[0]
+            let calorieAverage = NutritionAnalytics.average(analytics.series(calories, ending: selectedDate, days: days))
+            let progress = calories.goal > 0 ? (calorieAverage ?? 0) / calories.goal : 0
+            let unknown = analytics.trackedMicros.filter { $0.id.hasPrefix("custom:") }
+            ScrollView {
+                // Lazy: the page carries up to 37 nutrient rows behind glass
+                // surfaces once "More Nutrients" is open. The List this replaced
+                // realized rows on demand; a plain VStack would not.
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Picker("Period", selection: $selectedPeriod) {
+                            Text("Day").tag(NutritionStore.TimePeriod.daily)
+                            Text("Week").tag(NutritionStore.TimePeriod.weekly)
+                            Text("Month").tag(NutritionStore.TimePeriod.monthly)
+                        }.pickerStyle(.segmented)
+                        let label = NutritionDateRange.label(ending: selectedDate, days: days)
+                        Text(label).font(.caption).foregroundStyle(.secondary)
+                            .ofjNumericTextTransition(value: selectedDate.timeIntervalSinceReferenceDate, trigger: label)
                     }
-                }.listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
 
-                ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
-                    Section(category.rawValue) {
-                        ForEach(KnownMicronutrients.common.filter { $0.category == category }) { known in
-                            nutrientRow(.known(known), analytics: analytics)
+                    NutritionSummaryCard(analytics: analytics, metrics: macros,
+                                         date: selectedDate, days: days) { selectedMetric = $0 }
+
+                    ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
+                        let nutrients = KnownMicronutrients.common.filter { $0.category == category }
+                        if !nutrients.isEmpty {
+                            nutrientSection(category.rawValue, metrics: nutrients.map(NutritionMetric.known), analytics: analytics)
                         }
                     }
-                }
 
-                Section {
                     DisclosureGroup("More Nutrients", isExpanded: $showUncommon) {
-                        ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
-                            Text(category.rawValue).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                            ForEach(KnownMicronutrients.uncommon.filter { $0.category == category }) { known in
-                                nutrientRow(.known(known), analytics: analytics)
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
+                                let nutrients = KnownMicronutrients.uncommon.filter { $0.category == category }
+                                if !nutrients.isEmpty {
+                                    Text(category.rawValue).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    ForEach(nutrients) { known in
+                                        nutrientRow(.known(known), analytics: analytics)
+                                    }
+                                }
                             }
-                        }
+                        }.padding(.top, 12)
                     }
-                }
+                    .padding(16)
+                    .modifier(NutritionSurface())
 
-                let unknown = analytics.trackedMicros.filter { $0.id.hasPrefix("custom:") }
-                if !unknown.isEmpty {
-                    Section("Other nutrients") { ForEach(unknown) { nutrientRow($0, analytics: analytics) } }
+                    if !unknown.isEmpty {
+                        nutrientSection("Other nutrients", metrics: unknown, analytics: analytics)
+                    }
+
+                    NutritionCitation()
                 }
-                Section { NutritionCitation().listRowBackground(Color.clear) }
+                .padding(16)
             }
-            .listStyle(.insetGrouped)
+            .background { JournalCalorieBackground(state: OFJColor.journalCalorieState(for: progress)) }
         }
         .navigationTitle("Nutrition")
         .navigationBarBackButtonHidden()
@@ -76,6 +85,18 @@ struct NutritionDetailView: View {
         .scrollEdgeEffectStyle(.soft, for: .top)
         .navigationDestination(item: $selectedMetric) { metric in
             NutritionNutrientDetailView(metric: metric, referenceDate: selectedDate, period: selectedPeriod)
+        }
+    }
+
+    @ViewBuilder
+    private func nutrientSection(_ title: String, metrics: [NutritionMetric], analytics: NutritionAnalytics) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(title).font(.headline).foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                ForEach(metrics) { nutrientRow($0, analytics: analytics) }
+            }
+            .padding(16)
+            .modifier(NutritionSurface())
         }
     }
 

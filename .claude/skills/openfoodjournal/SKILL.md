@@ -243,7 +243,8 @@ Already configured in `OpenFoodJournal.entitlements`:
 - **Settings: OFF contribute toggle** (`off.contributeEnabled`, default off) in Integrations section
 - Container Tracking: create from Food Bank food, enter start weight, complete with final weight
 - Serving Mappings: per-food unit conversions, editable in EditEntryView
-- **NutritionDetailView macro cards**: circular progress rings (not linear ProgressView), showing value inside ring + percentage below
+- **NutritionDetailView**: `ScrollView` on `JournalCalorieBackground` (same page treatment as History/calendar). Macro summary and vitamin/mineral sections use `NutritionSurface` glass cards. Avoid `insetGrouped` List here — glass on grouped-list chrome creates a double-card halo.
+- **History micronutrient pins**: long-press chip → context menu Pin/Unpin. Persisted by `PinnedMicronutrientSettings` (`history.pinnedMicronutrientIDs`) and included in `AppSettingsRecord` backups.
 - **FoodNutrientBreakdownView**: inverse of NutrientBreakdownView — food → all nutrients. NavigationLink from NutrientBreakdownView "By Food" rows
 - **LogFoodSheet editable micronutrients**: collapsible DisclosureGroup with editable text fields for each micronutrient, values applied at log time
 - **Radial menu text shadow**: option labels have `.shadow()` for legibility over glass

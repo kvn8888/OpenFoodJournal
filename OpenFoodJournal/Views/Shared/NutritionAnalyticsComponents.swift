@@ -196,7 +196,9 @@ struct NutritionSummaryCard: View {
                                     NutritionOverflowHatch().stroke(.white.opacity(0.65), lineWidth: 2)
                                         .frame(width: geometry.size.width * min(ratio - 1, 0.5))
                                 }
-                            }.clipShape(.capsule)
+                            }
+                            .clipShape(.capsule)
+                            .compositingGroup()
                         }.frame(height: 5)
                     }.contentShape(.rect)
                 }.buttonStyle(.plain).accessibilityLabel("\(metric.name): \(metric.valueText(amount(metric)))")
@@ -298,40 +300,109 @@ struct NutritionMetricPicker: View {
     let macros: [NutritionMetric]
     let micros: [NutritionMetric]
     @Binding var selectedID: String
+    @AppStorage(PinnedMicronutrientSettings.idsKey) private var pinnedIDsRaw = ""
+    @Namespace private var glassNamespace
+
+    private var pinnedIDs: [String] { PinnedMicronutrientSettings.decode(pinnedIDsRaw) }
+    private var pinnedMicros: [NutritionMetric] {
+        let lookup = Dictionary(micros.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return pinnedIDs.compactMap { lookup[$0] }
+    }
+    private var unpinnedMicros: [NutritionMetric] {
+        let pinned = Set(pinnedIDs)
+        return micros.filter { !pinned.contains($0.id) }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             ScrollView(.horizontal) {
-                GlassEffectContainer(spacing: 6) { HStack(spacing: 6) { ForEach(macros) { chip($0) } } }
+                GlassEffectContainer(spacing: 6) { HStack(spacing: 6) { ForEach(macros) { chip($0, allowsPinning: false) } } }
             }.scrollIndicators(.hidden)
-            if !micros.isEmpty {
-                HStack {
-                    Text("Micronutrients").font(.caption.weight(.semibold))
-                    Spacer()
-                    Text("\(micros.count) tracked").font(.caption2)
-                }.foregroundStyle(.secondary)
-                ScrollView(.horizontal) {
-                    GlassEffectContainer(spacing: 6) {
-                        LazyHStack(spacing: 6) { ForEach(micros) { chip($0).frame(width: 112) } }
-                            .padding(.vertical, 2)
-                    }
-                }.scrollIndicators(.hidden).frame(height: 52)
+            if !pinnedMicros.isEmpty {
+                chipRow(title: "Pinned", accessory: "\(pinnedMicros.count) pinned", metrics: pinnedMicros)
             }
-        }.onChange(of: (macros + micros).map(\.id), initial: true) { _, ids in
+            // Each header counts only the row beneath it, so pinning everything
+            // cannot leave a "Micronutrients" heading standing over empty space.
+            if !unpinnedMicros.isEmpty {
+                chipRow(title: "Micronutrients", accessory: "\(unpinnedMicros.count) tracked", metrics: unpinnedMicros)
+            }
+        }
+        .sensoryFeedback(.impact(flexibility: .soft), trigger: pinnedIDsRaw)
+        .onChange(of: (macros + micros).map(\.id), initial: true) { _, ids in
             if !ids.contains(selectedID), let first = macros.first { selectedID = first.id }
         }
     }
-    private func chip(_ metric: NutritionMetric) -> some View {
-        Button { selectedID = metric.id } label: {
-            Text(metric.name).font(.caption.weight(selectedID == metric.id ? .semibold : .regular))
-                .lineLimit(2).multilineTextAlignment(.center).padding(.horizontal, 10)
-                .frame(minWidth: 58, minHeight: 44).frame(maxWidth: .infinity)
-                .foregroundStyle(selectedID == metric.id ? Color.accentColor : .primary)
-                .contentShape(.capsule)
-        }.buttonStyle(.plain)
-            .glassEffect(.regular.tint(selectedID == metric.id ? Color.accentColor.opacity(0.15) : .clear).interactive(), in: .capsule)
-            .accessibilityAddTraits(selectedID == metric.id ? .isSelected : [])
+
+    @ViewBuilder
+    private func chipRow(title: String, accessory: String, metrics: [NutritionMetric]) -> some View {
+        HStack {
+            Text(title).font(.caption.weight(.semibold))
+            Spacer()
+            Text(accessory).font(.caption2)
+        }.foregroundStyle(.secondary)
+        chipScroller(metrics)
     }
 
+    private func chipScroller(_ metrics: [NutritionMetric]) -> some View {
+        ScrollView(.horizontal) {
+            GlassEffectContainer(spacing: 6) {
+                LazyHStack(spacing: 6) { ForEach(metrics) { chip($0, allowsPinning: true).frame(width: 112) } }
+                    .padding(.vertical, 2)
+            }
+        }.scrollIndicators(.hidden).frame(height: 52)
+    }
+
+    @ViewBuilder
+    private func chip(_ metric: NutritionMetric, allowsPinning: Bool) -> some View {
+        let pinned = allowsPinning && PinnedMicronutrientSettings.isPinned(metric.id, in: pinnedIDs)
+        let button = Button { selectedID = metric.id } label: {
+            HStack(spacing: 4) {
+                if pinned {
+                    Image(systemName: "pin.fill").font(.caption2)
+                }
+                Text(metric.name).font(.caption.weight(selectedID == metric.id ? .semibold : .regular))
+                    .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 10)
+            .frame(minWidth: 58, minHeight: 44).frame(maxWidth: .infinity)
+            .foregroundStyle(selectedID == metric.id ? Color.accentColor : .primary)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.tint(selectedID == metric.id ? Color.accentColor.opacity(0.15) : .clear).interactive(), in: .capsule)
+        .accessibilityAddTraits(selectedID == metric.id ? .isSelected : [])
+
+        if allowsPinning {
+            button
+                .glassEffectID(metric.id, in: glassNamespace)
+                .contextMenu {
+                    if pinned {
+                        Button { unpin(metric.id) } label: { Label("Unpin", systemImage: "pin.slash") }
+                    } else {
+                        Button { pin(metric.id) } label: { Label("Pin", systemImage: "pin") }
+                    }
+                }
+                .accessibilityHint(pinned ? "Pinned. Touch and hold to unpin." : "Touch and hold to pin.")
+        } else {
+            button
+        }
+    }
+
+    private func pin(_ id: String) {
+        withAnimation(.spring(duration: 0.3)) {
+            pinnedIDsRaw = PinnedMicronutrientSettings.encode(
+                PinnedMicronutrientSettings.pin(id, in: pinnedIDs)
+            )
+        }
+    }
+
+    private func unpin(_ id: String) {
+        withAnimation(.spring(duration: 0.3)) {
+            pinnedIDsRaw = PinnedMicronutrientSettings.encode(
+                PinnedMicronutrientSettings.unpin(id, from: pinnedIDs)
+            )
+        }
+    }
 }
 
 struct NutritionCitation: View {

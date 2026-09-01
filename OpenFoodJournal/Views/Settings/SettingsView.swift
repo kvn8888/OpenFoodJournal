@@ -43,6 +43,7 @@ struct SettingsView: View {
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
     @AppStorage(JournalAppearanceSettings.showFoodImagesKey) private var showJournalFoodImages = JournalAppearanceSettings.defaultShowFoodImages
+    @AppStorage(PinnedMicronutrientSettings.idsKey) private var pinnedMicronutrientIDsRaw = ""
     @AppStorage(ChatModelPreference.storageKey) private var chatModelPreferenceRawValue: String = ChatModelPreference.fast.rawValue
     @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
     @AppStorage("off.contributionSuccessCount") private var offContributionSuccessCount: Int = 0
@@ -1489,6 +1490,7 @@ struct SettingsView: View {
                     chatContextBudget: chatContextBudgetRawValue,
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
                     showJournalFoodImages: showJournalFoodImages,
+                    pinnedMicronutrientIDs: PinnedMicronutrientSettings.decode(pinnedMicronutrientIDsRaw),
                     offContributeEnabled: offContributeEnabled,
                     breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
                     lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
@@ -1555,6 +1557,7 @@ struct SettingsView: View {
             chatContextBudgetRawValue = backup.appSettings.chatContextBudget
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
             showJournalFoodImages = backup.appSettings.showJournalFoodImages
+            pinnedMicronutrientIDsRaw = PinnedMicronutrientSettings.encode(backup.appSettings.pinnedMicronutrientIDs)
             offContributeEnabled = backup.appSettings.offContributeEnabled
             mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
             mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes
