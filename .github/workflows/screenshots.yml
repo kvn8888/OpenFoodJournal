@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       screens:
-        description: all, or comma-separated journal,nutrition,scan,food-bank,log-food,history,assistant,settings
+        description: all, or comma-separated journal,scan,food-bank,log-food,history,assistant,settings
         type: string
         default: all
         required: true

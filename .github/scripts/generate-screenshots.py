@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 
-SCREENS = ("journal", "nutrition", "scan", "food-bank", "log-food", "history", "assistant", "settings")
+SCREENS = ("journal", "scan", "food-bank", "log-food", "history", "assistant", "settings")
 DEVICES = ("iPhone 17 Pro", "iPhone 17 Pro Max")
 
 
