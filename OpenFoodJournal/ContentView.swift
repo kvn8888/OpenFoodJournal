@@ -4,6 +4,15 @@
 import SwiftUI
 import SwiftData
 
+/// Root destinations that deserve persistent tab-bar placement.
+/// Settings is intentionally a Journal destination instead of a fifth tab.
+enum AppTab: String, CaseIterable, Hashable {
+    case journal
+    case foodBank
+    case history
+    case assistant
+}
+
 struct ContentView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(UserGoals.self) private var userGoals
@@ -14,10 +23,6 @@ struct ContentView: View {
     @AppStorage("lastSeenVersion") private var lastSeenVersion: String = ""
     @State private var showWhatsNew = false
     @State private var selectedTab: AppTab = .journal
-
-    private enum AppTab: Hashable {
-        case journal, foodBank, history, assistant, settings
-    }
 
     /// The current app version from Info.plist (e.g. "1.1")
     private var currentVersion: String {
@@ -39,16 +44,13 @@ struct ContentView: View {
                 ChatView()
             }
             .badge(chatService.isStreaming ? Text("Active") : nil)
-            Tab("Settings", systemImage: "gearshape", value: .settings) {
-                SettingsView()
-            }
         }
         .tabBarMinimizeBehavior(.never)
         .safeAreaInset(edge: .top, spacing: 0) {
             if chatService.isStreaming && selectedTab != .assistant {
                 globalAssistantBanner
-                    .padding(.horizontal, 12)
-                    .padding(.top, 6)
+                    .padding(.horizontal, OFJSpace.s12)
+                    .padding(.top, OFJSpace.s6)
             }
         }
         .onAppear {
@@ -68,9 +70,9 @@ struct ContentView: View {
     private var globalAssistantBanner: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
             let elapsed = max(0, Int(timeline.date.timeIntervalSince(chatService.activeStartedAt ?? timeline.date)))
-            HStack(spacing: 9) {
+            HStack(spacing: OFJSpace.s9) {
                 ProgressView().controlSize(.small)
-                VStack(alignment: .leading, spacing: 1) {
+                VStack(alignment: .leading, spacing: OFJSpace.s1) {
                     Text(globalAssistantStatus)
                         .font(.caption.weight(.semibold))
                     Text(String(format: "%d:%02d", elapsed / 60, elapsed % 60))
@@ -91,9 +93,12 @@ struct ContentView: View {
                 .buttonStyle(.glass)
                 .accessibilityLabel("Stop Assistant")
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .glassEffect(.regular.tint(.blue.opacity(0.10)), in: .rect(cornerRadius: 16))
+            .padding(.horizontal, OFJSpace.s12)
+            .padding(.vertical, OFJSpace.s9)
+            .glassEffect(
+                .regular.tint(OFJColor.assistantActivity.opacity(0.10)),
+                in: .rect(cornerRadius: OFJRadius.compactCard)
+            )
             .accessibilityIdentifier("assistant.global-banner")
         }
     }

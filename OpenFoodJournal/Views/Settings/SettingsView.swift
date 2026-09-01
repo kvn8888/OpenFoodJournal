@@ -17,6 +17,8 @@ struct SettingsView: View {
     @Query private var savedFoods: [SavedFood]
     @Query private var preferences: [Preferences]
 
+    @AppStorage(OFJAccentTheme.storageKey) private var accentThemeRawValue: String =
+        OFJAccentTheme.defaultTheme.rawValue
     @AppStorage("healthkit.enabled") private var healthKitEnabled: Bool = false
     @AppStorage(AIProviderSettings.providerKey) private var aiProviderRawValue: String = AIProviderSettings.defaultProvider.rawValue
     @AppStorage(AIProviderSettings.assistantProviderKey) private var assistantProviderRawValue: String = ""
@@ -32,9 +34,24 @@ struct SettingsView: View {
     @AppStorage(AIProviderSettings.azureSolDeploymentKey) private var azureSolDeployment: String = ""
     @AppStorage(AIProviderSettings.azureTerraDeploymentKey) private var azureTerraDeployment: String = ""
     @AppStorage(AIProviderSettings.azureDefaultModelKey) private var azureDefaultModelRawValue: String = AIProviderSettings.defaultAzureModel.rawValue
+    @AppStorage(AIProviderSettings.openAIFastModelKey) private var openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel
+    @AppStorage(AIProviderSettings.openAISmartModelKey) private var openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel
+    @AppStorage(AIProviderSettings.anthropicFastModelKey) private var anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel
+    @AppStorage(AIProviderSettings.anthropicSmartModelKey) private var anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel
+    @AppStorage(AIProviderSettings.museSparkModelKey) private var museSparkModel: String = AIProviderSettings.defaultMuseSparkModel
+    @AppStorage(AIProviderSettings.openAICompatibleBaseURLKey) private var openAICompatibleBaseURL: String = AIProviderSettings.defaultOpenAICompatibleBaseURL
+    @AppStorage(AIProviderSettings.openAICompatibleLiteModelKey) private var openAICompatibleLiteModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleProModelKey) private var openAICompatibleProModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleEmojiModelKey) private var openAICompatibleEmojiModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleFastModelKey) private var openAICompatibleFastModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleSmartModelKey) private var openAICompatibleSmartModel: String = AIProviderSettings.defaultOpenAICompatibleModel
+    @AppStorage(AIProviderSettings.openAICompatibleImageModelKey) private var openAICompatibleImageModel: String = AIProviderSettings.defaultOpenAICompatibleImageModel
+    @AppStorage(AIProviderSettings.foodIconImageProviderKey) private var foodIconImageProviderRawValue: String = FoodIconImageProvider.gemini.rawValue
     @AppStorage(AIProviderSettings.chatContextBudgetKey) private var chatContextBudgetRawValue: String = ChatContextBudget.balanced.rawValue
     @AppStorage(FoodBankEmojiSettings.autoGenerateKey) private var autoGenerateFoodEmojis: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedFoodIconImages: Bool = false
+    @AppStorage(JournalAppearanceSettings.showFoodImagesKey) private var showJournalFoodImages = JournalAppearanceSettings.defaultShowFoodImages
+    @AppStorage(PinnedMicronutrientSettings.idsKey) private var pinnedMicronutrientIDsRaw = ""
     @AppStorage(ChatModelPreference.storageKey) private var chatModelPreferenceRawValue: String = ChatModelPreference.fast.rawValue
     @AppStorage("off.contributeEnabled") private var offContributeEnabled: Bool = false
     @AppStorage("off.contributionSuccessCount") private var offContributionSuccessCount: Int = 0
@@ -46,6 +63,11 @@ struct SettingsView: View {
     @State private var azureAPIKeyInput: String = ""
     @State private var tavilyAPIKeyInput: String = ""
     @State private var parallelAPIKeyInput: String = ""
+    @State private var openAIAPIKeyInput: String = ""
+    @State private var anthropicAPIKeyInput: String = ""
+    @State private var museSparkAPIKeyInput: String = ""
+    @State private var openAICompatibleAPIKeyInput: String = ""
+    @State private var exaAPIKeyInput: String = ""
     /// Whether the saved key is currently masked (showing dots instead of the key).
     @State private var isKeyMasked: Bool = true
     /// Whether a valid API key is currently stored in Keychain.
@@ -54,12 +76,19 @@ struct SettingsView: View {
     @State private var hasAzureOpenAIAPIKey: Bool = false
     @State private var hasTavilyAPIKey: Bool = false
     @State private var hasParallelAPIKey: Bool = false
+    @State private var hasOpenAIAPIKey: Bool = false
+    @State private var hasAnthropicAPIKey: Bool = false
+    @State private var hasMuseSparkAPIKey: Bool = false
+    @State private var hasOpenAICompatibleAPIKey: Bool = false
+    @State private var hasExaAPIKey: Bool = false
     @State private var azureConnectionStatus: [AzureAssistantModel: String] = [:]
     @State private var azureConnectionsInProgress: Set<AzureAssistantModel> = []
     @State private var tavilyConnectionStatus: String?
     @State private var tavilyConnectionInProgress = false
     @State private var parallelConnectionStatus: String?
     @State private var parallelConnectionInProgress = false
+    @State private var exaConnectionStatus: String?
+    @State private var exaConnectionInProgress = false
 
     @State private var showOnboarding = false
     /// Shown when the user tries to export but has logged no food yet.
@@ -80,27 +109,61 @@ struct SettingsView: View {
     @State private var showHealthKitRepairConfirmation = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                // MARK: Goals
-                Section("Goals") {
-                    NavigationLink("Daily Macro Goals") {
-                        GoalsEditorView()
-                    }
-                    HStack {
-                        Text("Calories")
-                        Spacer()
-                        Text("\(Int(goals.dailyCalories)) kcal")
-                            .foregroundStyle(.secondary)
-                    }
-                    HStack {
-                        Text("Protein / Carbs / Fat")
-                        Spacer()
-                        Text("\(Int(goals.dailyProtein))g · \(Int(goals.dailyCarbs))g · \(Int(goals.dailyFat))g")
-                            .foregroundStyle(.secondary)
-                            .font(.subheadline)
+        Form {
+            // MARK: Appearance
+            Section {
+                Picker("Accent Color", selection: $accentThemeRawValue) {
+                    ForEach(OFJAccentTheme.allCases) { theme in
+                        Label {
+                            Text(theme.displayName)
+                        } icon: {
+                            Image(systemName: "circle.fill")
+                                .foregroundStyle(theme.accentColor)
+                        }
+                        .tag(theme.rawValue)
                     }
                 }
+                .pickerStyle(.navigationLink)
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("The accent updates app controls immediately. Harvest Orange also uses its warm light and dark surfaces in Log Food.")
+            }
+
+            // MARK: Goals
+            Section {
+                Toggle("Show Food Images", isOn: $showJournalFoodImages)
+                    .onChange(of: showJournalFoodImages) { tursoMirror.scheduleMirror(reason: "journal-image-appearance") }
+            } header: {
+                Text("Journal")
+            } footer: {
+                Text("Show existing Food Bank images beside journal entries, with placeholders when unavailable. This does not generate images or make AI requests.")
+            }
+
+            Section("Goals") {
+                NavigationLink("Daily Macro Goals") {
+                    GoalsEditorView()
+                }
+                HStack {
+                    Text("Calories")
+                    Spacer()
+                    Text("\(Int(goals.dailyCalories)) kcal")
+                        .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: goals.dailyCalories)
+                }
+                HStack {
+                    Text("Protein / Carbs / Fat")
+                    Spacer()
+                    Text("\(Int(goals.dailyProtein))g · \(Int(goals.dailyCarbs))g · \(Int(goals.dailyFat))g")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                        .ofjNumericTextTransition(
+                            value: goals.dailyProtein
+                                + goals.dailyCarbs
+                                + goals.dailyFat
+                        )
+                }
+            }
 
                 // MARK: Meal Schedule
                 Section {
@@ -133,7 +196,8 @@ struct SettingsView: View {
                     }
                     .accessibilityIdentifier("settings.scan-provider")
 
-                    if selectedAIProvider == .gemini {
+                    switch selectedAIProvider {
+                    case .gemini:
                         apiKeyRow(
                             providerName: "Gemini",
                             placeholder: "Paste your Gemini API key",
@@ -145,7 +209,7 @@ struct SettingsView: View {
                         Link(destination: URL(string: "https://aistudio.google.com/apikey")!) {
                             Label("Get Gemini API Key", systemImage: "safari")
                         }
-                    } else {
+                    case .openRouter:
                         apiKeyRow(
                             providerName: "OpenRouter",
                             placeholder: "Paste your OpenRouter API key",
@@ -179,11 +243,25 @@ struct SettingsView: View {
                         Text(selectedOpenRouterRoutingMode.description)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    case .openAICompatible:
+                        openAICompatibleEndpointRows
+
+                        TextField("Lite / label model", text: $openAICompatibleLiteModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Pro / estimate model", text: $openAICompatibleProModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+
+                        TextField("Food emoji model", text: $openAICompatibleEmojiModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
                     }
                 } header: {
                     Text("Scan Provider")
                 } footer: {
-                    Text("Used for food scans, AI Search, OCR, and generated food icons. API keys stay in Keychain and are never exported.")
+                    Text(scanProviderFooterText)
                 }
 
                 // MARK: Scanning
@@ -194,7 +272,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Scanning")
                 } footer: {
-                    Text("When enabled, food photo scans, AI Search, and calculator OCR use the provider's Pro model. Lite mode is faster and uses less quota.")
+                    Text("When enabled, food photo scans and calculator OCR use the provider's Pro model. Lite mode is faster and uses less quota.")
                 }
 
                 // MARK: Assistant
@@ -267,6 +345,69 @@ struct SettingsView: View {
                             model: .terra,
                             deployment: $azureTerraDeployment
                         )
+
+                    case .openAI:
+                        apiKeyRow(
+                            providerName: "OpenAI",
+                            placeholder: "Paste your OpenAI API key",
+                            input: $openAIAPIKeyInput,
+                            hasKey: $hasOpenAIAPIKey,
+                            account: KeychainService.openAIAPIKeyAccount
+                        )
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $openAIFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $openAISmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://platform.openai.com/api-keys")!) {
+                            Label("Manage OpenAI API Keys", systemImage: "safari")
+                        }
+
+                    case .anthropic:
+                        apiKeyRow(
+                            providerName: "Anthropic",
+                            placeholder: "Paste your Anthropic API key",
+                            input: $anthropicAPIKeyInput,
+                            hasKey: $hasAnthropicAPIKey,
+                            account: KeychainService.anthropicAPIKeyAccount
+                        )
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $anthropicFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $anthropicSmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://console.anthropic.com/settings/keys")!) {
+                            Label("Manage Anthropic API Keys", systemImage: "safari")
+                        }
+
+                    case .museSpark:
+                        apiKeyRow(
+                            providerName: "Muse Spark",
+                            placeholder: "Paste your Meta Model API key",
+                            input: $museSparkAPIKeyInput,
+                            hasKey: $hasMuseSparkAPIKey,
+                            account: KeychainService.museSparkAPIKeyAccount
+                        )
+                        TextField("Model slug", text: $museSparkModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Link(destination: URL(string: "https://dev.meta.ai")!) {
+                            Label("Manage Meta Model API", systemImage: "safari")
+                        }
+
+                    case .openAICompatible:
+                        openAICompatibleEndpointRows
+                        assistantTierPicker
+                        TextField("Fast model slug", text: $openAICompatibleFastModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        TextField("Smart model slug", text: $openAICompatibleSmartModel)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
                     }
 
                     Picker("Context", selection: $chatContextBudgetRawValue) {
@@ -387,6 +528,38 @@ struct SettingsView: View {
                         Link(destination: URL(string: "https://platform.parallel.ai")!) {
                             Label("Manage Parallel API Key", systemImage: "safari")
                         }
+
+                    case .exa:
+                        apiKeyRow(
+                            providerName: "Exa",
+                            placeholder: "Paste your Exa API key",
+                            input: $exaAPIKeyInput,
+                            hasKey: $hasExaAPIKey,
+                            account: KeychainService.exaAPIKeyAccount
+                        )
+                        HStack {
+                            Button {
+                                testExaSearch()
+                            } label: {
+                                Label(
+                                    exaConnectionInProgress ? "Testing" : "Test Search",
+                                    systemImage: exaConnectionInProgress ? "hourglass" : "network"
+                                )
+                            }
+                            .disabled(exaConnectionInProgress)
+                            Spacer()
+                            if let exaConnectionStatus {
+                                Text(exaConnectionStatus)
+                                    .font(.caption)
+                                    .foregroundStyle(exaConnectionStatus == "Connected" ? .green : .secondary)
+                            }
+                        }
+                        Text("Test Search makes one small Exa request.")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                        Link(destination: URL(string: "https://dashboard.exa.ai/api-keys")!) {
+                            Label("Manage Exa API Key", systemImage: "safari")
+                        }
                     }
                 } header: {
                     Text("Assistant Web Research")
@@ -395,6 +568,8 @@ struct SettingsView: View {
                         Text("Tavily searches independently of the Assistant model. Results and source links are saved with the conversation; API keys stay in Keychain and are never exported. Page downloads still use the app's protected URL fetcher.")
                     } else if selectedAssistantResearchProvider == .parallel {
                         Text("Parallel returns objective-focused excerpts from multiple keyword queries. Results and source links are saved with the conversation; API keys stay in Keychain and are never exported. Page downloads still use the app's protected URL fetcher.")
+                    } else if selectedAssistantResearchProvider == .exa {
+                        Text("Exa returns source text and citations to the same durable research pipeline. The API key stays in Keychain, and page downloads still use the app's protected URL fetcher.")
                     } else {
                         Text("Uses the selected Assistant model's native web-search capability.")
                     }
@@ -415,6 +590,9 @@ struct SettingsView: View {
                     }
                     .onChange(of: autoGenerateFoodEmojis) {
                         tursoMirror.scheduleMirror(reason: "food_emoji_setting_changed")
+                        if autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                            scanService.resumeQueuedFoodIconImageGeneration()
+                        }
                     }
 
                     Toggle(isOn: $useGeneratedFoodIconImages) {
@@ -422,6 +600,30 @@ struct SettingsView: View {
                     }
                     .onChange(of: useGeneratedFoodIconImages) {
                         tursoMirror.scheduleMirror(reason: "food_icon_mode_changed")
+                        if autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                            scanService.resumeQueuedFoodIconImageGeneration()
+                        }
+                    }
+
+                    if useGeneratedFoodIconImages {
+                        Picker("Image Provider", selection: $foodIconImageProviderRawValue) {
+                            ForEach(FoodIconImageProvider.allCases) { provider in
+                                Text(provider.displayName).tag(provider.rawValue)
+                            }
+                        }
+                        .onChange(of: foodIconImageProviderRawValue) {
+                            if autoGenerateFoodEmojis {
+                                scanService.resumeQueuedFoodIconImageGeneration()
+                            }
+                        }
+
+                        if selectedFoodIconImageProvider == .openAICompatible {
+                            openAICompatibleEndpointRows
+
+                            TextField("Image model slug", text: $openAICompatibleImageModel)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                        }
                     }
 
                     LabeledContent(missingFoodIconLabel, value: missingFoodIconCount.formatted())
@@ -462,7 +664,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Food Bank")
                 } footer: {
-                    Text("Toggles only change icon preferences. Generate missing icons manually with the button above or a Food Bank row context menu. Emoji mode uses the selected AI provider. Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails.")
+                    Text(foodBankFooterText)
                 }
 
                 // MARK: AI Usage
@@ -470,19 +672,53 @@ struct SettingsView: View {
                     LabeledContent {
                         Text(costText(geminiTotalEstimatedCostUSD))
                             .monospacedDigit()
+                            .ofjNumericTextTransition(
+                                value: geminiTotalEstimatedCostUSD
+                            )
                     } label: {
                         Label("Estimated Token Cost", systemImage: "dollarsign.circle")
                     }
 
-                    LabeledContent("Requests", value: geminiRequestSummaryText)
-                    LabeledContent("Tokens", value: geminiTokenSummaryText)
+                    LabeledContent {
+                        Text(geminiRequestSummaryText)
+                            .monospacedDigit()
+                            .ofjNumericTextTransition(value: geminiTotalRequests)
+                    } label: {
+                        Text("Requests")
+                    }
+                    LabeledContent {
+                        Text(geminiTokenSummaryText)
+                            .monospacedDigit()
+                            .ofjNumericTextTransition(
+                                value: geminiTotalInputTokens
+                                    + geminiTotalOutputTokens
+                            )
+                    } label: {
+                        Text("Tokens")
+                    }
 
                     if geminiTotalThinkingTokens > 0 {
-                        LabeledContent("Thinking Tokens", value: geminiTotalThinkingTokens.formatted())
+                        LabeledContent {
+                            Text(geminiTotalThinkingTokens.formatted())
+                                .monospacedDigit()
+                                .ofjNumericTextTransition(
+                                    value: geminiTotalThinkingTokens
+                                )
+                        } label: {
+                            Text("Thinking Tokens")
+                        }
                     }
 
                     if geminiGroundedSearchPrompts > 0 {
-                        LabeledContent("AI Search Grounding", value: "\(geminiGroundedSearchPrompts.formatted()) prompts")
+                        LabeledContent {
+                            Text("\(geminiGroundedSearchPrompts.formatted()) prompts")
+                                .monospacedDigit()
+                                .ofjNumericTextTransition(
+                                    value: geminiGroundedSearchPrompts
+                                )
+                        } label: {
+                            Text("Legacy Grounded Searches")
+                        }
                     }
 
                     if geminiTotalRequests > 0 {
@@ -588,7 +824,7 @@ struct SettingsView: View {
                     .alert("No AI logs", isPresented: $showNoGeminiLogsAlert) {
                         Button("OK", role: .cancel) {}
                     } message: {
-                        Text("Enable Turso diagnostics, then use AI Scan, AI Search, or the Assistant. The export contains the last 14 days stored in your Turso database.")
+                        Text("Enable Turso diagnostics, then use AI Scan or the Assistant. The export contains the last 14 days stored in your Turso database.")
                     }
 
                     Button(role: .destructive) {
@@ -643,18 +879,27 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("Settings")
-            .onAppear {
-                if assistantProviderRawValue.isEmpty {
-                    assistantProviderRawValue = AssistantProvider.stored().rawValue
-                }
-                hasAPIKey = KeychainService.hasGeminiAPIKey
-                hasOpenRouterAPIKey = KeychainService.hasOpenRouterAPIKey
-                hasAzureOpenAIAPIKey = KeychainService.hasAzureOpenAIAPIKey
-                hasTavilyAPIKey = KeychainService.hasTavilyAPIKey
-                hasParallelAPIKey = KeychainService.hasParallelAPIKey
-                _ = GeminiCostAccumulator.current(in: modelContext)
-                try? modelContext.save()
+        .navigationTitle("Settings")
+        .onAppear {
+            if assistantProviderRawValue.isEmpty {
+                assistantProviderRawValue = AssistantProvider.stored().rawValue
+            }
+            hasAPIKey = KeychainService.hasGeminiAPIKey
+            hasOpenRouterAPIKey = KeychainService.hasOpenRouterAPIKey
+            hasAzureOpenAIAPIKey = KeychainService.hasAzureOpenAIAPIKey
+            hasTavilyAPIKey = KeychainService.hasTavilyAPIKey
+            hasParallelAPIKey = KeychainService.hasParallelAPIKey
+            hasOpenAIAPIKey = KeychainService.hasOpenAIAPIKey
+            hasAnthropicAPIKey = KeychainService.hasAnthropicAPIKey
+            hasMuseSparkAPIKey = KeychainService.hasMuseSparkAPIKey
+            hasOpenAICompatibleAPIKey = KeychainService.hasOpenAICompatibleAPIKey
+            hasExaAPIKey = KeychainService.hasExaAPIKey
+            _ = GeminiCostAccumulator.current(in: modelContext)
+            try? modelContext.save()
+        }
+        .onChange(of: hasAPIKey) {
+            if hasAPIKey && autoGenerateFoodEmojis && useGeneratedFoodIconImages {
+                scanService.resumeQueuedFoodIconImageGeneration()
             }
         }
         .fullScreenCover(isPresented: $showOnboarding) {
@@ -787,7 +1032,13 @@ struct SettingsView: View {
             return hasAPIKey
         case .openRouter:
             return hasOpenRouterAPIKey
+        case .openAICompatible:
+            return hasOpenAICompatibleAPIKey
         }
+    }
+
+    private var selectedFoodIconImageProvider: FoodIconImageProvider {
+        FoodIconImageProvider(rawValue: foodIconImageProviderRawValue) ?? .gemini
     }
 
     @ViewBuilder
@@ -800,12 +1051,52 @@ struct SettingsView: View {
         .pickerStyle(.segmented)
     }
 
+    /// Base URL + API key rows shared by every place that can target a custom
+    /// OpenAI-compatible endpoint (scan, Assistant, food icon images). All
+    /// three intentionally share one credential and one base URL.
+    @ViewBuilder
+    private var openAICompatibleEndpointRows: some View {
+        apiKeyRow(
+            providerName: "OpenAI-Compatible",
+            placeholder: "Paste your API key",
+            input: $openAICompatibleAPIKeyInput,
+            hasKey: $hasOpenAICompatibleAPIKey,
+            account: KeychainService.openAICompatibleAPIKeyAccount
+        )
+
+        TextField("https://api.meta.ai/v1", text: $openAICompatibleBaseURL)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+
+        Link(destination: URL(string: "https://dev.meta.ai")!) {
+            Label("Get a Meta Model API Key", systemImage: "safari")
+        }
+    }
+
+    private var scanProviderFooterText: String {
+        switch selectedAIProvider {
+        case .gemini, .openRouter:
+            "Used for food scans, OCR, and generated food emojis. API keys stay in Keychain and are never exported."
+        case .openAICompatible:
+            "Works with any OpenAI-compatible /chat/completions endpoint — Meta Model API (Muse Spark), LiteLLM, or a self-hosted vLLM server. Enter the base URL ending in /v1; models must accept images for scans. API keys stay in Keychain and are never exported."
+        }
+    }
+
     private var assistantFooterText: String {
         switch selectedAssistantProvider {
         case .gemini, .openRouter:
             "Fast uses the lightweight model; Smart uses the deeper model. Context is compacted before reaching the selected limit."
         case .azureOpenAI:
             "Deployment names are the identifiers configured in your Azure resource. Limits come from the app's dated capability catalog; connection tests check reachability. Azure calls are stateless and API keys stay in Keychain."
+        case .openAI:
+            "OpenAI uses the Responses API with stateless, portable conversation replay. Model slugs remain editable and capabilities refresh from the runtime catalog."
+        case .anthropic:
+            "Anthropic uses the Messages API. Signed thinking blocks and tool IDs are preserved for later turns; model slugs remain editable."
+        case .museSpark:
+            "Muse Spark uses Meta's OpenAI-compatible Model API. The model slug is runtime-editable so app updates are not required when Meta changes models."
+        case .openAICompatible:
+            "Connects to any OpenAI-compatible /chat/completions endpoint via the base URL above — Meta Model API, LiteLLM, OpenRouter-style gateways, or self-hosted vLLM. Fast and Smart slugs are runtime-editable."
         }
     }
 
@@ -965,6 +1256,32 @@ struct SettingsView: View {
         }
     }
 
+    private func testExaSearch() {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["OFJ_UI_TEST_MODE"] == "1" {
+            exaConnectionStatus = "Connected"
+            return
+        }
+        #endif
+        guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
+            exaConnectionStatus = "Save an API key first"
+            return
+        }
+        exaConnectionInProgress = true
+        exaConnectionStatus = nil
+        Task {
+            defer { exaConnectionInProgress = false }
+            do {
+                try await ExaChatWebSearchProvider(apiKey: apiKey).testSearch()
+                exaConnectionStatus = "Connected"
+            } catch is CancellationError {
+                exaConnectionStatus = "Cancelled"
+            } catch {
+                exaConnectionStatus = error.localizedDescription
+            }
+        }
+    }
+
     @ViewBuilder
     private func apiKeyRow(
         providerName: String,
@@ -1044,11 +1361,27 @@ struct SettingsView: View {
     }
 
     private var selectedFoodIconModeHasKey: Bool {
-        useGeneratedFoodIconImages ? hasAPIKey : selectedAIProviderHasKey
+        guard useGeneratedFoodIconImages else { return selectedAIProviderHasKey }
+        switch selectedFoodIconImageProvider {
+        case .gemini: return hasAPIKey
+        case .openAICompatible: return hasOpenAICompatibleAPIKey
+        }
     }
 
     private var selectedFoodIconModeKeyName: String {
-        useGeneratedFoodIconImages ? "Gemini" : selectedAIProvider.displayName
+        useGeneratedFoodIconImages
+            ? selectedFoodIconImageProvider.displayName
+            : selectedAIProvider.displayName
+    }
+
+    private var foodBankFooterText: String {
+        let base = "When icon generation and generated images are enabled, each newly saved Food Bank item is queued automatically. Generate Missing handles older items. Emoji mode uses the selected AI provider."
+        switch selectedFoodIconImageProvider {
+        case .gemini:
+            return base + " Image mode uses Gemini 3.1 Flash Lite Image with your Gemini key and stores compact 160 px JPEG thumbnails."
+        case .openAICompatible:
+            return base + " Image mode calls the OpenAI-compatible /images/generations endpoint (e.g. Meta's Muse Image) with your key and stores compact 160 px thumbnails."
+        }
     }
 
     private var foodEmojiProgressText: String {
@@ -1247,6 +1580,7 @@ struct SettingsView: View {
             let data = try nutritionStore.exportBackup(
                 goals: goals,
                 appSettings: AppSettingsRecord(
+                    accentTheme: accentThemeRawValue,
                     aiProvider: aiProviderRawValue,
                     assistantProvider: assistantProviderRawValue,
                     assistantResearchProvider: assistantResearchProviderRawValue,
@@ -1261,8 +1595,23 @@ struct SettingsView: View {
                     azureSolDeployment: azureSolDeployment,
                     azureTerraDeployment: azureTerraDeployment,
                     azureDefaultModel: azureDefaultModelRawValue,
+                    openAIFastModel: openAIFastModel,
+                    openAISmartModel: openAISmartModel,
+                    anthropicFastModel: anthropicFastModel,
+                    anthropicSmartModel: anthropicSmartModel,
+                    museSparkModel: museSparkModel,
+                    openAICompatibleBaseURL: openAICompatibleBaseURL,
+                    openAICompatibleLiteModel: openAICompatibleLiteModel,
+                    openAICompatibleProModel: openAICompatibleProModel,
+                    openAICompatibleEmojiModel: openAICompatibleEmojiModel,
+                    openAICompatibleFastModel: openAICompatibleFastModel,
+                    openAICompatibleSmartModel: openAICompatibleSmartModel,
+                    openAICompatibleImageModel: openAICompatibleImageModel,
+                    foodIconImageProvider: foodIconImageProviderRawValue,
                     chatContextBudget: chatContextBudgetRawValue,
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
+                    showJournalFoodImages: showJournalFoodImages,
+                    pinnedMicronutrientIDs: PinnedMicronutrientSettings.decode(pinnedMicronutrientIDsRaw),
                     offContributeEnabled: offContributeEnabled,
                     breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
                     lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
@@ -1304,6 +1653,9 @@ struct SettingsView: View {
 
         do {
             backupImportSummary = try nutritionStore.importBackup(backup, goals: goals)
+            accentThemeRawValue = OFJAccentTheme.resolved(
+                from: backup.appSettings.accentTheme
+            ).rawValue
             aiProviderRawValue = backup.appSettings.aiProvider
             assistantProviderRawValue = backup.appSettings.assistantProvider
             assistantResearchProviderRawValue = backup.appSettings.assistantResearchProvider
@@ -1318,8 +1670,23 @@ struct SettingsView: View {
             azureSolDeployment = backup.appSettings.azureSolDeployment
             azureTerraDeployment = backup.appSettings.azureTerraDeployment
             azureDefaultModelRawValue = backup.appSettings.azureDefaultModel
+            openAIFastModel = backup.appSettings.openAIFastModel
+            openAISmartModel = backup.appSettings.openAISmartModel
+            anthropicFastModel = backup.appSettings.anthropicFastModel
+            anthropicSmartModel = backup.appSettings.anthropicSmartModel
+            museSparkModel = backup.appSettings.museSparkModel
+            openAICompatibleBaseURL = backup.appSettings.openAICompatibleBaseURL
+            openAICompatibleLiteModel = backup.appSettings.openAICompatibleLiteModel
+            openAICompatibleProModel = backup.appSettings.openAICompatibleProModel
+            openAICompatibleEmojiModel = backup.appSettings.openAICompatibleEmojiModel
+            openAICompatibleFastModel = backup.appSettings.openAICompatibleFastModel
+            openAICompatibleSmartModel = backup.appSettings.openAICompatibleSmartModel
+            openAICompatibleImageModel = backup.appSettings.openAICompatibleImageModel
+            foodIconImageProviderRawValue = backup.appSettings.foodIconImageProvider
             chatContextBudgetRawValue = backup.appSettings.chatContextBudget
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
+            showJournalFoodImages = backup.appSettings.showJournalFoodImages
+            pinnedMicronutrientIDsRaw = PinnedMicronutrientSettings.encode(backup.appSettings.pinnedMicronutrientIDs)
             offContributeEnabled = backup.appSettings.offContributeEnabled
             mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
             mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes
@@ -1346,10 +1713,12 @@ struct SettingsView: View {
 
 #Preview {
     let container = ModelContainer.preview
-    SettingsView()
-        .modelContainer(container)
-        .environment(NutritionStore(modelContext: container.mainContext))
-        .environment(HealthKitService())
-        .environment(UserGoals())
-        .environment(MealTimeSettings())
+    NavigationStack {
+        SettingsView()
+    }
+    .modelContainer(container)
+    .environment(NutritionStore(modelContext: container.mainContext))
+    .environment(HealthKitService())
+    .environment(UserGoals())
+    .environment(MealTimeSettings())
 }

@@ -3,6 +3,7 @@
 import Foundation
 import SwiftData
 import Testing
+import UIKit
 @testable import OpenFoodJournal
 
 @MainActor
@@ -34,6 +35,97 @@ struct ChatFeatureTests {
         #expect(harness.service.contextUsage?.isReported == true)
         #expect(harness.service.contextUsage?.displayedTokens == harness.service.contextUsage?.estimatedInputTokens)
         #expect((harness.service.contextUsage?.estimatedInputTokens ?? 0) > 120)
+    }
+
+    @Test func editingUserMessageReplacesItsBranchAndReplaysEditedAttachments() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread(title: "Old title")
+        let user = harness.insertMessage(.user, text: "Old prompt", into: thread)
+        let oldAttachment = ChatAttachment(
+            data: Data([0x01]),
+            mimeType: "image/jpeg",
+            filename: "old.jpg"
+        )
+        oldAttachment.message = user
+        harness.context.insert(oldAttachment)
+        user.attachments?.append(oldAttachment)
+        _ = harness.insertMessage(.model, text: "Old answer", into: thread)
+        harness.proxy.enqueue(ChatModelTurn(text: "Replacement answer"))
+        let replacement = ChatDraftAttachment(
+            data: Data([0x02, 0x03]),
+            mimeType: "image/jpeg",
+            filename: "replacement.jpg"
+        )
+
+        let result = harness.service.submitEdit(
+            "Edited prompt",
+            attachments: [replacement],
+            replacing: user,
+            in: thread
+        )
+        guard case .accepted(_, let messageID) = result else {
+            Issue.record("Expected edited message to be accepted")
+            return
+        }
+        for _ in 0..<500 where harness.service.isStreaming { await Task.yield() }
+
+        #expect(messageID == user.id)
+        #expect(thread.safeMessages.map(\.role) == [.user, .model])
+        #expect(thread.safeMessages.first?.text == "Edited prompt")
+        #expect(thread.safeMessages.first?.safeAttachments.map(\.filename) == ["replacement.jpg"])
+        #expect(thread.safeMessages.last?.text == "Replacement answer")
+        let request = try #require(harness.proxy.turns.first?.request)
+        #expect(request.messages.first?.parts.contains(.text("Edited prompt")) == true)
+        #expect(request.messages.first?.parts.contains(.attachment(ChatModelAttachment(
+            data: replacement.data,
+            mimeType: replacement.mimeType,
+            filename: replacement.filename
+        ))) == true)
+        #expect(request.messages.description.contains("Old answer") == false)
+    }
+
+    @Test func conversationTitleIsGeneratedByTheConfiguredModel() async throws {
+        let harness = try ChatTestHarness(automaticallyGeneratesTitles: true)
+        harness.proxy.enqueue(ChatModelTurn(text: "Your protein is on track."))
+        harness.proxy.enqueue(ChatModelTurn(
+            text: "**Protein Progress Plan!**",
+            usage: ChatTokenUsage(input: 36, output: 5, thinking: 0),
+            providerRequestID: "title-request"
+        ))
+        let thread = harness.makeThread()
+
+        await harness.service.send("How can I hit my protein goal?", in: thread)
+        for _ in 0..<500 where thread.title.isEmpty { await Task.yield() }
+
+        #expect(thread.title == "Protein Progress Plan")
+        #expect(harness.proxy.turns.count == 2)
+        let titleRequest = harness.proxy.turns[1].request
+        #expect(titleRequest.tools.isEmpty)
+        #expect(titleRequest.systemPrompt.contains("2 to 6 words"))
+        #expect(titleRequest.messages.allSatisfy { message in
+            message.parts.allSatisfy { part in
+                if case .attachment = part { return false }
+                return true
+            }
+        })
+        let aggregate = try #require(
+            harness.context.fetch(FetchDescriptor<ChatUsageDailyAggregate>()).first
+        )
+        #expect(aggregate.requestCount >= 2)
+    }
+
+    @Test func titleRegenerationKeepsOnlyACompactPlainTitle() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread(title: "Previous title")
+        _ = harness.insertMessage(.user, text: "Review my sodium today", into: thread)
+        _ = harness.insertMessage(.model, text: "Your sodium is elevated.", into: thread)
+        harness.proxy.enqueue(ChatModelTurn(text: "\"Daily Sodium Review.\""))
+
+        await harness.service.regenerateTitle(in: thread)
+
+        #expect(thread.title == "Daily Sodium Review")
+        #expect(harness.service.titleGenerationThreadIDs.isEmpty)
+        #expect(ChatService.sanitizedGeneratedTitle("# Weekly Fiber Plan!!!") == "Weekly Fiber Plan")
     }
 
     @Test func azureUsageAggregatesTokensAndDatedDollarEstimate() async throws {
@@ -172,6 +264,32 @@ struct ChatFeatureTests {
         #expect(sources.allSatisfy { $0.kind == .userAttachment })
         let block = try #require(harness.service.contextBlocks(for: thread, afterMessageID: nil).first)
         #expect(Set(block.sourceIDs) == Set(sources.map(\.id)))
+    }
+
+    @Test func cameraCapturedPhotoUsesTheSharedDownscaledJPEGPipeline() throws {
+        let sourceFormat = UIGraphicsImageRendererFormat.default()
+        sourceFormat.scale = 1
+        let sourceImage = UIGraphicsImageRenderer(
+            size: CGSize(width: 2_000, height: 1_000),
+            format: sourceFormat
+        ).image { context in
+            UIColor.systemGreen.setFill()
+            context.cgContext.fill(CGRect(x: 0, y: 0, width: 2_000, height: 1_000))
+        }
+        let sourceData = try #require(sourceImage.pngData())
+
+        let jpeg = try #require(
+            ChatService.downscaledJPEG(
+                from: sourceData,
+                maxDimension: 1_200,
+                quality: 0.8
+            )
+        )
+        let decoded = try #require(UIImage(data: jpeg))
+
+        #expect(decoded.size.width == 1_200)
+        #expect(decoded.size.height == 600)
+        #expect(jpeg.starts(with: [0xFF, 0xD8]))
     }
 
     @Test func plainConversationPairsRemainCompleteContextBlocksWithExactBoundaries() throws {
@@ -725,6 +843,52 @@ struct ChatFeatureTests {
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
+    }
+
+    @Test func exaSearchEncodesProviderNeutralRequestAndDecodesSources() async throws {
+        let payload = #"""
+        {
+          "requestId":"exa-request-1",
+          "searchTime":0.08,
+          "costDollars":{"total":0.004},
+          "results":[{
+            "title":"FDA Nutrition Facts",
+            "url":"https://www.fda.gov/example",
+            "text":"Official sodium guidance.",
+            "highlights":["Sodium guidance"],
+            "score":0.98
+          }]
+        }
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            #expect(request.url == ExaChatWebSearchProvider.searchURL)
+            #expect(request.value(forHTTPHeaderField: "x-api-key") == "test-exa-key")
+            let body = try #require(StubChatURLProtocol.bodyData(for: request))
+            let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect(json["type"] as? String == "auto")
+            #expect(json["numResults"] as? Int == 5)
+            #expect((json["query"] as? String)?.contains("FDA sodium") == true)
+            #expect(String(data: body, encoding: .utf8)?.contains("test-exa-key") == false)
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!,
+                payload
+            )
+        }
+        defer { StubChatURLProtocol.handler = nil }
+
+        let result = try await ExaChatWebSearchProvider(
+            apiKey: "test-exa-key",
+            session: StubChatURLProtocol.session()
+        ).search(request: ChatWebSearchRequest(
+            objective: "FDA sodium guidance",
+            searchQueries: ["FDA sodium"]
+        ))
+
+        #expect(result.providerID == AssistantResearchProvider.exa.rawValue)
+        #expect(result.providerRequestID == "exa-request-1")
+        #expect(result.sources.first?.content == "Official sodium guidance.")
+        #expect(result.citations.first?.url == "https://www.fda.gov/example")
+        #expect(result.estimatedCostUSD == 0.004)
     }
 
     @Test func parallelSearchEncodesObjectiveQueriesModeAndDecodesExcerpts() async throws {
@@ -1323,6 +1487,43 @@ struct ChatProviderAdapterContractTests {
     }
 
     @MainActor
+    @Test func museSparkAdapterUsesMetaRuntimeSlugAndStandardToolCalls() async throws {
+        let payload = #"""
+        data: {"model":"muse-spark-1.2","choices":[{"delta":{"content":"Done.","tool_calls":[{"index":0,"id":"muse-call","function":{"name":"get_goals","arguments":"{}"}}]}}],"usage":{"prompt_tokens":30,"completion_tokens":6}}
+        data: [DONE]
+
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://api.meta.ai/v1/chat/completions")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer meta-key")
+            let body = try #require(StubChatURLProtocol.bodyData(for: request))
+            let root = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+            #expect(root["model"] as? String == "muse-spark-1.2")
+            #expect(root["provider"] == nil)
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["x-request-id": "meta-request"])!,
+                payload
+            )
+        }
+        defer { StubChatURLProtocol.handler = nil }
+        let proxy = MuseSparkChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.descriptor(provider: .museSpark, model: "muse-spark-1.2"),
+                apiKey: "meta-key",
+                endpoint: URL(string: "https://api.meta.ai/v1")
+            ),
+            session: StubChatURLProtocol.session()
+        )
+
+        let turn = try await proxy.streamTurn(request: request, onTextUpdate: { _ in })
+        #expect(turn.text == "Done.")
+        #expect(turn.calls.first?.callID == "muse-call")
+        #expect(turn.calls.first?.name == "get_goals")
+        #expect(turn.providerRequestID == "meta-request")
+        #expect(turn.usage == ChatTokenUsage(input: 30, output: 6, thinking: 0))
+    }
+
+    @MainActor
     @Test func azureAdapterMapsStatelessResponsesAttachmentsContinuationsAndCallIDs() throws {
         let descriptor = ChatModelCatalog.azureDescriptor(model: .sol, deployment: "my-sol-deployment")
         let configuration = ChatProxyConfiguration(
@@ -1390,6 +1591,194 @@ struct ChatProviderAdapterContractTests {
         #expect(call["call_id"] as? String == "azure-call")
         let output = try #require(input.first(where: { $0["type"] as? String == "function_call_output" }))
         #expect(output["call_id"] as? String == "azure-call")
+    }
+
+    @MainActor
+    @Test func openAIAdapterUsesTheSamePortableResponsesContract() throws {
+        let descriptor = ChatModelCatalog.openAIDescriptor(model: .terra, deployment: "gpt-5.6-terra")
+        let continuation = ChatProviderContinuation(
+            providerID: AssistantProvider.openAI.rawValue,
+            modelTurnID: "response-openai",
+            ordinal: 0,
+            kind: "reasoning.encrypted_content",
+            payload: .object([
+                "type": .string("reasoning"),
+                "id": .string("reasoning-openai"),
+                "encrypted_content": .string("opaque-openai=="),
+            ])
+        )
+        let openAIRequest = ChatModelRequest(
+            systemPrompt: request.systemPrompt,
+            messages: [
+                ChatModelMessage(role: .model, parts: [
+                    .providerContinuation(continuation),
+                    .functionCall(ChatModelCall(
+                        callID: "openai-call",
+                        thoughtSignature: nil,
+                        modelTurnID: "response-openai",
+                        modelTurnIndex: 1,
+                        name: "get_goals",
+                        args: .object([:])
+                    )),
+                ]),
+                ChatModelMessage(role: .user, parts: [
+                    .functionResponse(ChatModelResponse(
+                        callID: "openai-call",
+                        name: "get_goals",
+                        response: .object(["ok": .bool(true)])
+                    )),
+                ]),
+            ],
+            tools: request.tools
+        )
+        let data = try OpenAIResponsesChatModelProxy.encodedTurnRequest(
+            configuration: ChatProxyConfiguration(
+                descriptor: descriptor,
+                apiKey: "not-in-body",
+                endpoint: URL(string: "https://api.openai.com/v1")
+            ),
+            request: openAIRequest
+        )
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(root["model"] as? String == "gpt-5.6-terra")
+        #expect(root["store"] as? Bool == false)
+        let input = try #require(root["input"] as? [[String: Any]])
+        #expect(input.first?["encrypted_content"] as? String == "opaque-openai==")
+        #expect(input.first(where: { $0["type"] as? String == "function_call" })?["call_id"] as? String == "openai-call")
+        #expect(input.first(where: { $0["type"] as? String == "function_call_output" })?["call_id"] as? String == "openai-call")
+    }
+
+    @MainActor
+    @Test func openAIAdapterUsesBearerAuthenticationAtResponsesEndpoint() async throws {
+        let payload = #"""
+        data: {"type":"response.output_text.delta","delta":"Hello"}
+        data: {"type":"response.completed","response":{"id":"resp-openai","model":"gpt-5.6-terra","output":[{"type":"message","content":[{"type":"output_text","text":"Hello","annotations":[]}]}],"usage":{"input_tokens":12,"output_tokens":3}}}
+        data: [DONE]
+
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://api.openai.com/v1/responses")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer openai-key")
+            #expect(request.value(forHTTPHeaderField: "api-key") == nil)
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["x-request-id": "request-openai"])!,
+                payload
+            )
+        }
+        defer { StubChatURLProtocol.handler = nil }
+        let proxy = OpenAIResponsesChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.openAIDescriptor(model: .terra, deployment: "gpt-5.6-terra"),
+                apiKey: "openai-key",
+                endpoint: URL(string: "https://api.openai.com/v1")
+            ),
+            session: StubChatURLProtocol.session()
+        )
+
+        let turn = try await proxy.streamTurn(request: request, onTextUpdate: { _ in })
+        #expect(turn.text == "Hello")
+        #expect(turn.providerRequestID == "request-openai")
+        #expect(turn.providerID == AssistantProvider.openAI.rawValue)
+        #expect(turn.usage == ChatTokenUsage(input: 12, output: 3, thinking: 0))
+    }
+
+    @MainActor
+    @Test func anthropicAdapterReplaysSignedThinkingAndMatchingToolIDs() throws {
+        let descriptor = ChatModelCatalog.descriptor(provider: .anthropic, model: "claude-sonnet-5")
+        let continuation = ChatProviderContinuation(
+            providerID: AssistantProvider.anthropic.rawValue,
+            modelTurnID: "msg-1",
+            ordinal: 0,
+            kind: "thinking.signature",
+            payload: .object([
+                "type": .string("thinking"),
+                "thinking": .string("opaque provider state"),
+                "signature": .string("anthropic-signature=="),
+            ])
+        )
+        let anthropicRequest = ChatModelRequest(
+            systemPrompt: "System",
+            messages: [
+                ChatModelMessage(role: .model, parts: [
+                    .providerContinuation(continuation),
+                    .functionCall(ChatModelCall(
+                        callID: "toolu_123",
+                        thoughtSignature: nil,
+                        modelTurnID: "msg-1",
+                        modelTurnIndex: 1,
+                        name: "get_goals",
+                        args: .object([:])
+                    )),
+                ]),
+                ChatModelMessage(role: .user, parts: [
+                    .functionResponse(ChatModelResponse(
+                        callID: "toolu_123",
+                        name: "get_goals",
+                        response: .object(["ok": .bool(true)])
+                    )),
+                ]),
+            ],
+            tools: request.tools
+        )
+        let data = try AnthropicChatModelProxy.encodedTurnRequest(
+            configuration: ChatProxyConfiguration(
+                descriptor: descriptor,
+                apiKey: "not-in-body",
+                endpoint: URL(string: "https://api.anthropic.com/v1")
+            ),
+            request: anthropicRequest
+        )
+        let root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let messages = try #require(root["messages"] as? [[String: Any]])
+        let assistant = try #require(messages.first?["content"] as? [[String: Any]])
+        #expect(assistant[0]["signature"] as? String == "anthropic-signature==")
+        #expect(assistant[1]["id"] as? String == "toolu_123")
+        let results = try #require(messages.last?["content"] as? [[String: Any]])
+        #expect(results.first?["tool_use_id"] as? String == "toolu_123")
+        #expect(String(data: data, encoding: .utf8)?.contains("not-in-body") == false)
+    }
+
+    @MainActor
+    @Test func anthropicAdapterDecodesSignedThinkingUsageAndToolCall() async throws {
+        let payload = #"""
+        data: {"type":"message_start","message":{"id":"msg_42","model":"claude-sonnet-5","usage":{"input_tokens":10,"cache_read_input_tokens":4,"cache_creation_input_tokens":1}}}
+        data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"opaque state","signature":""}}
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"signed=="}}
+        data: {"type":"content_block_stop","index":0}
+        data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":"Checking."}}
+        data: {"type":"content_block_stop","index":1}
+        data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_42","name":"get_goals","input":{}}}
+        data: {"type":"content_block_stop","index":2}
+        data: {"type":"message_delta","usage":{"output_tokens":8}}
+        data: {"type":"message_stop"}
+
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://api.anthropic.com/v1/messages")
+            #expect(request.value(forHTTPHeaderField: "x-api-key") == "anthropic-key")
+            #expect(request.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["request-id": "request-42"])!,
+                payload
+            )
+        }
+        defer { StubChatURLProtocol.handler = nil }
+        let proxy = AnthropicChatModelProxy(
+            configuration: ChatProxyConfiguration(
+                descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: "claude-sonnet-5"),
+                apiKey: "anthropic-key",
+                endpoint: URL(string: "https://api.anthropic.com/v1")
+            ),
+            session: StubChatURLProtocol.session()
+        )
+
+        let turn = try await proxy.streamTurn(request: request, onTextUpdate: { _ in })
+        #expect(turn.text == "Checking.")
+        #expect(turn.calls.first?.callID == "toolu_42")
+        #expect(turn.calls.first?.modelTurnID == "msg_42")
+        #expect(turn.continuations.first?.payload["signature"]?.stringValue == "signed==")
+        #expect(turn.usage == ChatTokenUsage(input: 15, cachedInput: 5, output: 8, thinking: 0))
+        #expect(turn.providerRequestID == "request-42")
     }
 
     @MainActor

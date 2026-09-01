@@ -8,11 +8,18 @@
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
   "externalTestFlightGroupID": "fb9250ee-ab00-43bd-943e-b73e4639cb8a",
   "primaryLocale": "en-US",
-  "xcodeRunner": "xcode-27",
-  "requiredXcodeVersion": "Xcode 27.0",
-  "requiredXcodeBuild": "27A5228h",
+  "xcodeRunner": "macos-26",
+  "requiredXcodeVersion": "Xcode 26.6",
+  "requiredXcodeBuild": "17F113",
   "ascVersion": "3.1.1",
-  "releaseNotesModel": "openai/gpt-4.1",
+  "releaseNotesModel": "gpt-5.6-sol",
+  "releaseNotesFallbackModels": [
+    "gpt-5.6-terra"
+  ],
+  "storeMetadataModel": "gpt-5.6-sol",
+  "storeMetadataFallbackModels": [
+    "gpt-5.6-terra"
+  ],
   "ascSHA256": {
     "arm64": "47d9be058359ab29c4f562361abfed710b7f24acdaa79c78777bc6e25e118fef",
     "x86_64": "8fbb62de183d62828bf94a433d446bcc5dfd3b26f51de9d4105200df9aacd806"

@@ -8,6 +8,7 @@ import SwiftData
 struct CompositeFoodBuilderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(NutritionStore.self) private var nutritionStore
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     private let food: SavedFood?
@@ -184,11 +185,12 @@ struct CompositeFoodBuilderView: View {
                 compositeIngredients: ingredients
             )
             composite.refreshCompositeNutrition()
-            modelContext.insert(composite)
+            nutritionStore.addSavedFood(composite, mirrorReason: "composite_created")
         }
 
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: isEditing ? "composite_updated" : "composite_created")
+        if isEditing {
+            nutritionStore.saveChanges(mirrorReason: "composite_updated")
+        }
         dismiss()
     }
 }
@@ -397,6 +399,7 @@ private struct CompositeIngredientRow: View {
                     .font(.headline)
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: totals.calories)
                 Text("cal")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -420,6 +423,7 @@ private struct CompositeIngredientRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .ofjNumericTextTransition(value: ingredient.selectedQuantity)
 
                 HStack(spacing: 6) {
                     MacroChip(value: totals.protein, color: .blue, label: "P")
@@ -455,6 +459,7 @@ private struct CompositeMacroCard: View {
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: value)
                 Text(unit)
                     .font(.caption)
                     .foregroundStyle(.secondary)

@@ -1,0 +1,88 @@
+name: Generate Screenshots
+
+on:
+  workflow_dispatch:
+    inputs:
+      screens:
+        description: all, or comma-separated journal,scan,food-bank,log-food,history,assistant,settings
+        type: string
+        default: all
+        required: true
+      appearance:
+        description: Appearance to capture
+        type: choice
+        options: [both, light, dark]
+        default: both
+      device:
+        description: Hosted simulator device
+        type: choice
+        options: [iPhone 17 Pro, iPhone 17 Pro Max]
+        default: iPhone 17 Pro
+  pull_request:
+    branches: [testflight, app-store]
+    types: [opened, reopened, synchronize, labeled]
+
+# Screenshot jobs only read source. They never receive release/provider secrets.
+permissions:
+  contents: read
+
+concurrency:
+  group: screenshots-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  capture:
+    name: Screenshot gallery
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:screenshots') &&
+      (github.event.action != 'labeled' || github.event.label.name == 'ci:screenshots'))
+    runs-on: macos-26
+    timeout-minutes: 35
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      SCREENSHOT_SCREENS: ${{ inputs.screens || 'all' }}
+      SCREENSHOT_APPEARANCE: ${{ inputs.appearance || 'both' }}
+      SCREENSHOT_DEVICE: ${{ inputs.device || 'iPhone 17 Pro' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Verify pinned Xcode toolchain
+        run: bash .github/scripts/verify-xcode.sh
+      - name: Verify screenshot export contracts
+        run: python3 .github/scripts/test-screenshot-export.py
+      - name: Build and capture selected screens
+        run: python3 .github/scripts/generate-screenshots.py
+      - name: Upload PNG gallery and source manifest
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshots-${{ github.run_id }}
+          path: ${{ runner.temp }}/screenshot-gallery
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Retain failed UI-test diagnostics briefly
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: screenshot-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/screenshot-diagnostics
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Summarize the requested gallery
+        if: always()
+        env:
+          GALLERY_MANIFEST: ${{ runner.temp }}/screenshot-gallery/manifest.json
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ['GALLERY_MANIFEST'])
+          if path.exists():
+              data = json.loads(path.read_text())
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+                  summary.write('## Screenshot gallery\n\n')
+                  summary.write(f"Complete: {data['complete']}\n\nSource: `{data['commit']}`\n\n")
+                  summary.write(f"{len(data['images'])} images on {data['device']}. Synthetic data only.\n\n")
+                  summary.write('Download the screenshots artifact, unzip it, and open `index.html`.\n')
+          PY

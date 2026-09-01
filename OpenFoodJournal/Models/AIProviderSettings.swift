@@ -7,6 +7,7 @@ import Foundation
 enum AIProvider: String, CaseIterable, Identifiable {
     case gemini
     case openRouter
+    case openAICompatible
 
     var id: String { rawValue }
 
@@ -14,6 +15,7 @@ enum AIProvider: String, CaseIterable, Identifiable {
         switch self {
         case .gemini: "Gemini"
         case .openRouter: "OpenRouter"
+        case .openAICompatible: "OpenAI-Compatible"
         }
     }
 
@@ -21,8 +23,13 @@ enum AIProvider: String, CaseIterable, Identifiable {
         switch self {
         case .gemini: KeychainService.geminiAPIKeyAccount
         case .openRouter: KeychainService.openRouterAPIKeyAccount
+        case .openAICompatible: KeychainService.openAICompatibleAPIKeyAccount
         }
     }
+
+    /// Onboarding keeps the two turn-key providers; the custom endpoint
+    /// provider needs a base URL and belongs in Settings.
+    static let onboardingChoices: [AIProvider] = [.gemini, .openRouter]
 
     static func stored(in defaults: UserDefaults = .standard) -> AIProvider {
         guard let rawValue = defaults.string(forKey: AIProviderSettings.providerKey),
@@ -41,6 +48,10 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
     case gemini
     case openRouter
     case azureOpenAI
+    case openAI
+    case anthropic
+    case museSpark
+    case openAICompatible
 
     var id: String { rawValue }
 
@@ -49,6 +60,10 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
         case .gemini: "Gemini"
         case .openRouter: "OpenRouter"
         case .azureOpenAI: "Azure OpenAI"
+        case .openAI: "OpenAI"
+        case .anthropic: "Anthropic"
+        case .museSpark: "Muse Spark"
+        case .openAICompatible: "OpenAI-Compatible"
         }
     }
 
@@ -57,6 +72,10 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
         case .gemini: KeychainService.geminiAPIKeyAccount
         case .openRouter: KeychainService.openRouterAPIKeyAccount
         case .azureOpenAI: KeychainService.azureOpenAIAPIKeyAccount
+        case .openAI: KeychainService.openAIAPIKeyAccount
+        case .anthropic: KeychainService.anthropicAPIKeyAccount
+        case .museSpark: KeychainService.museSparkAPIKeyAccount
+        case .openAICompatible: KeychainService.openAICompatibleAPIKeyAccount
         }
     }
 
@@ -71,7 +90,62 @@ enum AssistantProvider: String, CaseIterable, Identifiable, Codable, Sendable {
         switch AIProvider.stored(in: defaults) {
         case .gemini: return .gemini
         case .openRouter: return .openRouter
+        case .openAICompatible: return .openAICompatible
         }
+    }
+}
+
+/// Which backend renders generated Food Bank icon images. Emoji-text
+/// generation follows the scan `AIProvider`; images are selected separately so
+/// a Gemini scan setup can still render icons through e.g. Meta's Muse Image.
+enum FoodIconImageProvider: String, CaseIterable, Identifiable {
+    case gemini
+    case openAICompatible
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .gemini: "Gemini"
+        case .openAICompatible: "OpenAI-Compatible"
+        }
+    }
+
+    var keychainAccount: String {
+        switch self {
+        case .gemini: KeychainService.geminiAPIKeyAccount
+        case .openAICompatible: KeychainService.openAICompatibleAPIKeyAccount
+        }
+    }
+
+    static func stored(in defaults: UserDefaults = .standard) -> FoodIconImageProvider {
+        guard let raw = defaults.string(forKey: AIProviderSettings.foodIconImageProviderKey),
+              let provider = FoodIconImageProvider(rawValue: raw)
+        else { return .gemini }
+        return provider
+    }
+}
+
+/// Base-URL handling for user-supplied OpenAI-compatible endpoints (Meta's
+/// Model API, OpenRouter-style gateways, LiteLLM, or self-hosted vLLM /
+/// llama.cpp servers). Unlike Azure, the destination host is intentionally
+/// unrestricted: pointing the app at a private LAN inference server is a
+/// supported BYOK use case, and only the user's own key is ever attached.
+enum OpenAICompatibleEndpoint {
+    /// Parses and normalizes a user-entered base URL such as
+    /// `https://api.meta.ai/v1`. Returns nil when the value is empty or not a
+    /// usable http(s) URL. A trailing slash is dropped so path components can
+    /// be appended uniformly.
+    static func normalizedBaseURL(from rawValue: String) -> URL? {
+        var trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") { trimmed = String(trimmed.dropLast()) }
+        guard !trimmed.isEmpty,
+              let url = URL(string: trimmed),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http",
+              let host = url.host, !host.isEmpty
+        else { return nil }
+        return url
     }
 }
 
@@ -82,6 +156,7 @@ enum AssistantResearchProvider: String, CaseIterable, Identifiable, Codable, Sen
     case modelProvider
     case tavily
     case parallel
+    case exa
 
     var id: String { rawValue }
 
@@ -90,6 +165,7 @@ enum AssistantResearchProvider: String, CaseIterable, Identifiable, Codable, Sen
         case .modelProvider: "Model Provider"
         case .tavily: "Tavily"
         case .parallel: "Parallel"
+        case .exa: "Exa"
         }
     }
 
@@ -264,13 +340,57 @@ enum ChatModelCatalog {
            let azureModel = AzureAssistantModel(rawValue: base) {
             return azureDescriptor(model: azureModel, deployment: model)
         }
+        if provider == .openAI,
+           let model = OpenAIAssistantModel(rawValue: base) {
+            return openAIDescriptor(model: model, deployment: model.rawValue)
+        }
+        let capabilities: ChatModelCapabilities
+        if provider == .anthropic || provider == .museSpark || provider == .openAICompatible {
+            capabilities = ChatModelCapabilities(
+                maximumInputTokens: conservativeCapabilities.maximumInputTokens,
+                maximumOutputTokens: conservativeCapabilities.maximumOutputTokens,
+                supportsStreaming: true,
+                supportsFunctions: true,
+                supportsParallelCalls: true,
+                supportsImages: true,
+                supportsPDFs: true,
+                supportsWebSearch: false,
+                supportsNativeCompaction: false
+            )
+        } else {
+            capabilities = conservativeCapabilities
+        }
         return ChatModelDescriptor(
             provider: provider,
             baseModelID: base,
             deploymentIdentifier: model,
             displayName: model,
-            capabilities: conservativeCapabilities,
+            capabilities: capabilities,
             lastVerifiedAt: "2026-07-20"
+        )
+    }
+
+    static func openAIDescriptor(
+        model: OpenAIAssistantModel,
+        deployment: String
+    ) -> ChatModelDescriptor {
+        ChatModelDescriptor(
+            provider: .openAI,
+            baseModelID: model.rawValue,
+            deploymentIdentifier: deployment,
+            displayName: model.displayName,
+            capabilities: ChatModelCapabilities(
+                maximumInputTokens: 922_000,
+                maximumOutputTokens: 128_000,
+                supportsStreaming: true,
+                supportsFunctions: true,
+                supportsParallelCalls: true,
+                supportsImages: true,
+                supportsPDFs: true,
+                supportsWebSearch: true,
+                supportsNativeCompaction: true
+            ),
+            lastVerifiedAt: "2026-08-27"
         )
     }
 
@@ -296,6 +416,20 @@ enum ChatModelCatalog {
             ),
             lastVerifiedAt: "2026-07-20"
         )
+    }
+}
+
+enum OpenAIAssistantModel: String, CaseIterable, Identifiable, Codable, Sendable {
+    case sol = "gpt-5.6-sol"
+    case terra = "gpt-5.6-terra"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .sol: "GPT-5.6 Sol"
+        case .terra: "GPT-5.6 Terra"
+        }
     }
 }
 
@@ -333,7 +467,7 @@ nonisolated enum ChatPricingCatalog {
     static let lastVerifiedAt = "2026-07-24"
 
     static func pricing(for selection: AssistantModelSelection) -> ChatModelPricing? {
-        if selection.provider == .azureOpenAI,
+        if (selection.provider == .azureOpenAI || selection.provider == .openAI),
            let model = AzureAssistantModel(rawValue: selection.descriptor.baseModelID) {
             let rates: (input: Double, cached: Double, output: Double) = switch model {
             case .sol: (5.00, 0.50, 30.00)
@@ -348,7 +482,9 @@ nonisolated enum ChatPricingCatalog {
                 longContextCachedInputMultiplier: 2,
                 longContextOutputMultiplier: 1.5,
                 outputIncludesThinking: true,
-                source: "GPT-5.6 public standard token rates checked \(lastVerifiedAt); Azure agreement and deployment type may differ"
+                source: selection.provider == .azureOpenAI
+                    ? "GPT-5.6 public standard token rates checked \(lastVerifiedAt); Azure agreement and deployment type may differ"
+                    : "OpenAI GPT-5.6 public token rates checked \(lastVerifiedAt)"
             )
         }
 
@@ -551,6 +687,19 @@ enum AIProviderSettings {
     static let azureSolDeploymentKey = "assistant.azure.solDeployment"
     static let azureTerraDeploymentKey = "assistant.azure.terraDeployment"
     static let azureDefaultModelKey = "assistant.azure.defaultModel"
+    static let openAIFastModelKey = "assistant.openai.fastModel"
+    static let openAISmartModelKey = "assistant.openai.smartModel"
+    static let anthropicFastModelKey = "assistant.anthropic.fastModel"
+    static let anthropicSmartModelKey = "assistant.anthropic.smartModel"
+    static let museSparkModelKey = "assistant.museSpark.model"
+    static let openAICompatibleBaseURLKey = "ai.openAICompatible.baseURL"
+    static let openAICompatibleLiteModelKey = "ai.openAICompatible.liteModel"
+    static let openAICompatibleProModelKey = "ai.openAICompatible.proModel"
+    static let openAICompatibleEmojiModelKey = "ai.openAICompatible.emojiModel"
+    static let openAICompatibleFastModelKey = "assistant.openAICompatible.fastModel"
+    static let openAICompatibleSmartModelKey = "assistant.openAICompatible.smartModel"
+    static let openAICompatibleImageModelKey = "foodBank.openAICompatible.imageModel"
+    static let foodIconImageProviderKey = "foodBank.iconImageProvider"
     nonisolated static let chatContextBudgetKey = "assistant.contextBudget"
 
     static let defaultProvider = AIProvider.gemini
@@ -558,6 +707,17 @@ enum AIProviderSettings {
     static let defaultOpenRouterProModel = "google/gemini-pro-latest"
     static let defaultOpenRouterEmojiModel = "google/gemini-flash-latest"
     static let defaultAzureModel = AzureAssistantModel.terra
+    static let defaultOpenAIFastModel = OpenAIAssistantModel.terra.rawValue
+    static let defaultOpenAISmartModel = OpenAIAssistantModel.sol.rawValue
+    static let defaultAnthropicFastModel = "claude-sonnet-5"
+    static let defaultAnthropicSmartModel = "claude-opus-5"
+    static let defaultMuseSparkModel = "muse-spark-1.2"
+    // Meta's Model API is the reference OpenAI-compatible target, so its
+    // current model slugs make the custom provider work with only a base URL
+    // and key. Every slug remains runtime-editable for other gateways.
+    static let defaultOpenAICompatibleBaseURL = "https://api.meta.ai/v1"
+    static let defaultOpenAICompatibleModel = "muse-spark-1.2"
+    static let defaultOpenAICompatibleImageModel = "muse-image-1.0"
     static let googleVertexProviderSlug = "google-vertex"
 
     static func openRouterLiteModel(in defaults: UserDefaults = .standard) -> String {
@@ -589,6 +749,58 @@ enum AIProviderSettings {
               let model = AzureAssistantModel(rawValue: raw)
         else { return defaultAzureModel }
         return model
+    }
+
+    static func openAIFastModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAIFastModelKey), fallback: defaultOpenAIFastModel)
+    }
+
+    static func openAISmartModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAISmartModelKey), fallback: defaultOpenAISmartModel)
+    }
+
+    static func anthropicFastModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: anthropicFastModelKey), fallback: defaultAnthropicFastModel)
+    }
+
+    static func anthropicSmartModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: anthropicSmartModelKey), fallback: defaultAnthropicSmartModel)
+    }
+
+    static func museSparkModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: museSparkModelKey), fallback: defaultMuseSparkModel)
+    }
+
+    static func openAICompatibleBaseURLString(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleBaseURLKey), fallback: defaultOpenAICompatibleBaseURL)
+    }
+
+    static func openAICompatibleBaseURL(in defaults: UserDefaults = .standard) -> URL? {
+        OpenAICompatibleEndpoint.normalizedBaseURL(from: openAICompatibleBaseURLString(in: defaults))
+    }
+
+    static func openAICompatibleLiteModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleLiteModelKey), fallback: defaultOpenAICompatibleModel)
+    }
+
+    static func openAICompatibleProModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleProModelKey), fallback: defaultOpenAICompatibleModel)
+    }
+
+    static func openAICompatibleEmojiModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleEmojiModelKey), fallback: defaultOpenAICompatibleModel)
+    }
+
+    static func openAICompatibleFastModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleFastModelKey), fallback: defaultOpenAICompatibleModel)
+    }
+
+    static func openAICompatibleSmartModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleSmartModelKey), fallback: defaultOpenAICompatibleModel)
+    }
+
+    static func openAICompatibleImageModel(in defaults: UserDefaults = .standard) -> String {
+        trimmed(defaults.string(forKey: openAICompatibleImageModelKey), fallback: defaultOpenAICompatibleImageModel)
     }
 
     private static func trimmed(_ value: String?, fallback: String) -> String {

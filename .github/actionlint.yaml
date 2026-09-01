@@ -1,8 +1,8 @@
 self-hosted-runner:
-  # GitHub introduced this hosted preview label after actionlint 1.7.12's
-  # built-in runner catalog was published.
+  # Keep the pinned hosted macOS label explicit for actionlint versions whose
+  # runner catalog predates the current GitHub image.
   labels:
-    - xcode-27
+    - macos-26
 
 config-variables:
   - ENABLE_APP_STORE_AUTOMATION

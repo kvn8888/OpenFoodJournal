@@ -20,15 +20,38 @@ struct TursoIntegrationSettingsView: View {
     @State private var statusMessage: String?
     @State private var busyAction: BusyAction?
 
+    /// Debug builds hard-disable the mirror in `TursoMirrorService.isEnabled`,
+    /// but this screen reads the raw `@AppStorage` key — so without this it
+    /// would report "enabled" and offer working-looking buttons while every
+    /// action silently no-ops.
+    private var isDeveloperBuild: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Form {
+            if isDeveloperBuild {
+                Section {
+                    Label(
+                        "Mirroring is disabled in developer builds. These controls have no effect.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 Toggle(isOn: Binding(
-                    get: { tursoEnabled },
+                    get: { tursoEnabled && !isDeveloperBuild },
                     set: setMirrorEnabled
                 )) {
                     Label("Mirror Data to Turso", systemImage: "externaldrive.badge.icloud")
                 }
+                .disabled(isDeveloperBuild)
 
                 TextField("libsql://your-db.turso.io", text: $databaseURLInput)
                     .textInputAutocapitalization(.never)

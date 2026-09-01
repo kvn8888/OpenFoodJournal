@@ -70,13 +70,13 @@ struct HealthDisclaimerView: View {
             }
 
             // MARK: - AI Nutrition Estimates
-            // Covers AI-powered food photo scanning and AI Search.
+            // Covers AI-powered food photo scanning.
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     Label("AI-Estimated Nutrition", systemImage: "wand.and.sparkles")
                         .font(.headline)
 
-                    Text("When you scan a food photo or use AI Search, the app sends your request to the AI provider selected in Settings to estimate or retrieve nutritional content. These results are approximations and may differ significantly from actual values.")
+                    Text("When you scan a food photo, the app sends the image to the AI provider selected in Settings to estimate nutritional content. These results are approximations and may differ significantly from actual values.")
 
                     Text("Factors that affect accuracy include portion size, food preparation method, lighting, image angle, and source quality. Always verify critical nutrition information against the product's official nutrition label or a certified nutrition database.")
 

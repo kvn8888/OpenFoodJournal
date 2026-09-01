@@ -222,6 +222,7 @@ final class ChatService {
     private(set) var activeStartedAt: Date?
     private(set) var activePhaseStartedAt: Date?
     private(set) var visibleReasoningSummary = ""
+    private(set) var titleGenerationThreadIDs: Set<UUID> = []
 
     // MARK: Dependencies
 
@@ -243,6 +244,7 @@ final class ChatService {
     @ObservationIgnored private let monotonicClock: any ChatMonotonicClock
     @ObservationIgnored private let jitterUnitProvider: () -> Double
     @ObservationIgnored private let modelCatalog: RuntimeModelCatalog?
+    @ObservationIgnored private let automaticallyGeneratesTitles: Bool
 
     @ObservationIgnored
     private var permissionContinuation: CheckedContinuation<ChatPermissionDecision, Never>?
@@ -301,7 +303,8 @@ final class ChatService {
         monotonicClock: (any ChatMonotonicClock)? = nil,
         jitterUnitProvider: (() -> Double)? = nil,
         permissionDecisionProvider: ((ChatPermissionRequest) async -> ChatPermissionDecision)? = nil,
-        modelCatalog: RuntimeModelCatalog? = nil
+        modelCatalog: RuntimeModelCatalog? = nil,
+        automaticallyGeneratesTitles: Bool = true
     ) {
         let liveSession = session ?? Self.makeSession()
         self.modelContext = modelContext
@@ -326,7 +329,7 @@ final class ChatService {
                 guard let searcher = proxy as? any ChatNativeWebSearching else {
                     throw ChatError.serverError(
                         400,
-                        "\(selection.provider.displayName) does not expose native web search. Select Tavily in Settings."
+                        "\(selection.provider.displayName) does not expose native web search through this adapter. Select Exa, Tavily, or Parallel in Settings."
                     )
                 }
                 return ModelProviderChatWebSearchProvider(
@@ -351,6 +354,11 @@ final class ChatService {
                     mode: ParallelSearchMode.stored(),
                     session: liveSession
                 )
+            case .exa:
+                guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
+                    throw ChatError.noAPIKey(AssistantResearchProvider.exa.displayName)
+                }
+                return ExaChatWebSearchProvider(apiKey: apiKey, session: liveSession)
             }
         }
         self.apiKeyProvider = resolvedAPIKeyProvider
@@ -363,6 +371,7 @@ final class ChatService {
         self.jitterUnitProvider = jitterUnitProvider ?? { Double.random(in: -1...1) }
         self.permissionDecisionProvider = permissionDecisionProvider
         self.modelCatalog = modelCatalog
+        self.automaticallyGeneratesTitles = automaticallyGeneratesTitles
         restoreInterruptedRuns()
     }
 
@@ -538,6 +547,190 @@ final class ChatService {
         try? modelContext.save()
         launchRunTask(in: thread, run: run)
         return .accepted(runID: run.id, messageID: userMessage.id)
+    }
+
+    /// Replaces a persisted user turn and starts a fresh run from that exact
+    /// transcript boundary. Later transcript output is removed because keeping
+    /// it would make the provider see answers and tool results for text the user
+    /// has just changed. Durable write ledgers and daily usage aggregates remain
+    /// intact; editing conversation text never attempts to undo journal writes.
+    @discardableResult
+    func submitEdit(
+        _ text: String,
+        attachments: [ChatDraftAttachment] = [],
+        replacing message: ChatMessage,
+        in thread: ChatThread
+    ) -> ChatSubmissionResult {
+        let startedAt = Date()
+        let startedTick = monotonicClock.now
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !attachments.isEmpty else { return .rejectedEmpty }
+        guard activeRunTask == nil, activeRunID == nil, !isStreaming else { return .rejectedBusy }
+        guard message.role == .user, message.thread?.id == thread.id else {
+            return .persistenceFailed("Only a user message in this conversation can be edited.")
+        }
+
+        repairMessageOrdering(in: thread)
+        let ordered = thread.safeMessages
+        guard let editedIndex = ordered.firstIndex(where: { $0.id == message.id }) else {
+            return .persistenceFailed("The message is no longer available.")
+        }
+        let previousBoundaryID = editedIndex > 0 ? ordered[editedIndex - 1].id : nil
+        let laterMessages = Array(ordered.dropFirst(editedIndex + 1))
+        let removedMessageIDs = Set(laterMessages.map(\.id) + [message.id])
+        let affectedRunIDs = Set(
+            ([message] + laterMessages).compactMap(\.runID)
+        )
+
+        // Every checkpoint after an edit summarizes the old transcript. Drop
+        // the derived checkpoints while retaining the original earlier turns.
+        for checkpoint in thread.contextCheckpoints ?? [] {
+            modelContext.delete(checkpoint)
+        }
+        thread.contextCheckpoints?.removeAll()
+
+        for source in thread.sourceArtifacts ?? []
+        where source.originatingMessageID.map(removedMessageIDs.contains) == true {
+            modelContext.delete(source)
+        }
+        thread.sourceArtifacts?.removeAll {
+            $0.originatingMessageID.map(removedMessageIDs.contains) == true
+        }
+
+        for later in laterMessages {
+            modelContext.delete(later)
+        }
+        thread.messages?.removeAll { later in
+            laterMessages.contains { $0.id == later.id }
+        }
+
+        // Completed run summaries for the removed branch would otherwise show
+        // beside the replacement answer. Usage/cost stays in daily aggregates.
+        for run in thread.agentRuns ?? [] where affectedRunIDs.contains(run.id) {
+            modelContext.delete(run)
+        }
+        thread.agentRuns?.removeAll { affectedRunIDs.contains($0.id) }
+
+        for attachment in message.safeAttachments {
+            modelContext.delete(attachment)
+        }
+        message.attachments?.removeAll()
+        message.text = trimmed
+        message.providerID = nil
+        message.modelID = nil
+        message.providerRequestID = nil
+        message.reportedInputTokens = nil
+        message.reportedCachedInputTokens = nil
+        message.reportedOutputTokens = nil
+        message.reportedThinkingTokens = nil
+        message.modelTurnID = nil
+        message.modelTurnTextOrdinal = nil
+        message.continuationPayload = nil
+        message.citationPayload = nil
+
+        let config = requestConfigProvider(nil)
+        let run = ChatAgentRun(
+            providerID: config.primary.provider.rawValue,
+            modelID: config.primary.descriptor.deploymentIdentifier
+        )
+        run.baseModelID = config.primary.descriptor.baseModelID
+        run.triggerMessageID = message.id
+        run.lastSafeBoundaryMessageID = previousBoundaryID
+        run.selectedContextLimit = contextBudgetProvider().inputLimit(for: config.primary.descriptor)
+        run.thread = thread
+        message.runID = run.id
+        modelContext.insert(run)
+        thread.agentRuns?.append(run)
+
+        for draft in attachments {
+            let attachment = ChatAttachment(
+                data: draft.data,
+                mimeType: draft.mimeType,
+                filename: draft.filename
+            )
+            attachment.message = message
+            modelContext.insert(attachment)
+            message.attachments?.append(attachment)
+            _ = persistSourceDraft(
+                ChatSourceDraft(
+                    id: UUID(),
+                    kind: .userAttachment,
+                    canonicalURL: nil,
+                    finalURL: nil,
+                    title: draft.filename,
+                    mimeType: draft.mimeType,
+                    contentHash: Self.sha256(draft.data),
+                    extractedText: nil,
+                    rawData: nil,
+                    attachmentID: attachment.id,
+                    providerID: nil,
+                    modelID: nil,
+                    citationStartIndex: nil,
+                    citationEndIndex: nil
+                ),
+                in: thread,
+                originatingMessageID: message.id,
+                toolName: nil
+            )
+        }
+        thread.updatedAt = Date()
+
+        do {
+            try modelContext.save()
+        } catch {
+            return .persistenceFailed(error.localizedDescription)
+        }
+
+        activeRun = run
+        activeRunID = run.id
+        activeThreadID = thread.id
+        activePhase = .queued
+        activeProviderName = config.primary.provider.displayName
+        activeStartedAt = run.createdAt
+        activePhaseStartedAt = run.queuedAt ?? run.createdAt
+        activeRunStartedTick = monotonicClock.now
+        accumulatedApprovalSeconds = 0
+        approvalStartedTick = nil
+        visibleReasoningSummary = ""
+        pendingReportedInputTokens = nil
+        pendingReportedCachedInputTokens = nil
+        isStreaming = true
+        recordDiagnosticSpan(ChatDiagnosticSpan(
+            runID: run.id,
+            threadID: thread.id,
+            kind: "edit_to_run_start",
+            providerID: config.primary.provider.rawValue,
+            baseModelID: config.primary.descriptor.baseModelID,
+            deploymentID: config.primary.descriptor.deploymentIdentifier,
+            startedAt: startedAt,
+            endedAt: Date(),
+            durationMs: Int(max(0, monotonicClock.now - startedTick) * 1_000),
+            outcome: "completed"
+        ))
+        try? modelContext.save()
+        launchRunTask(in: thread, run: run)
+        return .accepted(runID: run.id, messageID: message.id)
+    }
+
+    /// Requests a short provider-generated title without exposing tools or
+    /// attachments. The existing title is retained if regeneration fails.
+    func regenerateTitle(in thread: ChatThread) async {
+        guard !titleGenerationThreadIDs.contains(thread.id) else { return }
+        let previousTitle = thread.title
+        titleGenerationThreadIDs.insert(thread.id)
+        defer { titleGenerationThreadIDs.remove(thread.id) }
+
+        do {
+            thread.title = try await generatedTitle(for: thread)
+            thread.updatedAt = Date()
+            try modelContext.save()
+        } catch {
+            if previousTitle.isEmpty {
+                let opening = thread.safeMessages.first(where: { $0.role == .user })?.text ?? ""
+                thread.title = Self.autoTitle(from: opening)
+                try? modelContext.save()
+            }
+        }
     }
 
     /// Sends a user message (with optional attachments) and runs the agent
@@ -790,6 +983,14 @@ final class ChatService {
             if permissionContinuation != nil {
                 resolvePermission(.denied)
             }
+            if run.state == .completed,
+               thread.title.isEmpty,
+               automaticallyGeneratesTitles {
+                Task { [weak self, weak thread] in
+                    guard let self, let thread else { return }
+                    await self.regenerateTitle(in: thread)
+                }
+            }
         }
 
         guard apiKeyProvider(config.provider) != nil else {
@@ -954,7 +1155,7 @@ final class ChatService {
                 }
             }
 
-            if thread.title.isEmpty {
+            if thread.title.isEmpty && !automaticallyGeneratesTitles {
                 let firstUserText = thread.safeMessages.first(where: { $0.role == .user })?.text ?? ""
                 thread.title = Self.autoTitle(from: firstUserText.isEmpty ? "New Conversation" : firstUserText)
             }
@@ -3132,7 +3333,8 @@ final class ChatService {
         }
         activeRun?.providerRequestID = search.providerRequestID
         if search.providerID == AssistantResearchProvider.tavily.rawValue
-            || search.providerID == AssistantResearchProvider.parallel.rawValue {
+            || search.providerID == AssistantResearchProvider.parallel.rawValue
+            || search.providerID == AssistantResearchProvider.exa.rawValue {
             recordExternalResearchUsage(search)
         } else {
             modelCatalog?.observeResolvedModel(
@@ -3433,6 +3635,7 @@ final class ChatService {
             return ToolOutcome(result: .object(["error": .string("name is required")]), status: .failed)
         }
         let micronutrients = Self.parseMicronutrients(args["micronutrients"])
+        let servingMetadata = Self.servingMetadata(from: args)
         let food = SavedFood(
             name: name,
             brand: args["brand"]?.stringValue,
@@ -3441,11 +3644,13 @@ final class ChatService {
             carbs: args["carbs"]?.doubleValue ?? 0,
             fat: args["fat"]?.doubleValue ?? 0,
             micronutrients: micronutrients,
-            servingSize: args["serving_description"]?.stringValue
+            servingSize: servingMetadata.description,
+            serving: servingMetadata.serving,
+            servingQuantity: servingMetadata.quantity,
+            servingUnit: servingMetadata.unit,
+            servingMappings: servingMetadata.mappings
         )
-        modelContext.insert(food)
-        try? modelContext.save()
-        tursoMirror?.scheduleMirror(reason: "chat_save_food")
+        nutritionStore.addSavedFood(food, mirrorReason: "chat_save_food")
 
         return ToolOutcome(result: .object([
             "status": .string("saved"),
@@ -3529,6 +3734,20 @@ final class ChatService {
         if let carbs = args["carbs"]?.doubleValue { food.carbs = carbs }
         if let fat = args["fat"]?.doubleValue { food.fat = fat }
         if let serving = args["serving_description"]?.stringValue { food.servingSize = serving }
+        if Self.containsServingMetadata(args) {
+            let metadata = Self.servingMetadata(
+                from: args,
+                fallbackDescription: food.servingSize,
+                fallbackQuantity: food.servingQuantity,
+                fallbackUnit: food.servingUnit,
+                fallbackGrams: food.serving?.grams
+            )
+            food.servingSize = metadata.description
+            food.serving = metadata.serving
+            food.servingQuantity = metadata.quantity
+            food.servingUnit = metadata.unit
+            food.servingMappings = metadata.mappings
+        }
         Self.applyMicronutrientChanges(args, to: &food.micronutrients)
         try? modelContext.save()
         tursoMirror?.scheduleMirror(reason: "chat_update_food")
@@ -3538,6 +3757,100 @@ final class ChatService {
             "food_id": .string(food.id.uuidString),
             "micronutrients": Self.micronutrientsValue(food.micronutrients),
         ]))
+    }
+
+    private struct AgentServingMetadata {
+        let description: String?
+        let quantity: Double?
+        let unit: String?
+        let serving: ServingSize?
+        let mappings: [ServingMapping]
+    }
+
+    /// Converts the agent's provider-neutral serving fields into the same
+    /// structured mapping used by scans and manual foods. A display string is
+    /// not enough: Log Food discovers selectable units from `serving` and
+    /// `servingMappings`, so this boundary must persist both sides explicitly.
+    private static func servingMetadata(
+        from args: JSONValue,
+        fallbackDescription: String? = nil,
+        fallbackQuantity: Double? = nil,
+        fallbackUnit: String? = nil,
+        fallbackGrams: Double? = nil
+    ) -> AgentServingMetadata {
+        let description = args["serving_description"]?.stringValue ?? fallbackDescription
+        let parsed = parsedServingDescription(description)
+        let quantity = args["serving_quantity"]?.doubleValue
+            ?? parsed.quantity
+            ?? fallbackQuantity
+            ?? 1
+        let explicitUnit = args["serving_unit"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let unit = (explicitUnit?.isEmpty == false ? explicitUnit : nil)
+            ?? parsed.unit
+            ?? fallbackUnit
+            ?? "serving"
+        let grams = args["serving_grams"]?.doubleValue
+            ?? args["serving_weight_grams"]?.doubleValue
+            ?? parsed.grams
+            ?? fallbackGrams
+        let validQuantity = quantity.isFinite && quantity > 0 ? quantity : 1
+        let validGrams = grams.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        let mapping: [ServingMapping]
+        if let validGrams,
+           !["g", "gram", "grams"].contains(unit.lowercased()) {
+            mapping = [ServingMapping(
+                from: ServingAmount(value: validQuantity, unit: unit),
+                to: ServingAmount(value: validGrams, unit: "g")
+            )]
+        } else {
+            mapping = []
+        }
+        return AgentServingMetadata(
+            description: description,
+            quantity: validQuantity,
+            unit: unit,
+            serving: validGrams.map(ServingSize.mass),
+            mappings: mapping
+        )
+    }
+
+    private static func containsServingMetadata(_ args: JSONValue) -> Bool {
+        if args["serving_quantity"] != nil
+            || args["serving_unit"] != nil
+            || args["serving_grams"] != nil
+            || args["serving_weight_grams"] != nil {
+            return true
+        }
+        return parsedServingDescription(args["serving_description"]?.stringValue).grams != nil
+    }
+
+    private static func parsedServingDescription(
+        _ description: String?
+    ) -> (quantity: Double?, unit: String?, grams: Double?) {
+        guard let description, !description.isEmpty else { return (nil, nil, nil) }
+        let gramsPattern = #"([0-9]+(?:\.[0-9]+)?)\s*(?:g|grams?)\b"#
+        let leadingPattern = #"^\s*([0-9]+(?:\.[0-9]+)?)\s+([A-Za-z][A-Za-z ]*?)\s*(?:=|\()"#
+        let grams = firstRegexGroups(in: description, pattern: gramsPattern)
+            .first.flatMap(Double.init)
+        let leading = firstRegexGroups(in: description, pattern: leadingPattern)
+        let quantity = leading.first.flatMap(Double.init)
+        let unit = leading.count > 1
+            ? leading[1].trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+        return (quantity, unit?.isEmpty == false ? unit : nil, grams)
+    }
+
+    private static func firstRegexGroups(in text: String, pattern: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
+              let match = regex.firstMatch(
+                in: text,
+                range: NSRange(text.startIndex..., in: text)
+              ) else { return [] }
+        return (1..<match.numberOfRanges).compactMap { index in
+            guard let range = Range(match.range(at: index), in: text) else { return nil }
+            return String(text[range])
+        }
     }
 
     private func updateGoals(_ args: JSONValue) -> ToolOutcome {
@@ -3851,6 +4164,68 @@ final class ChatService {
                     routingMode: .automatic
                 )
             )
+        case .openAI:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.openAIFastModel(in: defaults)
+            let smart = AIProviderSettings.openAISmartModel(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAI, model: primary),
+                    endpoint: URL(string: "https://api.openai.com/v1"),
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAI, model: fast),
+                    endpoint: URL(string: "https://api.openai.com/v1"),
+                    routingMode: .automatic
+                )
+            )
+        case .anthropic:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.anthropicFastModel(in: defaults)
+            let smart = AIProviderSettings.anthropicSmartModel(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: primary),
+                    endpoint: URL(string: "https://api.anthropic.com/v1"),
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .anthropic, model: fast),
+                    endpoint: URL(string: "https://api.anthropic.com/v1"),
+                    routingMode: .automatic
+                )
+            )
+        case .museSpark:
+            let model = AIProviderSettings.museSparkModel()
+            let selection = AssistantModelSelection(
+                descriptor: ChatModelCatalog.descriptor(provider: .museSpark, model: model),
+                endpoint: URL(string: "https://api.meta.ai/v1"),
+                routingMode: .automatic
+            )
+            return ChatRequestConfig(primary: selection, fallback: selection)
+        case .openAICompatible:
+            let defaults = UserDefaults.standard
+            let fast = AIProviderSettings.openAICompatibleFastModel(in: defaults)
+            let smart = AIProviderSettings.openAICompatibleSmartModel(in: defaults)
+            // A nil endpoint (unconfigured/malformed base URL) is rejected by
+            // the proxy factory with an actionable Settings message.
+            let endpoint = AIProviderSettings.openAICompatibleBaseURL(in: defaults)
+            let primary = preference == .smart ? smart : fast
+            return ChatRequestConfig(
+                primary: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAICompatible, model: primary),
+                    endpoint: endpoint,
+                    routingMode: .automatic
+                ),
+                fallback: AssistantModelSelection(
+                    descriptor: ChatModelCatalog.descriptor(provider: .openAICompatible, model: fast),
+                    endpoint: endpoint,
+                    routingMode: .automatic
+                )
+            )
         }
     }
 
@@ -4128,6 +4503,136 @@ final class ChatService {
 
     // MARK: - Helpers
 
+    private func generatedTitle(for thread: ChatThread) async throws -> String {
+        let config = requestConfigProvider(nil)
+        modelCatalog?.refreshInBackgroundIfNeeded()
+        let selection = modelCatalog?.selectionResolvingRuntimeMetadata(config.primary)
+            ?? config.primary
+        let proxy = try modelProxyFactory(selection)
+        let transcript = thread.safeMessages.compactMap { message -> ChatModelMessage? in
+            guard message.role == .user || message.role == .model else { return nil }
+            let text = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return ChatModelMessage(
+                role: message.role == .user ? .user : .model,
+                parts: [.text(String(text.prefix(1_500)))]
+            )
+        }
+        guard !transcript.isEmpty else { throw ChatError.emptyResponse }
+
+        let request = ChatModelRequest(
+            systemPrompt: """
+            Create a specific title for this nutrition-assistant conversation.
+            Return only the title: 2 to 6 words, no quotation marks, no markdown,
+            no ending punctuation, and no generic label such as Conversation.
+            """,
+            messages: Array(transcript.prefix(8)),
+            tools: []
+        )
+        let monitor = ChatProviderDeadlineMonitor(clock: monotonicClock)
+        let requestStartedAt = Date()
+        let requestStartedTick = monotonicClock.now
+        let totalDeadline = min(30, deadlinePolicy.modelTurn)
+        let firstEventDeadline = min(totalDeadline, deadlinePolicy.firstProviderEvent)
+
+        let turn = try await withThrowingTaskGroup(of: ChatModelTurn.self) { group in
+            group.addTask { @MainActor in
+                try await proxy.streamTurn(request: request) { event in
+                    monitor.receive(event)
+                }
+            }
+            group.addTask { @MainActor [monotonicClock] in
+                try await monotonicClock.sleep(for: firstEventDeadline)
+                guard monitor.providerEventCount > 0 else {
+                    throw ChatError.timeout(
+                        step: "title_first_provider_event",
+                        seconds: firstEventDeadline
+                    )
+                }
+                try await monotonicClock.sleep(for: max(0, totalDeadline - firstEventDeadline))
+                throw ChatError.timeout(step: "title_generation", seconds: totalDeadline)
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw ChatError.emptyResponse }
+            return first
+        }
+        guard turn.calls.isEmpty else { throw ChatError.invalidResponse }
+        let title = Self.sanitizedGeneratedTitle(turn.text)
+        guard !title.isEmpty else { throw ChatError.emptyResponse }
+
+        modelCatalog?.observeResolvedModel(
+            provider: selection.provider,
+            requestedModelID: selection.descriptor.deploymentIdentifier,
+            resolvedModelID: turn.resolvedModelID
+        )
+        let resolution = modelCatalog?.resolution(
+            for: selection,
+            resolvedModelID: turn.resolvedModelID
+        ) ?? Self.fallbackCatalogResolution(
+            for: selection,
+            resolvedModelID: turn.resolvedModelID
+        )
+        let cost = turn.usage.flatMap { usage in
+            resolution.pricing.map { $0.estimatedCost(for: usage) }
+        }
+        recordUsage(
+            selection: selection,
+            catalogResolution: resolution,
+            usage: turn.usage,
+            grounded: false,
+            succeeded: true,
+            requestKind: "assistant_title_generation"
+        )
+        recordDailyUsage(
+            selection: resolution.selection,
+            catalogVersion: resolution.catalogVersion,
+            verifiedAt: resolution.verifiedAt,
+            usage: turn.usage,
+            cost: cost,
+            retryCount: 0,
+            at: Date()
+        )
+        recordDiagnosticSpan(ChatDiagnosticSpan(
+            runID: UUID(),
+            threadID: thread.id,
+            kind: "title_generation",
+            providerID: selection.provider.rawValue,
+            baseModelID: resolution.resolvedModelID,
+            deploymentID: selection.descriptor.deploymentIdentifier,
+            startedAt: requestStartedAt,
+            endedAt: Date(),
+            durationMs: Int(max(0, monotonicClock.now - requestStartedTick) * 1_000),
+            outcome: "completed",
+            providerRequestID: turn.providerRequestID ?? monitor.requestID
+        ))
+        try? modelContext.save()
+        return title
+    }
+
+    nonisolated static func sanitizedGeneratedTitle(_ raw: String) -> String {
+        var title = raw
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map(String.init) ?? ""
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`#*"))
+        title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        while let last = title.last, ".!?:;,-".contains(last) {
+            title.removeLast()
+            title = title.trimmingCharacters(in: .whitespaces)
+        }
+        guard !title.isEmpty else { return "" }
+        if title.count > 60 {
+            let prefix = title.prefix(60)
+            if let space = prefix.lastIndex(of: " ") {
+                title = String(prefix[..<space])
+            } else {
+                title = String(prefix)
+            }
+        }
+        return title
+    }
+
     /// Derives a short thread title from the opening message.
     private static func autoTitle(from text: String) -> String {
         let collapsed = text
@@ -4168,7 +4673,12 @@ final class ChatService {
         }
         let scale = maxDimension / largest
         let target = CGSize(width: size.width * scale, height: size.height * scale)
-        let renderer = UIGraphicsImageRenderer(size: target)
+        let format = UIGraphicsImageRendererFormat.default()
+        // Model limits are pixel-based. A renderer that inherits the device's
+        // 2x/3x display scale would silently turn a 1200px target back into a
+        // 2400/3600px upload.
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: target, format: format)
         let resized = renderer.image { _ in
             image.draw(in: CGRect(origin: .zero, size: target))
         }

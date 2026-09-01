@@ -220,6 +220,8 @@ struct SavedFoodRecord: Codable {
     var kind: SavedFoodKind
     var compositeIngredients: [CompositeIngredientSnapshot]
     var calculatorIngredients: [CalculatorIngredient]
+    var calculatorCustomizations: [CalculatorCustomization]
+    var sourceJournalEntryID: UUID?
 
     init(_ food: SavedFood) {
         id = food.id
@@ -249,6 +251,8 @@ struct SavedFoodRecord: Codable {
         kind = food.kind
         compositeIngredients = food.compositeIngredients
         calculatorIngredients = food.calculatorIngredients
+        calculatorCustomizations = food.calculatorCustomizations
+        sourceJournalEntryID = food.sourceJournalEntryID
     }
 
     enum CodingKeys: String, CodingKey {
@@ -279,6 +283,8 @@ struct SavedFoodRecord: Codable {
         case kind
         case compositeIngredients
         case calculatorIngredients
+        case calculatorCustomizations
+        case sourceJournalEntryID
     }
 
     init(from decoder: Decoder) throws {
@@ -329,6 +335,10 @@ struct SavedFoodRecord: Codable {
             [CalculatorIngredient].self,
             forKey: .calculatorIngredients
         ) ?? []
+        calculatorCustomizations = try container.decodeIfPresent(
+            [CalculatorCustomization].self, forKey: .calculatorCustomizations
+        ) ?? []
+        sourceJournalEntryID = try container.decodeIfPresent(UUID.self, forKey: .sourceJournalEntryID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -360,6 +370,8 @@ struct SavedFoodRecord: Codable {
         try container.encode(kind, forKey: .kind)
         try container.encode(compositeIngredients, forKey: .compositeIngredients)
         try container.encode(calculatorIngredients, forKey: .calculatorIngredients)
+        try container.encode(calculatorCustomizations, forKey: .calculatorCustomizations)
+        try container.encodeIfPresent(sourceJournalEntryID, forKey: .sourceJournalEntryID)
     }
 
     func makeModel() -> SavedFood {
@@ -389,7 +401,9 @@ struct SavedFoodRecord: Codable {
             isOnShelf: isOnShelf,
             kind: kind,
             compositeIngredients: compositeIngredients,
-            calculatorIngredients: calculatorIngredients
+            calculatorIngredients: calculatorIngredients,
+            calculatorCustomizations: calculatorCustomizations,
+            sourceJournalEntryID: sourceJournalEntryID
         )
         food.lastUsedAt = lastUsedAt
         food.refreshCompositeNutrition()
@@ -424,6 +438,8 @@ struct SavedFoodRecord: Codable {
         food.kind = kind
         food.compositeIngredients = compositeIngredients
         food.calculatorIngredients = calculatorIngredients
+        food.calculatorCustomizations = calculatorCustomizations
+        food.sourceJournalEntryID = sourceJournalEntryID
         food.refreshCompositeNutrition()
         food.refreshCalculatorNutrition()
     }
@@ -439,6 +455,7 @@ struct TrackedContainerRecord: Codable {
     var fatPerServing: Double
     var micronutrientsPerServing: [String: MicronutrientValue]
     var gramsPerServing: Double
+    var tareWeight: Double?
     var startWeight: Double
     var finalWeight: Double?
     var startDate: Date
@@ -455,6 +472,7 @@ struct TrackedContainerRecord: Codable {
         fatPerServing = container.fatPerServing
         micronutrientsPerServing = container.micronutrientsPerServing
         gramsPerServing = container.gramsPerServing
+        tareWeight = container.tareWeight
         startWeight = container.startWeight
         finalWeight = container.finalWeight
         startDate = container.startDate
@@ -473,6 +491,7 @@ struct TrackedContainerRecord: Codable {
             fatPerServing: fatPerServing,
             micronutrientsPerServing: micronutrientsPerServing,
             gramsPerServing: gramsPerServing,
+            tareWeight: tareWeight,
             startWeight: startWeight,
             startDate: startDate,
             savedFoodID: savedFoodID
@@ -491,6 +510,7 @@ struct TrackedContainerRecord: Codable {
         container.fatPerServing = fatPerServing
         container.micronutrientsPerServing = micronutrientsPerServing
         container.gramsPerServing = gramsPerServing
+        container.tareWeight = tareWeight
         container.startWeight = startWeight
         container.finalWeight = finalWeight
         container.startDate = startDate
@@ -638,6 +658,7 @@ struct UserGoalsRecord: Codable {
 }
 
 struct AppSettingsRecord: Codable {
+    var accentTheme: String
     var aiProvider: String
     var assistantProvider: String
     var assistantResearchProvider: String
@@ -652,14 +673,30 @@ struct AppSettingsRecord: Codable {
     var azureSolDeployment: String
     var azureTerraDeployment: String
     var azureDefaultModel: String
+    var openAIFastModel: String
+    var openAISmartModel: String
+    var anthropicFastModel: String
+    var anthropicSmartModel: String
+    var museSparkModel: String
+    var openAICompatibleBaseURL: String
+    var openAICompatibleLiteModel: String
+    var openAICompatibleProModel: String
+    var openAICompatibleEmojiModel: String
+    var openAICompatibleFastModel: String
+    var openAICompatibleSmartModel: String
+    var openAICompatibleImageModel: String
+    var foodIconImageProvider: String
     var chatContextBudget: String
     var useGeneratedFoodIconImages: Bool
+    var showJournalFoodImages: Bool
+    var pinnedMicronutrientIDs: [String]
     var offContributeEnabled: Bool
     var breakfastStartMinutes: Int
     var lunchStartMinutes: Int
     var dinnerStartMinutes: Int
 
     init(
+        accentTheme: String = OFJAccentTheme.defaultTheme.rawValue,
         aiProvider: String = AIProviderSettings.defaultProvider.rawValue,
         assistantProvider: String? = nil,
         assistantResearchProvider: String = AssistantResearchProvider.modelProvider.rawValue,
@@ -674,13 +711,29 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment: String = "",
         azureTerraDeployment: String = "",
         azureDefaultModel: String = AIProviderSettings.defaultAzureModel.rawValue,
+        openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel,
+        openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel,
+        anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel,
+        anthropicSmartModel: String = AIProviderSettings.defaultAnthropicSmartModel,
+        museSparkModel: String = AIProviderSettings.defaultMuseSparkModel,
+        openAICompatibleBaseURL: String = AIProviderSettings.defaultOpenAICompatibleBaseURL,
+        openAICompatibleLiteModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleProModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleEmojiModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleFastModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleSmartModel: String = AIProviderSettings.defaultOpenAICompatibleModel,
+        openAICompatibleImageModel: String = AIProviderSettings.defaultOpenAICompatibleImageModel,
+        foodIconImageProvider: String = FoodIconImageProvider.gemini.rawValue,
         chatContextBudget: String = ChatContextBudget.balanced.rawValue,
         useGeneratedFoodIconImages: Bool = false,
+        showJournalFoodImages: Bool = JournalAppearanceSettings.defaultShowFoodImages,
+        pinnedMicronutrientIDs: [String] = [],
         offContributeEnabled: Bool,
         breakfastStartMinutes: Int = MealScheduleDefaults.breakfastStartMinutes,
         lunchStartMinutes: Int = MealScheduleDefaults.lunchStartMinutes,
         dinnerStartMinutes: Int = MealScheduleDefaults.dinnerStartMinutes
     ) {
+        self.accentTheme = OFJAccentTheme.resolved(from: accentTheme).rawValue
         self.aiProvider = aiProvider
         self.assistantProvider = assistantProvider ?? aiProvider
         self.assistantResearchProvider = assistantResearchProvider
@@ -695,8 +748,23 @@ struct AppSettingsRecord: Codable {
         self.azureSolDeployment = azureSolDeployment
         self.azureTerraDeployment = azureTerraDeployment
         self.azureDefaultModel = azureDefaultModel
+        self.openAIFastModel = openAIFastModel
+        self.openAISmartModel = openAISmartModel
+        self.anthropicFastModel = anthropicFastModel
+        self.anthropicSmartModel = anthropicSmartModel
+        self.museSparkModel = museSparkModel
+        self.openAICompatibleBaseURL = openAICompatibleBaseURL
+        self.openAICompatibleLiteModel = openAICompatibleLiteModel
+        self.openAICompatibleProModel = openAICompatibleProModel
+        self.openAICompatibleEmojiModel = openAICompatibleEmojiModel
+        self.openAICompatibleFastModel = openAICompatibleFastModel
+        self.openAICompatibleSmartModel = openAICompatibleSmartModel
+        self.openAICompatibleImageModel = openAICompatibleImageModel
+        self.foodIconImageProvider = foodIconImageProvider
         self.chatContextBudget = chatContextBudget
         self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
+        self.showJournalFoodImages = showJournalFoodImages
+        self.pinnedMicronutrientIDs = PinnedMicronutrientSettings.normalized(pinnedMicronutrientIDs)
         self.offContributeEnabled = offContributeEnabled
         self.breakfastStartMinutes = breakfastStartMinutes
         self.lunchStartMinutes = lunchStartMinutes
@@ -704,6 +772,7 @@ struct AppSettingsRecord: Codable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case accentTheme
         case aiProvider
         case assistantProvider
         case assistantResearchProvider
@@ -718,8 +787,23 @@ struct AppSettingsRecord: Codable {
         case azureSolDeployment
         case azureTerraDeployment
         case azureDefaultModel
+        case openAIFastModel
+        case openAISmartModel
+        case anthropicFastModel
+        case anthropicSmartModel
+        case museSparkModel
+        case openAICompatibleBaseURL
+        case openAICompatibleLiteModel
+        case openAICompatibleProModel
+        case openAICompatibleEmojiModel
+        case openAICompatibleFastModel
+        case openAICompatibleSmartModel
+        case openAICompatibleImageModel
+        case foodIconImageProvider
         case chatContextBudget
         case useGeneratedFoodIconImages
+        case showJournalFoodImages
+        case pinnedMicronutrientIDs
         case offContributeEnabled
         case breakfastStartMinutes
         case lunchStartMinutes
@@ -728,6 +812,10 @@ struct AppSettingsRecord: Codable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        accentTheme = OFJAccentTheme.resolved(
+            from: try container.decodeIfPresent(String.self, forKey: .accentTheme)
+                ?? OFJAccentTheme.defaultTheme.rawValue
+        ).rawValue
         aiProvider = try container.decodeIfPresent(String.self, forKey: .aiProvider) ?? AIProviderSettings.defaultProvider.rawValue
         assistantProvider = try container.decodeIfPresent(String.self, forKey: .assistantProvider) ?? aiProvider
         assistantResearchProvider = try container.decodeIfPresent(String.self, forKey: .assistantResearchProvider) ?? AssistantResearchProvider.modelProvider.rawValue
@@ -742,8 +830,25 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment = try container.decodeIfPresent(String.self, forKey: .azureSolDeployment) ?? ""
         azureTerraDeployment = try container.decodeIfPresent(String.self, forKey: .azureTerraDeployment) ?? ""
         azureDefaultModel = try container.decodeIfPresent(String.self, forKey: .azureDefaultModel) ?? AIProviderSettings.defaultAzureModel.rawValue
+        openAIFastModel = try container.decodeIfPresent(String.self, forKey: .openAIFastModel) ?? AIProviderSettings.defaultOpenAIFastModel
+        openAISmartModel = try container.decodeIfPresent(String.self, forKey: .openAISmartModel) ?? AIProviderSettings.defaultOpenAISmartModel
+        anthropicFastModel = try container.decodeIfPresent(String.self, forKey: .anthropicFastModel) ?? AIProviderSettings.defaultAnthropicFastModel
+        anthropicSmartModel = try container.decodeIfPresent(String.self, forKey: .anthropicSmartModel) ?? AIProviderSettings.defaultAnthropicSmartModel
+        museSparkModel = try container.decodeIfPresent(String.self, forKey: .museSparkModel) ?? AIProviderSettings.defaultMuseSparkModel
+        openAICompatibleBaseURL = try container.decodeIfPresent(String.self, forKey: .openAICompatibleBaseURL) ?? AIProviderSettings.defaultOpenAICompatibleBaseURL
+        openAICompatibleLiteModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleLiteModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleProModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleProModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleEmojiModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleEmojiModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleFastModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleFastModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleSmartModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleSmartModel) ?? AIProviderSettings.defaultOpenAICompatibleModel
+        openAICompatibleImageModel = try container.decodeIfPresent(String.self, forKey: .openAICompatibleImageModel) ?? AIProviderSettings.defaultOpenAICompatibleImageModel
+        foodIconImageProvider = try container.decodeIfPresent(String.self, forKey: .foodIconImageProvider) ?? FoodIconImageProvider.gemini.rawValue
         chatContextBudget = try container.decodeIfPresent(String.self, forKey: .chatContextBudget) ?? ChatContextBudget.balanced.rawValue
         useGeneratedFoodIconImages = try container.decodeIfPresent(Bool.self, forKey: .useGeneratedFoodIconImages) ?? false
+        showJournalFoodImages = try container.decodeIfPresent(Bool.self, forKey: .showJournalFoodImages) ?? JournalAppearanceSettings.defaultShowFoodImages
+        pinnedMicronutrientIDs = PinnedMicronutrientSettings.normalized(
+            try container.decodeIfPresent([String].self, forKey: .pinnedMicronutrientIDs) ?? []
+        )
         offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false
         breakfastStartMinutes = try container.decodeIfPresent(Int.self, forKey: .breakfastStartMinutes) ?? MealScheduleDefaults.breakfastStartMinutes
         lunchStartMinutes = try container.decodeIfPresent(Int.self, forKey: .lunchStartMinutes) ?? MealScheduleDefaults.lunchStartMinutes

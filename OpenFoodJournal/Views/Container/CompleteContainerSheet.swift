@@ -87,6 +87,16 @@ struct CompleteContainerSheet: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            if let tareWeight = container.tareWeight,
+               let initialFoodWeight = container.initialFoodGrams {
+                Text(
+                    "Empty container: \(formatWeight(tareWeight))g · "
+                    + "Food at start: \(formatWeight(initialFoodWeight))g"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -98,6 +108,13 @@ struct CompleteContainerSheet: View {
             Text("Enter the current weight of the container")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+
+            if container.tareWeight != nil {
+                Text("Use the same bowl, lid, and accessories as the starting measurement.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
 
             HStack {
                 TextField("Weight", text: $finalWeightText)
@@ -115,24 +132,33 @@ struct CompleteContainerSheet: View {
 
             // Calculate button — validates and shows results
             Button("Calculate") {
-                guard let weight = Double(finalWeightText),
-                      weight >= 0,
-                      weight < container.startWeight else { return }
+                guard candidateCalculation?.isValidCompletion == true else { return }
                 withAnimation(.spring(duration: 0.3)) {
                     showResults = true
                 }
             }
             .buttonStyle(.bordered)
-            .disabled(Double(finalWeightText) == nil)
+            .disabled(candidateCalculation?.isValidCompletion != true)
+
+            if let completionValidationMessage {
+                Label(completionValidationMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityLabel(completionValidationMessage)
+            }
         }
         .onAppear { isWeightFocused = true }
+        .onChange(of: finalWeightText) {
+            showResults = false
+        }
     }
 
     // MARK: - Results Section
 
     /// Shows the calculated consumed nutrition after entering final weight
     private func resultsSection(finalWeight: Double) -> some View {
-        let consumed = container.startWeight - finalWeight
+        let calculation = container.weightCalculation(endingAt: finalWeight)
+        let consumed = calculation.consumedFoodWeight ?? 0
         let servings = container.gramsPerServing > 0 ? consumed / container.gramsPerServing : 0
 
         return VStack(spacing: 16) {
@@ -143,9 +169,18 @@ struct CompleteContainerSheet: View {
                     .foregroundStyle(.secondary)
                 Text("\(Int(consumed))g")
                     .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .ofjNumericTextTransition(value: consumed)
                 Text("(\(servings, specifier: "%.1f") servings)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: servings)
+
+                if let remaining = calculation.remainingFoodWeight {
+                    Text("\(formatWeight(remaining))g remaining")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(value: remaining)
+                }
             }
 
             // Macro grid
@@ -227,6 +262,38 @@ struct CompleteContainerSheet: View {
         mealTypeWasEdited ? selectedMealType : mealTimeSettings.mealType()
     }
 
+    private var candidateCalculation: ContainerWeightCalculation? {
+        guard let endingWeight = Double(finalWeightText) else { return nil }
+        return container.weightCalculation(endingAt: endingWeight)
+    }
+
+    private var completionValidationMessage: String? {
+        guard !finalWeightText.isEmpty else { return nil }
+        guard let endingWeight = Double(finalWeightText),
+              endingWeight.isFinite,
+              endingWeight >= 0 else {
+            return "Enter a valid current weight."
+        }
+        if endingWeight >= container.startWeight {
+            return "Current weight must be below the starting weight of \(formatWeight(container.startWeight))g."
+        }
+        if let tareWeight = container.tareWeight, endingWeight < tareWeight {
+            return "Current weight cannot be below the empty container weight of \(formatWeight(tareWeight))g."
+        }
+        return nil
+    }
+
+    private func formatWeight(_ weight: Double) -> String {
+        var text = String(format: "%.3f", weight)
+        while text.last == "0" {
+            text.removeLast()
+        }
+        if text.last == "." {
+            text.removeLast()
+        }
+        return text
+    }
+
     private func applyDefaultMealTypeIfNeeded() {
         guard !didApplyDefaultMealType else { return }
         selectedMealType = mealTimeSettings.mealType()
@@ -250,6 +317,7 @@ private struct ResultMacroCell: View {
                 .font(.title2)
                 .fontWeight(.bold)
                 .monospacedDigit()
+                .ofjNumericTextTransition(value: value)
             Text(unit)
                 .font(.caption2)
                 .foregroundStyle(.secondary)

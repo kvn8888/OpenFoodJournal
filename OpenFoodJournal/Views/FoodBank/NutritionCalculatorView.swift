@@ -112,6 +112,7 @@ struct NutritionCalculatorLibraryView: View {
 struct NutritionCalculatorEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
+    @Environment(NutritionStore.self) private var nutritionStore
     @Environment(TursoMirrorService.self) private var tursoMirror
 
     private let calculator: SavedFood?
@@ -275,12 +276,13 @@ struct NutritionCalculatorEditorView: View {
                 calculatorIngredients: ingredients
             )
             calculator.refreshCalculatorNutrition()
-            modelContext.insert(calculator)
+            nutritionStore.addSavedFood(calculator, mirrorReason: "nutrition_calculator_created")
             saved = calculator
         }
 
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: isEditing ? "nutrition_calculator_updated" : "nutrition_calculator_created")
+        if isEditing {
+            nutritionStore.saveChanges(mirrorReason: "nutrition_calculator_updated")
+        }
         onSaved?(saved)
         dismiss()
     }
@@ -288,9 +290,7 @@ struct NutritionCalculatorEditorView: View {
 
 struct NutritionCalculatorBuildView: View {
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @Environment(NutritionStore.self) private var nutritionStore
-    @Environment(TursoMirrorService.self) private var tursoMirror
     @Environment(MealTimeSettings.self) private var mealTimeSettings
 
     @Bindable var calculator: SavedFood
@@ -301,6 +301,7 @@ struct NutritionCalculatorBuildView: View {
     @State private var didApplyDefaultMealType = false
     @State private var buildName: String
     @State private var selections: [CalculatorSelection] = []
+    @State private var customizationMessage: String?
 
     init(calculator: SavedFood, logDate: Date) {
         self.calculator = calculator
@@ -313,8 +314,16 @@ struct NutritionCalculatorBuildView: View {
     }
 
     private var canLog: Bool {
-        !selections.isEmpty &&
+        CalculatorCustomization.canUse(selections, in: calculator.calculatorIngredients) &&
         !buildName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var customizations: [CalculatorCustomization] {
+        calculator.calculatorCustomizations.sorted {
+            $0.lastUsedAt == $1.lastUsedAt
+                ? $0.id.uuidString < $1.id.uuidString
+                : $0.lastUsedAt > $1.lastUsedAt
+        }
     }
 
     var body: some View {
@@ -322,6 +331,7 @@ struct NutritionCalculatorBuildView: View {
             Form {
                 summarySection
                 ingredientsSection
+                customizationsSection
                 quantitiesSection
                 actionsSection
             }
@@ -334,6 +344,14 @@ struct NutritionCalculatorBuildView: View {
             }
             .onAppear {
                 applyDefaultMealTypeIfNeeded()
+            }
+            .alert("Calculator", isPresented: Binding(
+                get: { customizationMessage != nil },
+                set: { if !$0 { customizationMessage = nil } }
+            )) {
+                Button("OK", role: .cancel) { customizationMessage = nil }
+            } message: {
+                Text(customizationMessage ?? "")
             }
         }
     }
@@ -384,6 +402,62 @@ struct NutritionCalculatorBuildView: View {
     }
 
     @ViewBuilder
+    private var customizationsSection: some View {
+        Section {
+            if customizations.isEmpty {
+                Text("Your logged combinations will appear here for reuse.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(customizations) { customization in
+                let isAvailable = customization.canUse(in: calculator.calculatorIngredients)
+                Button {
+                    guard isAvailable else { return }
+                    buildName = customization.name
+                    selections = customization.selections
+                } label: {
+                    VStack(alignment: .leading, spacing: OFJSpace.s4) {
+                        Label(customization.name, systemImage: "clock.arrow.circlepath")
+                            .font(.subheadline.weight(.medium))
+                        Text(customization.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(3)
+                        if !isAvailable {
+                            Text("Unavailable: an ingredient, portion, or amount is no longer valid.")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(!isAvailable)
+                .swipeActions(edge: .trailing) {
+                    Button("Delete", role: .destructive) {
+                        if !nutritionStore.deleteCalculatorCustomization(customization.id, from: calculator) {
+                            customizationMessage = "Could not remove this customization. Please try again."
+                        }
+                    }
+                }
+            }
+            Button {
+                if nutritionStore.saveCalculatorCustomization(for: calculator, name: buildName, selections: selections) {
+                    customizationMessage = "Customization saved. No journal entry was added."
+                } else {
+                    customizationMessage = "Could not save this customization. Check the ingredients and try again."
+                }
+            } label: {
+                Label("Save Current Customization", systemImage: "bookmark")
+            }
+            .disabled(!canLog)
+        } header: {
+            Text("Saved Customizations")
+        } footer: {
+            Text("Select a combination to fill the ingredients and quantities, then review before adding to Journal. Nutrition uses the calculator's current values; older journal entries never change.")
+        }
+    }
+
+    @ViewBuilder
     private var quantitiesSection: some View {
         if !selections.isEmpty {
             Section {
@@ -406,6 +480,9 @@ struct NutritionCalculatorBuildView: View {
                                 ) {
                                     Text("\(CalculatorFormat.number(selection.quantity))x")
                                         .monospacedDigit()
+                                        .ofjNumericTextTransition(
+                                            value: selection.quantity
+                                        )
                                 }
                             }
                             .padding(.vertical, 2)
@@ -433,6 +510,8 @@ struct NutritionCalculatorBuildView: View {
         } footer: {
             if selections.isEmpty {
                 Text("Choose at least one ingredient to log this meal.")
+            } else if !CalculatorCustomization.canUse(selections, in: calculator.calculatorIngredients) {
+                Text("An ingredient or portion changed. Review your choices before logging.")
             }
         }
     }
@@ -483,33 +562,14 @@ struct NutritionCalculatorBuildView: View {
     }
 
     private func logBuild() {
-        let trimmedName = buildName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let summary = SavedFood.calculatorSelectionSummary(
-            for: calculator.calculatorIngredients,
-            selections: selections
-        )
-        let entry = NutritionEntry(
-            name: trimmedName,
-            mealType: mealTypeForLog,
-            scanMode: .manual,
-            calories: totals.calories,
-            protein: totals.protein,
-            carbs: totals.carbs,
-            fat: totals.fat,
-            micronutrients: totals.micronutrients,
-            servingSize: "1 meal",
-            brand: calculator.brand ?? calculator.name,
-            servingQuantity: 1,
-            servingUnit: "meal",
-            savedFoodID: calculator.id
-        )
-        entry.selectionSummary = summary.nilIfEmpty
-
-        nutritionStore.log(entry, to: logDate)
-        calculator.markLoggedForFoodBank()
-        try? modelContext.save()
-        tursoMirror.scheduleMirror(reason: "nutrition_calculator_logged")
-        dismiss()
+        if nutritionStore.logCalculatorBuild(
+            from: calculator, name: buildName, selections: selections,
+            mealType: mealTypeForLog, to: logDate
+        ) {
+            dismiss()
+        } else {
+            customizationMessage = "Could not log this meal. Review the ingredients and try again."
+        }
     }
 
     private var mealTypeBinding: Binding<MealType> {
@@ -1072,6 +1132,7 @@ private struct CalculatorIngredientRow: View {
                 Text("\(ingredient.portions.count) portion\(ingredient.portions.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: ingredient.portions.count)
             }
             Spacer()
             Image(systemName: "chevron.right")
@@ -1096,6 +1157,7 @@ private struct CalculatorPortionRow: View {
                 Text("\(CalculatorFormat.number(portion.calories)) cal")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: portion.calories)
             }
             Spacer()
             HStack(spacing: 6) {
@@ -1123,6 +1185,7 @@ private struct CalculatorMacroCard: View {
                     .font(.system(.headline, design: .rounded))
                     .fontWeight(.semibold)
                     .monospacedDigit()
+                    .ofjNumericTextTransition(value: value)
                 Text(unit)
                     .font(.caption)
                     .foregroundStyle(.secondary)
