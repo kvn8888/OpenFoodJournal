@@ -261,7 +261,7 @@ TextField("Calories", text: $caloriesText)
 | Default wheel | In-form selection |
 
 ### History Micronutrient Pins
-Long-press a History micronutrient chip to open a context menu with **Pin** / **Unpin**. Pins persist in `UserDefaults` (`history.pinnedMicronutrientIDs`) via `PinnedMicronutrientSettings` and appear in a dedicated row above the full chip scroller. Macros are not pinnable.
+Long-press a History micronutrient chip to open a **Pin** / **Unpin** menu. Pins persist in `UserDefaults` (`history.pinnedMicronutrientIDs`) via `PinnedMicronutrientSettings` and appear in a dedicated row above the full chip scroller. Macros are not pinnable. Pinnable chips use `Menu` with `primaryAction` (tap selects, hold opens the menu) rather than `Button` + `contextMenu`, which does not present inside a horizontal `ScrollView` with interactive Liquid Glass.
 
 ### Confirmation Dialogs
 ```swift
