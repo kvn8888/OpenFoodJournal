@@ -54,6 +54,7 @@ struct OpenFoodJournalTests {
 
         #expect(joined.contains("cached_input_token_count INTEGER"))
         #expect(joined.contains("provider TEXT"))
+        #expect(joined.contains("accent_theme TEXT"))
         #expect(!joined.contains("ADD COLUMN IF NOT EXISTS"))
     }
 
@@ -178,6 +179,7 @@ struct OpenFoodJournalTests {
             session: StubChatURLProtocol.session(),
             defaults: defaults,
             diagnosticOutboxURL: directory.appending(path: "outbox.json"),
+            networkAccess: .unitTests,
             credentialProvider: {
                 ("https://test-diagnostics.turso.io", "test-turso-token")
             }
@@ -206,6 +208,74 @@ struct OpenFoodJournalTests {
             $0.contains("DELETE FROM ofj_ai_diagnostic_events WHERE expires_at <= ?")
         }))
     }
+
+    #if DEBUG
+    @MainActor
+    @Test func developerBuildUsesIsolatedCloudKitAndDisablesHealthKit() {
+        #expect(MacrosApp.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal.dev")
+        #expect(!HealthKitService().isAvailable)
+    }
+
+    @MainActor
+    @Test func developerBuildBlocksTursoWithoutReadingCredentials() async throws {
+        let harness = try ChatTestHarness()
+        let suiteName = "ofj-turso-debug-isolation-tests-(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(true, forKey: TursoMirrorService.enabledKey)
+        defaults.set(true, forKey: TursoMirrorService.includeDiagnosticsKey)
+
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: suiteName, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        var credentialReadCount = 0
+        var requestCount = 0
+        StubChatURLProtocol.handler = { request in
+            requestCount += 1
+            let response = HTTPURLResponse(
+                url: try #require(request.url),
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+        defer { StubChatURLProtocol.handler = nil }
+
+        let service = TursoMirrorService(
+            modelContext: harness.context,
+            session: StubChatURLProtocol.session(),
+            defaults: defaults,
+            diagnosticOutboxURL: directory.appending(path: "outbox.json"),
+            credentialProvider: {
+                credentialReadCount += 1
+                return ("https://should-not-run.turso.io", "should-not-run")
+            }
+        )
+
+        #expect(!service.isEnabled)
+        service.recordDiagnostic(AIDiagnosticEvent(
+            eventType: "assistant_span",
+            operation: "debug_isolation",
+            status: "completed"
+        ))
+        #expect(service.pendingDiagnosticCount == 0)
+        #expect(!(await service.flushDiagnosticOutbox()))
+        await service.clearAIDiagnostics()
+
+        do {
+            try await service.testConnection()
+            Issue.record("Debug testConnection unexpectedly reached Turso")
+        } catch TursoMirrorError.disabledInDeveloperBuild {
+            // Expected: the build policy rejects access before credentials.
+        } catch {
+            Issue.record("Unexpected Debug Turso error: \(error)")
+        }
+
+        #expect(credentialReadCount == 0)
+        #expect(requestCount == 0)
+    }
+    #endif
 
     @Test func tursoUpsertStatementUsesPlaceholders() {
         let row = TursoMirrorRow(table: "ofj_app_settings", columns: [
@@ -245,6 +315,7 @@ struct OpenFoodJournalTests {
 
         #expect(record.useProModel)
         #expect(!record.offContributeEnabled)
+        #expect(record.accentTheme == OFJAccentTheme.defaultTheme.rawValue)
         #expect(record.breakfastStartMinutes == MealScheduleDefaults.breakfastStartMinutes)
         #expect(record.lunchStartMinutes == MealScheduleDefaults.lunchStartMinutes)
         #expect(record.dinnerStartMinutes == MealScheduleDefaults.dinnerStartMinutes)
@@ -257,6 +328,34 @@ struct OpenFoodJournalTests {
         #expect(record.assistantResearchProvider == AssistantResearchProvider.modelProvider.rawValue)
         #expect(record.tavilySearchDepth == TavilySearchDepth.fast.rawValue)
         #expect(record.parallelSearchMode == ParallelSearchMode.basic.rawValue)
+        #expect(record.openAIFastModel == AIProviderSettings.defaultOpenAIFastModel)
+        #expect(record.openAISmartModel == AIProviderSettings.defaultOpenAISmartModel)
+        #expect(record.anthropicFastModel == AIProviderSettings.defaultAnthropicFastModel)
+        #expect(record.anthropicSmartModel == AIProviderSettings.defaultAnthropicSmartModel)
+        #expect(record.museSparkModel == AIProviderSettings.defaultMuseSparkModel)
+        #expect(record.pinnedMicronutrientIDs.isEmpty)
+    }
+
+    @MainActor
+    @Test func appSettingsRecordRoundTripsAccentTheme() throws {
+        let original = AppSettingsRecord(
+            accentTheme: OFJAccentTheme.harvestOrange.rawValue,
+            useProModel: false,
+            offContributeEnabled: false
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: data)
+
+        #expect(decoded.accentTheme == OFJAccentTheme.harvestOrange.rawValue)
+    }
+
+    @MainActor
+    @Test func appSettingsRecordFallsBackFromUnknownAccentTheme() throws {
+        let data = Data(#"{"accentTheme":"future-theme"}"#.utf8)
+        let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: data)
+
+        #expect(decoded.accentTheme == OFJAccentTheme.defaultTheme.rawValue)
     }
 
     @Test func chatToolRecordPreservesGeminiReplayMetadata() throws {

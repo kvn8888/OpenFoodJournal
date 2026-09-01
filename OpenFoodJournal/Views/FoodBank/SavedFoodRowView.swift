@@ -11,6 +11,7 @@ struct SavedFoodRowView: View {
     let food: SavedFood
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
     @State private var generatedIconAnimationTrigger = 0
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         HStack(spacing: 12) {
@@ -38,6 +39,7 @@ struct SavedFoodRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                        .ofjNumericTextTransition(value: food.calories)
                 } else if let emoji = food.normalizedEmoji {
                     Text(emoji)
                         .font(.title3)
@@ -46,6 +48,7 @@ struct SavedFoodRowView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
+                        .ofjNumericTextTransition(value: food.calories)
                 } else if food.kind == .calculator {
                     Image(systemName: "slider.horizontal.3")
                         .font(.headline)
@@ -53,11 +56,15 @@ struct SavedFoodRowView: View {
                     Text("\(food.calculatorIngredients.count)")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                        .ofjNumericTextTransition(
+                            value: food.calculatorIngredients.count
+                        )
                 } else {
                     Text("\(Int(food.calories))")
                         .font(.headline)
                         .fontWeight(.semibold)
                         .monospacedDigit()
+                        .ofjNumericTextTransition(value: food.calories)
                     Text("cal")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -108,12 +115,16 @@ struct SavedFoodRowView: View {
                 Text("\(food.calculatorIngredients.count) item\(food.calculatorIngredients.count == 1 ? "" : "s")")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-            } else {
-                HStack(spacing: 6) {
-                    MacroChip(value: food.protein, color: .blue, label: "P")
-                    MacroChip(value: food.carbs, color: .green, label: "C")
-                    MacroChip(value: food.fat, color: .yellow, label: "F")
-                }
+                    .ofjNumericTextTransition(
+                        value: food.calculatorIngredients.count
+                    )
+            } else if !dynamicTypeSize.isAccessibilitySize {
+                FoodMacroPill(protein: food.protein, carbs: food.carbs, fat: food.fat)
+            }
+        }
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 8) {
+            if dynamicTypeSize.isAccessibilitySize && food.kind != .calculator {
+                FoodMacroPill(protein: food.protein, carbs: food.carbs, fat: food.fat)
             }
         }
         .padding(.vertical, 4)
@@ -131,7 +142,7 @@ struct SavedFoodRowView: View {
     }
 }
 
-private enum FoodIconMetrics {
+enum FoodIconMetrics {
     static let imageSize: CGFloat = 51
     static let columnWidth: CGFloat = 58
     static let shineWidth: CGFloat = imageSize * 0.3

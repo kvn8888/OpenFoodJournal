@@ -101,7 +101,9 @@ final class RuntimeModelCatalog {
                 [String: ProviderPayload].self,
                 from: data
             )
-            let retained = Dictionary(uniqueKeysWithValues: ["google", "openrouter", "azure"].compactMap {
+            let retained = Dictionary(uniqueKeysWithValues: [
+                "google", "openrouter", "azure", "openai", "anthropic", "meta"
+            ].compactMap {
                 providerID in providers[providerID].map { (providerID, $0) }
             })
             guard !retained.isEmpty else { throw CatalogError.missingProviders }
@@ -311,6 +313,12 @@ final class RuntimeModelCatalog {
         case .gemini: "google"
         case .openRouter: "openrouter"
         case .azureOpenAI: "azure"
+        case .openAI: "openai"
+        case .anthropic: "anthropic"
+        case .museSpark: "meta"
+        // Custom endpoints have no models.dev entry; an unmatched ID simply
+        // falls back to the conservative capability defaults.
+        case .openAICompatible: "openai-compatible"
         }
     }
 
@@ -364,7 +372,7 @@ final class RuntimeModelCatalog {
             longContextInputMultiplier: Self.multiplier(tier?.input, base: input),
             longContextCachedInputMultiplier: Self.multiplier(tier?.cacheRead, base: cached),
             longContextOutputMultiplier: Self.multiplier(tier?.output, base: output),
-            outputIncludesThinking: provider == .azureOpenAI,
+            outputIncludesThinking: provider != .gemini && provider != .openRouter,
             source: "models.dev \(catalogProviderID(for: provider))/\(modelID), fetched \(verifiedAt ?? "unknown")"
         )
     }

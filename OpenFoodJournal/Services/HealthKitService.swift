@@ -10,7 +10,21 @@ import SwiftData
 @MainActor
 final class HealthKitService {
     var isAuthorized = false
-    var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
+
+    /// HealthKit has no development/production split — there is exactly one
+    /// Health store on the device, shared by every app that can reach it.
+    /// A Debug build would appear as a *separate* HKSource writing into the
+    /// user's real health data, and sync identifiers only deduplicate within a
+    /// source, so overlapping entries would show up twice. Debug builds also
+    /// ship entitlements without HealthKit, so this keeps the code path
+    /// consistent with what the entitlements already allow.
+    var isAvailable: Bool {
+        #if DEBUG
+        return false
+        #else
+        return HKHealthStore.isHealthDataAvailable()
+        #endif
+    }
 
     @ObservationIgnored
     private let tursoMirror: TursoMirrorService?

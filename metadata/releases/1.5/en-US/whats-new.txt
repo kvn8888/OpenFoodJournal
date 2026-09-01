@@ -1,0 +1,7 @@
+OpenFoodJournal 1.5 is our biggest update yet, with a redesigned experience across Journal, Food Bank, History, Nutrition, Log Food, the camera, and Settings.
+
+• A clearer Journal with a refreshed calendar, calorie-aware backgrounds, food images, and smoother live updates.
+• Rebuilt Nutrition and History views with day, week, and month trends, deeper macro and micronutrient details, and pinned nutrients.
+• A persistent nutrition Assistant with multiple AI providers, web research, tools, image and PDF input, durable sources, context compaction, and transparent usage details.
+• Smarter food logging with Shelf suggestions, tare and container tracking, reusable calculator customizations, serving conversions, and Journal-to-Food Bank saving.
+• Better camera framing and zoom, customizable accents, improved dark mode, stronger Apple Health syncing, and many reliability fixes.

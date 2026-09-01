@@ -104,7 +104,7 @@ jobs:
   promote:
     name: Promote existing build externally
     needs: prepare
-    runs-on: xcode-27
+    runs-on: macos-26
     timeout-minutes: 20
     environment: app-store-production
 

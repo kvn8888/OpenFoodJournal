@@ -2,7 +2,7 @@
 
 Status: workflows, GitHub environments, verified credentials, both protected release branches, environment branch restrictions, the production reviewer gate, immutable releases, public-release synchronization, and both deployment enablement variables are configured. Future trusted branch updates now use the cloud release train.
 
-Last updated: 2026-07-30
+Last updated: 2026-08-31
 
 ## Decision
 
@@ -32,13 +32,14 @@ TestFlight and the App Store do not receive separately rebuilt binaries. A binar
 
 | Concern | Previous workflow | New workflow |
 | --- | --- | --- |
-| Build host | Kevin's local Mac and external SSD | Ephemeral GitHub `xcode-27` runner |
+| Build host | Kevin's local Mac and external SSD | Ephemeral GitHub `macos-26` runner |
 | Source branch | `app-store` was development, TestFlight, and App Store release state | `testflight` is integration/beta; `app-store` is production promotion |
 | Pull requests | Local compile verification was performed when requested | Every PR to either protected branch runs cloud compile and non-UI tests |
-| Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Pinned GitHub `xcode-27` preview image |
-| Xcode drift | Selected manually | Workflow requires Xcode 27.0 build `27A5228h` and fails on drift |
+| Xcode | Local `/Volumes/DevDisk/Xcode-beta.app` | Stable Xcode 26.6 on GitHub `macos-26` |
+| Xcode drift | Selected manually | Workflow requires Xcode 26.6 build `17F113` and fails on drift |
 | DerivedData | Accumulated under local `.asc` or other local paths | Created under `RUNNER_TEMP` and destroyed after the job |
 | Unit tests | Often compile-only because the local simulator store is unreliable | Executed on a hosted iPhone simulator through the unit-test-only scheme |
+| Gemini image contract | Manual/ad hoc API probes could drift from the app payload | A protected billable canary executes the exact production request builder and blocks archive/upload on contract failure |
 | UI tests | Not required | UI-test execution remains excluded |
 | Build number | Bumped locally before an archive | Allocated from processed and in-flight App Store Connect builds under a serialized deployment |
 | Signing | Local Keychain and provisioning profile | Temporary runner keychain and profile from protected environment secrets |
@@ -63,15 +64,15 @@ Triggers on:
 
 It:
 
-1. Uses the pinned `xcode-27` image.
-2. Confirms Xcode 27.0 build `27A5228h`.
+1. Uses the pinned `macos-26` image.
+2. Selects and confirms stable Xcode 26.6 build `17F113`.
 3. Runs the release-note and promotion-manifest contract tests.
 4. Compiles the app, unit-test target, and UI-test target with `build-for-testing`.
 5. Selects an available hosted iPhone simulator.
 6. Executes only `OpenFoodJournalUnitTests`, which includes provider-contract tests.
 7. Uploads an `.xcresult` for three days only when the test job fails.
 
-It receives no App Store Connect, signing, or AI-provider credentials. Live provider tests continue to skip when their opt-in credentials are absent.
+It receives no App Store Connect, signing, or AI-provider credentials. Pull-request live provider tests continue to skip when their opt-in credentials are absent. The protected TestFlight workflow owns the required billable Gemini image canary so provider secrets are never exposed to pull-request jobs.
 
 ### `.github/workflows/release-credentials-check.yml`
 
@@ -87,7 +88,9 @@ metadata, stage a version, or submit for review.
 
 Triggers on pushes to `testflight` or manual dispatch. The deployment job runs only when the repository variable `ENABLE_TESTFLIGHT_AUTOMATION` equals `true`.
 
-After cloud CI succeeds, it:
+After cloud CI succeeds, a protected `gemini-image-contract` job uses the `testflight-internal` environment to execute the exact production `ScanService.foodIconImageRequest(prompt:)` payload against `gemini-3.1-flash-lite-image`. It requires a real returned image and fails closed on missing credentials, HTTP errors, or response-contract drift. This is a small billable canary and runs before any archive or upload.
+
+The deployment then:
 
 1. Enters the protected `testflight-internal` environment.
 2. Installs the pinned `asc` 3.1.1 binary after SHA-256 verification.
@@ -119,12 +122,12 @@ The prerelease manifest is the bridge between TestFlight and App Store promotion
   "whatsNew": "Public, version-specific release notes",
   "whatsNewSHA256": "SHA-256 of the attached notes file",
   "releaseNotes": {
-    "source": "github-models",
-    "model": "openai/gpt-4.1",
+    "source": "bifrost",
+    "model": "openai/gpt-5.6-sol",
     "requiresHumanApproval": true
   },
   "version": "1.4",
-  "xcodeBuild": "27A5228h"
+  "xcodeBuild": "17F113"
 }
 ```
 
@@ -223,8 +226,11 @@ Secrets:
 - `APPLE_DISTRIBUTION_CERTIFICATE_B64`
 - `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD`
 - `APPLE_PROVISIONING_PROFILE_B64`
+- `OFJ_GEMINI_API_KEY`
 
 The App Store Connect key must be able to inspect apps/builds, allocate build numbers, upload builds, and manage internal TestFlight distribution. The provisioning profile must match `k3vnc.OpenFoodJournal`, team `83B48K23H4`, and the capabilities used by the Release archive.
+
+`OFJ_GEMINI_API_KEY` is a dedicated, restricted Gemini credential for the billable Nano Banana 2 Lite release canary. Do not reuse a personal unrestricted key. Restrict it to the Gemini API where supported, monitor its usage, and rotate it independently of keys stored on user devices. A missing or rejected key blocks TestFlight before archive/upload.
 
 The repository currently expects the certificate identity `iPhone Distribution`,
 matching the installed project credential. If the certificate is rotated to a
@@ -273,7 +279,31 @@ The legacy `main` branch remains historical and is not part of the release train
 
 ## AI release assistant boundary
 
-The TestFlight workflow currently uses GitHub Models `openai/gpt-4.1` through the job’s short-lived `GITHUB_TOKEN` and `models: read` permission. It sends only bounded commit-derived change evidence—never source code, app data, Apple credentials, signing assets, or AI-provider keys. `RELEASE_NOTES_MODEL` may override the versioned default. A reviewed file at `metadata/releases/<version>/<locale>/whats-new.txt` takes precedence when exact copy is required.
+The TestFlight workflow drafts release notes through the self-hosted Bifrost router at `vars.BIFROST_BASE_URL`, authenticated with the `BIFROST_VIRTUAL_KEY` and `BIFROST_AUTHORIZATION` secrets. It sends only bounded commit-derived change evidence—never source code, app data, Apple credentials, signing assets, or AI-provider keys. `RELEASE_NOTES_MODEL` may override the versioned default in `ci/release-config.json`. A reviewed file at `metadata/releases/<version>/<locale>/whats-new.txt` takes precedence when exact copy is required.
+
+Sources are attempted in order, and `releaseNotes.source` in the manifest records which one produced the text:
+
+| Order | `source` | Condition |
+| --- | --- | --- |
+| 1 | `repository-override` | A committed `whats-new.txt` exists for the version and locale. |
+| 2 | `bifrost` | `BIFROST_BASE_URL` and `BIFROST_VIRTUAL_KEY` are set and the reply passes validation. |
+| 3 | `github-models` | Legacy path; GitHub Models is being retired and now answers with a brownout error, so expect this tier to fail. |
+| 4 | `deterministic-git-history` | No generator succeeded; notes are cleaned commit subjects. |
+
+Model names are deliberately **unprefixed** (`gpt-5.6-sol`, not `openai/gpt-5.6-sol`). An unprefixed name lets the virtual key select among every provider whose keys serve that model, which is the layer where the router's weighting and key rotation apply. Prefixing pins the request to one upstream and bypasses that selection entirely, so the contract test rejects any `provider/model` name in the config.
+
+Provider selection cannot substitute a *different* model, so it does not help if a model is withdrawn or unavailable everywhere. The per-request chain in `releaseNotesFallbackModels` covers that case, overridable with the comma-separated `RELEASE_NOTES_FALLBACK_MODELS`, tried in order when the primary errors. `releaseNotes.model` in the manifest records the model that actually answered, which is not necessarily the one requested.
+
+Two router-side settings limit how much of this actually protects a release, and neither lives in this repo:
+
+- Every provider has `max_retries: 0`, so there is no retry budget for transient 429s, 5xx responses, or timeouts before the router gives up on a provider.
+- Every provider and key weight is `null`, so traffic is not distributed—observed requests all land on the same provider.
+
+Because the router is a single self-hosted machine, none of its failure modes fail the release—an unreachable host, a rejected key, or a reply that fails validation each fall through to the next tier. A run that lands on `deterministic-git-history` still ships, but the notes will read like a changelog; treat that source in the approval summary as a signal to write the copy by hand.
+
+The prompt is versioned at `ci/prompts/whats-new-system.txt` and `ci/prompts/whats-new-user.txt` rather than embedded in the script, so wording changes are reviewable. `{{VERSION}}` and `{{EVIDENCE}}` are substituted at run time, and `{{EVIDENCE}}` must remain alone on its own line. The prompt deliberately instructs the model to discard internal changes (toolchain, CI, tests, refactors, debug-only builds, credential handling) rather than paraphrase them, to avoid naming gestures or screens the evidence does not name, and to translate developer vocabulary into user-visible terms.
+
+`max_tokens` is set well above the visible output length on purpose: reasoning models bill hidden reasoning tokens against the same cap, and too small a budget returns an empty message that silently demotes the run to deterministic notes.
 
 AI can safely prepare a release proposal containing:
 
@@ -303,7 +333,7 @@ AI must not own:
 2. Keep the centralized HealthKit, Assistant, container, and cloud-release work together; it is reconciled and pushed.
 3. Keep the remote `testflight` branch aligned with reviewed release candidates.
 4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
-5. Keep the verified environment secrets in place and rerun **Release Credential Check** after any key, certificate, password, or profile rotation.
+5. Keep the verified environment secrets in place, including the dedicated `OFJ_GEMINI_API_KEY` release-canary credential, and rerun **Release Credential Check** after any Apple key, certificate, password, or profile rotation.
 6. Keep `testflight-internal` restricted to `testflight`; keep `app-store-production` restricted to `app-store` with Kevin as a required reviewer.
 7. Enable immutable releases in the repository's GitHub settings.
 8. Add the branch protection rules and required `Cloud CI` check.
@@ -321,17 +351,18 @@ AI must not own:
 ## Current blockers
 
 - `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
+- `OFJ_GEMINI_API_KEY` is present in `testflight-internal` as of 2026-07-31. Its actual request validity is intentionally checked by every trusted TestFlight candidate before archive/upload.
 - `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
 - `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
 - Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
 - Repository release immutability is enabled for future releases.
 - Public GitHub releases 1.2 (build 1) and 1.3 (build 3) were backfilled from
-  live App Store Connect records on 2026-07-30; v1.3 is Latest. TestFlight 1.4
-  (build 11) remains a prerelease and must not become v1.4 until Apple publishes
-  App Store version 1.4.
+  live App Store Connect records on 2026-07-30; v1.3 remains Latest until Apple
+  publishes 1.5. TestFlight 1.5 candidates remain prereleases and must not
+  become the public `v1.5` GitHub release before Apple's storefront reports 1.5.
 - Public-release automation requires a schema-2 TestFlight manifest; legacy
   schema-1 manifests fail closed.
-- `xcode-27` is currently a GitHub preview image. It matches the local Xcode build, but preview capacity and naming may change.
+- Release archives use stable Xcode 26.6 rather than an Xcode beta. Beta toolchains can become invalid for App Store Connect uploads as soon as Apple advances the supported beta.
 
 ## Storage behavior
 

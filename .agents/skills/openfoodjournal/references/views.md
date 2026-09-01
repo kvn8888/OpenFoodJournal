@@ -65,8 +65,9 @@ enum DailyLogSheet: Identifiable {
 ### FoodBankView (`Views/FoodBank/FoodBankView.swift`)
 - **Default list**: active foods only; foods auto-hide when `SavedFood.lastUsedAt` is older than 14 days or `archivedAt != nil`
 - **Search**: non-empty search filters all saved foods, so archived foods remain discoverable
-- **Plus menu**: AI Search, Composite Food, Nutrition Calculator, Search Open Food Facts, Manual Entry, Archive
+- **Plus menu**: Composite Food, Nutrition Calculator, Search Open Food Facts, Manual Entry, Archive, Manage Brands. AI Search is retired.
 - **Rows**: tap or leading swipe opens `LogFoodSheet` for single/composite foods or `NutritionCalculatorBuildView` for calculators; trailing swipe archives/unarchives or opens `EditFoodSheet`, `CompositeFoodBuilderView`, or `NutritionCalculatorEditorView` by food kind
+- **Shelf Suggestions**: each expanded recommendation row has a trailing Remove from Shelf swipe action that saves `isOnShelf = false` and schedules the Turso mirror
 
 ### CompositeFoodBuilderView (`Views/FoodBank/CompositeFoodBuilderView.swift`)
 - **Purpose**: creates or edits a `SavedFood(kind: .composite)` from Food Bank ingredient snapshots

@@ -152,7 +152,7 @@ Every sheet must include:
 | `RadialMenuButton` | Floating "+" FAB with radial menu | Circular, bottom-aligned |
 | `MicronutrientSummaryView` | Progress bars for all micros | Full width section |
 | `NutrientBreakdownView` | Donut chart + per-food bars | NavigationDestination |
-| `NutritionDetailView` | Period picker + macro cards + micros | Full screen section |
+| `NutritionDetailView` | Period picker + glass macro card + glass vitamin/mineral sections | ScrollView on `JournalCalorieBackground` |
 | `ServingMappingSection` | Reusable Form section for unit maps | Form section |
 | `CursorEndModifier` | UITextField cursor fix | Applied at app root |
 
@@ -259,6 +259,9 @@ TextField("Calories", text: $caloriesText)
 | `.pickerStyle(.menu)` | Compact inline (meal type in cards) |
 | `.pickerStyle(.segmented)` | 3–4 options (period picker) |
 | Default wheel | In-form selection |
+
+### History Micronutrient Pins
+Long-press a History micronutrient chip to open a **Pin** / **Unpin** menu. Pins persist in `UserDefaults` (`history.pinnedMicronutrientIDs`) via `PinnedMicronutrientSettings` and appear in a dedicated row above the full chip scroller. Macros are not pinnable. Pinnable chips use `Menu` with `primaryAction` (tap selects, hold opens the menu) rather than `Button` + `contextMenu`, which does not present inside a horizontal `ScrollView` with interactive Liquid Glass.
 
 ### Confirmation Dialogs
 ```swift

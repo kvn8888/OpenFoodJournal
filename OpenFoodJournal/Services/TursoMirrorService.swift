@@ -8,6 +8,7 @@ import SwiftData
 
 enum TursoMirrorError: LocalizedError, Sendable {
     case missingCredentials
+    case disabledInDeveloperBuild
     case invalidDatabaseURL
     case invalidResponse
     case httpStatus(Int, String)
@@ -17,6 +18,8 @@ enum TursoMirrorError: LocalizedError, Sendable {
         switch self {
         case .missingCredentials:
             "Turso database URL and auth token are required."
+        case .disabledInDeveloperBuild:
+            "Turso is disabled in developer builds."
         case .invalidDatabaseURL:
             "Enter a valid libsql:// or https:// Turso database URL."
         case .invalidResponse:
@@ -26,6 +29,27 @@ enum TursoMirrorError: LocalizedError, Sendable {
         case .pipelineError(let message):
             "Turso SQL pipeline failed: \(message)"
         }
+    }
+}
+
+enum TursoNetworkAccess: Sendable {
+    case buildDefault
+    case unitTests
+
+    var isAllowed: Bool {
+        #if DEBUG
+        switch self {
+        case .buildDefault:
+            return false
+        case .unitTests:
+            // The override exists only so Debug-hosted tests can exercise the
+            // HTTP protocol. It remains unusable from previews and normal app
+            // launches even if a future caller selects it accidentally.
+            return ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        }
+        #else
+        return true
+        #endif
     }
 }
 
@@ -182,6 +206,8 @@ enum TursoSchema {
             .init(name: "serving_mappings_json", type: "TEXT"),
             .init(name: "composite_ingredients_json", type: "TEXT"),
             .init(name: "calculator_ingredients_json", type: "TEXT"),
+            .init(name: "calculator_customizations_json", type: "TEXT"),
+            .init(name: "source_journal_entry_id", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
         TursoTableDefinition(name: "ofj_tracked_containers", columns: [
@@ -193,6 +219,7 @@ enum TursoSchema {
             .init(name: "carbs_per_serving", type: "REAL"),
             .init(name: "fat_per_serving", type: "REAL"),
             .init(name: "grams_per_serving", type: "REAL"),
+            .init(name: "tare_weight", type: "REAL"),
             .init(name: "start_weight", type: "REAL"),
             .init(name: "final_weight", type: "REAL"),
             .init(name: "start_date", type: "TEXT"),
@@ -251,9 +278,12 @@ enum TursoSchema {
         ]),
         TursoTableDefinition(name: "ofj_app_settings", columns: [
             .init(name: "id", type: "TEXT PRIMARY KEY"),
+            .init(name: "accent_theme", type: "TEXT"),
             .init(name: "use_gemini_pro", type: "INTEGER"),
             .init(name: "food_bank_auto_generate_emojis", type: "INTEGER"),
             .init(name: "food_bank_use_generated_icon_images", type: "INTEGER"),
+            .init(name: "journal_show_food_images", type: "INTEGER"),
+            .init(name: "history_pinned_micronutrient_ids", type: "TEXT"),
             .init(name: "off_contribute_enabled", type: "INTEGER"),
             .init(name: "off_contribution_success_count", type: "INTEGER"),
             .init(name: "off_last_contribution_at", type: "TEXT"),
@@ -264,6 +294,7 @@ enum TursoSchema {
             .init(name: "turso_enabled", type: "INTEGER"),
             .init(name: "turso_include_diagnostics", type: "INTEGER"),
             .init(name: "app_version", type: "TEXT"),
+            .init(name: "app_bundle_id", type: "TEXT"),
             .init(name: "app_build", type: "TEXT"),
             .init(name: "mirror_generation", type: "TEXT")
         ]),
@@ -416,6 +447,8 @@ final class TursoMirrorService {
     @ObservationIgnored
     private let credentialProvider: () -> (databaseURL: String?, authToken: String?)
     @ObservationIgnored
+    private let networkAccess: TursoNetworkAccess
+    @ObservationIgnored
     private let encoder: JSONEncoder
     @ObservationIgnored
     private let isoFormatter: ISO8601DateFormatter
@@ -441,11 +474,13 @@ final class TursoMirrorService {
         diagnosticOutboxMaximumEvents: Int = AIDiagnosticOutboxStore.defaultMaximumEvents,
         diagnosticOutboxMaximumBytes: Int = AIDiagnosticOutboxStore.defaultMaximumBytes,
         diagnosticOutboxMaximumAge: TimeInterval = AIDiagnosticOutboxStore.defaultMaximumAge,
+        networkAccess: TursoNetworkAccess = .buildDefault,
         credentialProvider: (() -> (databaseURL: String?, authToken: String?))? = nil
     ) {
         self.modelContext = modelContext
         self.session = session
         self.defaults = defaults
+        self.networkAccess = networkAccess
         self.credentialProvider = credentialProvider ?? {
             (KeychainService.tursoDatabaseURL, KeychainService.tursoAuthToken)
         }
@@ -472,7 +507,12 @@ final class TursoMirrorService {
     }
 
     var isEnabled: Bool {
-        defaults.bool(forKey: Self.enabledKey)
+        // Developer builds never mirror. The mirror is generation-pruned, so a
+        // developer build pushing its own (separate, possibly empty) dataset
+        // could delete rows the production app still relies on. Keychain
+        // scoping already makes production credentials unreachable from a
+        // Debug build, but that is incidental; this is the actual guarantee.
+        networkAccess.isAllowed && defaults.bool(forKey: Self.enabledKey)
     }
 
     var includeDiagnostics: Bool {
@@ -868,12 +908,22 @@ final class TursoMirrorService {
     // MARK: - Credentials
 
     private var hasCredentials: Bool {
+        guard networkAccess.isAllowed else { return false }
         let credentials = credentialProvider()
         return Self.normalizedHTTPURLString(credentials.databaseURL ?? "") != nil
             && credentials.authToken?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     private func loadCredentials() throws -> (url: URL, token: String) {
+        // Every network path — mirrorAll, scheduleMirror, testConnection,
+        // runMigrations, the diagnostic flush/export, and clearRemoteDiagnostics
+        // — resolves credentials here. Failing at this one point disables all of
+        // them, including any path added later. Guarding only `isEnabled` left
+        // testConnection, runMigrations and clearRemoteDiagnostics reachable,
+        // and clearRemoteDiagnostics issues DELETE statements.
+        guard networkAccess.isAllowed else {
+            throw TursoMirrorError.disabledInDeveloperBuild
+        }
         let credentials = credentialProvider()
         guard let urlString = credentials.databaseURL,
               let normalized = Self.normalizedHTTPURLString(urlString),
@@ -1014,6 +1064,35 @@ final class TursoMirrorService {
         return TursoSQLStatement(sql: sql, args: columns.compactMap { row.columns[$0] })
     }
 
+    static func trackedContainerMirrorRow(
+        _ container: TrackedContainer,
+        generation: String,
+        startDate: String,
+        completedDate: String?,
+        micronutrientsJSON: String
+    ) -> TursoMirrorRow {
+        TursoMirrorRow(table: "ofj_tracked_containers", columns: [
+            "id": .text(container.id.uuidString),
+            "food_name": .text(container.foodName),
+            "food_brand": container.foodBrand.map(TursoSQLValue.text) ?? .null,
+            "calories_per_serving": .real(container.caloriesPerServing),
+            "protein_per_serving": .real(container.proteinPerServing),
+            "carbs_per_serving": .real(container.carbsPerServing),
+            "fat_per_serving": .real(container.fatPerServing),
+            "grams_per_serving": .real(container.gramsPerServing),
+            "tare_weight": container.tareWeight.map(TursoSQLValue.real) ?? .null,
+            "start_weight": .real(container.startWeight),
+            "final_weight": container.finalWeight.map(TursoSQLValue.real) ?? .null,
+            "start_date": .text(startDate),
+            "completed_date": completedDate.map(TursoSQLValue.text) ?? .null,
+            "saved_food_id": container.savedFoodID.map {
+                .text($0.uuidString)
+            } ?? .null,
+            "micronutrients_json": .text(micronutrientsJSON),
+            "mirror_generation": .text(generation)
+        ])
+    }
+
     private func upsertSyncRun(
         id: String,
         generation: String,
@@ -1130,28 +1209,20 @@ final class TursoMirrorService {
                 "serving_mappings_json": .text(jsonString(food.servingMappings)),
                 "composite_ingredients_json": .text(jsonString(food.compositeIngredients)),
                 "calculator_ingredients_json": .text(jsonString(food.calculatorIngredients)),
+                "calculator_customizations_json": .text(jsonString(food.calculatorCustomizations)),
+                "source_journal_entry_id": optionalString(food.sourceJournalEntryID?.uuidString),
                 "mirror_generation": .text(generation)
             ]))
         }
 
         for container in containers {
-            append(TursoMirrorRow(table: "ofj_tracked_containers", columns: [
-                "id": .text(container.id.uuidString),
-                "food_name": .text(container.foodName),
-                "food_brand": optionalString(container.foodBrand),
-                "calories_per_serving": .real(container.caloriesPerServing),
-                "protein_per_serving": .real(container.proteinPerServing),
-                "carbs_per_serving": .real(container.carbsPerServing),
-                "fat_per_serving": .real(container.fatPerServing),
-                "grams_per_serving": .real(container.gramsPerServing),
-                "start_weight": .real(container.startWeight),
-                "final_weight": optionalDouble(container.finalWeight),
-                "start_date": .text(iso(container.startDate)),
-                "completed_date": optionalDate(container.completedDate),
-                "saved_food_id": optionalUUID(container.savedFoodID),
-                "micronutrients_json": .text(jsonString(container.micronutrientsPerServing)),
-                "mirror_generation": .text(generation)
-            ]))
+            append(Self.trackedContainerMirrorRow(
+                container,
+                generation: generation,
+                startDate: iso(container.startDate),
+                completedDate: container.completedDate.map { iso($0) },
+                micronutrientsJSON: jsonString(container.micronutrientsPerServing)
+            ))
         }
 
         append(TursoMirrorRow(table: "ofj_preferences", columns: [
@@ -1206,9 +1277,17 @@ final class TursoMirrorService {
 
         append(TursoMirrorRow(table: "ofj_app_settings", columns: [
             "id": .text("default"),
+            "accent_theme": .text(
+                OFJAccentTheme.resolved(
+                    from: defaults.string(forKey: OFJAccentTheme.storageKey)
+                        ?? OFJAccentTheme.defaultTheme.rawValue
+                ).rawValue
+            ),
             "use_gemini_pro": .bool(defaults.bool(forKey: "scan.useProModel")),
             "food_bank_auto_generate_emojis": .bool(defaults.bool(forKey: FoodBankEmojiSettings.autoGenerateKey)),
             "food_bank_use_generated_icon_images": .bool(defaults.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey)),
+            "journal_show_food_images": .bool(JournalAppearanceSettings.showFoodImages(in: defaults)),
+            "history_pinned_micronutrient_ids": .text(PinnedMicronutrientSettings.encode(PinnedMicronutrientSettings.ids(in: defaults))),
             "off_contribute_enabled": .bool(defaults.bool(forKey: "off.contributeEnabled")),
             "off_contribution_success_count": .integer(defaults.integer(forKey: "off.contributionSuccessCount")),
             "off_last_contribution_at": optionalDate(timestamp: defaults.double(forKey: "off.lastContributionAt")),
@@ -1219,6 +1298,10 @@ final class TursoMirrorService {
             "turso_enabled": .bool(isEnabled),
             "turso_include_diagnostics": .bool(includeDiagnostics),
             "app_version": .text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"),
+            // CURRENT_PROJECT_VERSION is only stamped with a real number by CI,
+            // so app_build alone cannot identify which app produced a row.
+            // Record the bundle identifier so every row is self-identifying.
+            "app_bundle_id": .text(Bundle.main.bundleIdentifier ?? "unknown"),
             "app_build": .text(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"),
             "mirror_generation": .text(generation)
         ]))

@@ -8,24 +8,28 @@
 import SwiftUI
 import SwiftData
 import PhotosUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct ChatView: View {
+    private static let maximumImageAttachments = 4
+
     @Environment(ChatService.self) private var chatService
     @Environment(\.modelContext) private var modelContext
 
     // Most recently active thread first — the tab always resumes the latest.
     @Query(sort: \ChatThread.updatedAt, order: .reverse)
     private var threads: [ChatThread]
-
     @State private var activeThread: ChatThread?
     @State private var draft = ""
     @State private var showThreadList = false
+    @State private var editingMessageID: UUID?
     @FocusState private var inputFocused: Bool
 
     // Attachment staging
     @State private var pendingAttachments: [ChatDraftAttachment] = []
     @State private var showPhotoPicker = false
+    @State private var showCameraPicker = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var showFileImporter = false
 
@@ -99,11 +103,18 @@ struct ChatView: View {
             .photosPicker(
                 isPresented: $showPhotoPicker,
                 selection: $photoPickerItems,
-                maxSelectionCount: 4,
+                maxSelectionCount: max(1, remainingImageAttachmentSlots),
                 matching: .images
             )
             .onChange(of: photoPickerItems) {
                 loadPickedPhotos()
+            }
+            .fullScreenCover(isPresented: $showCameraPicker) {
+                AssistantCameraPicker(
+                    onCapture: attachCapturedPhoto,
+                    onCancel: { showCameraPicker = false }
+                )
+                .ignoresSafeArea()
             }
             .fileImporter(
                 isPresented: $showFileImporter,
@@ -129,7 +140,10 @@ struct ChatView: View {
                     }
 
                     if let thread = currentThread {
-                        ScopedChatTranscript(thread: thread)
+                        ScopedChatTranscript(
+                            thread: thread,
+                            onEdit: beginEditing
+                        )
                     }
 
                     if chatService.activeThreadID == currentThread?.id,
@@ -154,9 +168,6 @@ struct ChatView: View {
                         errorBanner(error)
                     }
 
-                    if let thread = currentThread {
-                        ChatCompletedRunDetails(threadID: thread.id)
-                    }
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
@@ -177,53 +188,11 @@ struct ChatView: View {
             .onChange(of: chatService.pendingPermission?.id) {
                 scrollToBottom(proxy)
             }
+            .onChange(of: currentThread?.id) {
+                cancelEditing()
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputBar
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func messageView(_ message: ChatMessage) -> some View {
-        switch message.role {
-        case .tool:
-            ToolChipView(message: message)
-        case .user, .model:
-            ChatBubble(message: message)
-                .contextMenu {
-                    bubbleMenu(for: message)
-                }
-        }
-    }
-
-    @ViewBuilder
-    private func bubbleMenu(for message: ChatMessage) -> some View {
-        Button {
-            UIPasteboard.general.string = message.text
-        } label: {
-            Label("Copy", systemImage: "doc.on.doc")
-        }
-
-        // Regeneration applies to the final reply of the thread only.
-        if message.role == .model,
-           message.id == messages.last?.id,
-           !chatService.isStreaming,
-           let thread = currentThread {
-            Divider()
-            Button {
-                Task { await chatService.regenerate(in: thread) }
-            } label: {
-                Label("Regenerate", systemImage: "arrow.clockwise")
-            }
-            Button {
-                Task { await chatService.regenerate(in: thread, using: .fast) }
-            } label: {
-                Label("Regenerate with Fast", systemImage: "hare")
-            }
-            Button {
-                Task { await chatService.regenerate(in: thread, using: .smart) }
-            } label: {
-                Label("Regenerate with Smart", systemImage: "brain")
             }
         }
     }
@@ -258,6 +227,7 @@ struct ChatView: View {
                         Text(elapsedLabel(elapsed))
                             .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .ofjNumericTextTransition(value: elapsed)
                     }
                     Spacer()
                     Button {
@@ -493,65 +463,111 @@ struct ChatView: View {
 
     private var inputBar: some View {
         VStack(spacing: 6) {
+            if editingMessageID != nil {
+                HStack(spacing: OFJSpace.s8) {
+                    Label("Editing message", systemImage: "pencil")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Cancel", action: cancelEditing)
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.glass)
+                }
+                .accessibilityIdentifier("assistant.editing-message")
+            }
+
             if !pendingAttachments.isEmpty {
                 pendingAttachmentsRow
             }
 
-            if let usage = chatService.contextUsage {
-                contextMeter(usage)
-            }
+            GlassEffectContainer(spacing: 8) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    Menu {
+                        Button {
+                            showCameraPicker = true
+                        } label: {
+                            Label("Take Photo", systemImage: "camera.fill")
+                        }
+                        .disabled(
+                            remainingImageAttachmentSlots == 0
+                                || !UIImagePickerController.isSourceTypeAvailable(.camera)
+                        )
 
-            HStack(alignment: .bottom, spacing: 8) {
-                Menu {
-                    Button {
-                        showPhotoPicker = true
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label("Photo Library", systemImage: "photo.on.rectangle")
+                        }
+                        .disabled(remainingImageAttachmentSlots == 0)
+                        Button {
+                            showFileImporter = true
+                        } label: {
+                            Label("Attach PDF", systemImage: "doc.badge.plus")
+                        }
                     } label: {
-                        Label("Photo Library", systemImage: "photo.on.rectangle")
-                    }
-                    Button {
-                        showFileImporter = true
-                    } label: {
-                        Label("Attach PDF", systemImage: "doc.badge.plus")
-                    }
-                } label: {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 28))
-                        .symbolRenderingMode(.hierarchical)
-                }
-                .disabled(chatService.isStreaming)
-
-                TextField("Ask about your nutrition…", text: $draft, axis: .vertical)
-                    .lineLimit(1...4)
-                    .focused($inputFocused)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(in: .rect(cornerRadius: 20))
-                    .accessibilityIdentifier("assistant.input")
-
-                if chatService.isStreaming {
-                    Button {
-                        chatService.cancelCurrentRun()
-                    } label: {
-                        Image(systemName: "stop.circle.fill")
-                            .font(.system(size: 32))
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.red)
+                        Image(systemName: "plus")
+                            .font(.body.weight(.semibold))
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Stop Assistant")
-                    .accessibilityIdentifier("assistant.stop")
-                } else {
-                    Button {
-                        sendMessage(draft)
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 32))
-                            .symbolRenderingMode(.hierarchical)
+                    .frame(
+                        width: OFJLayout.assistantComposerRestingHeight,
+                        height: OFJLayout.assistantComposerRestingHeight
+                    )
+                    .contentShape(Circle())
+                    .glassEffect(.regular.interactive(), in: .circle)
+                    .disabled(chatService.isStreaming)
+                    .accessibilityLabel("Add attachment")
+
+                    TextField("Ask about your nutrition…", text: $draft, axis: .vertical)
+                        .lineLimit(1...4)
+                        .focused($inputFocused)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .frame(minHeight: OFJLayout.assistantComposerRestingHeight)
+                        .glassEffect(
+                            .regular.interactive(),
+                            in: .rect(cornerRadius: OFJLayout.assistantComposerRestingHeight / 2)
+                        )
+                        .accessibilityIdentifier("assistant.input")
+
+                    if chatService.isStreaming {
+                        Button {
+                            chatService.cancelCurrentRun()
+                        } label: {
+                            Image(systemName: "stop.fill")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.red)
+                        }
+                        .buttonStyle(.plain)
+                        .frame(
+                            width: OFJLayout.assistantComposerRestingHeight,
+                            height: OFJLayout.assistantComposerRestingHeight
+                        )
+                        .contentShape(Circle())
+                        .glassEffect(.regular.interactive(), in: .circle)
+                        .accessibilityLabel("Stop Assistant")
+                        .accessibilityIdentifier("assistant.stop")
+                    } else {
+                        Button {
+                            sendMessage(draft)
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.body.weight(.bold))
+                        }
+                        .buttonStyle(.plain)
+                        .frame(
+                            width: OFJLayout.assistantComposerRestingHeight,
+                            height: OFJLayout.assistantComposerRestingHeight
+                        )
+                        .contentShape(Circle())
+                        .glassEffect(
+                            .regular.tint(Color.accentColor.opacity(0.35)).interactive(),
+                            in: .circle
+                        )
+                        .disabled(sendDisabled)
+                        .opacity(sendDisabled ? 0.5 : 1)
+                        .accessibilityIdentifier("assistant.send")
                     }
-                    .buttonStyle(.plain)
-                    .disabled(sendDisabled)
-                    .opacity(sendDisabled ? 0.5 : 1)
-                    .accessibilityIdentifier("assistant.send")
                 }
             }
 
@@ -570,60 +586,6 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 4)
-    }
-
-    private func contextMeter(_ usage: ChatContextUsage) -> some View {
-        return VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text("Next request")
-                Spacer()
-                Text("~\(compactTokenCount(usage.displayedTokens)) / \(compactTokenCount(usage.selectedLimit))")
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-
-            ProgressView(
-                value: min(Double(usage.displayedTokens), Double(usage.selectedLimit)),
-                total: Double(max(1, usage.selectedLimit))
-            )
-            .tint(usage.isContextLimited ? .orange : .accentColor)
-
-            Text("Reserved: \(compactTokenCount(usage.reservedOutputTokens)) output + \(compactTokenCount(usage.reservedToolTokens)) tools")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-
-            if let reported = usage.reportedInputTokens {
-                let cached = usage.reportedCachedInputTokens ?? 0
-                Text("Last provider report: \(compactTokenCount(reported)) input · \(compactTokenCount(cached)) cached")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if usage.isEstimateFrozen {
-                Text("Estimate frozen until this run completes")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-            }
-
-            if let explanation = usage.explanation ?? chatService.contextWarning {
-                Text(explanation)
-                    .font(.caption2)
-                    .foregroundStyle(.orange)
-                    .accessibilityIdentifier("assistant.context-warning")
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityIdentifier("assistant.context-meter")
-    }
-
-    private func compactTokenCount(_ count: Int) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        }
-        if count >= 1_000 {
-            return String(format: "%.0fk", Double(count) / 1_000)
-        }
-        return count.formatted()
     }
 
     private var pendingAttachmentsRow: some View {
@@ -666,6 +628,14 @@ struct ChatView: View {
             || (draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pendingAttachments.isEmpty)
     }
 
+    private var remainingImageAttachmentSlots: Int {
+        max(
+            0,
+            Self.maximumImageAttachments
+                - pendingAttachments.lazy.filter(\.isImage).count
+        )
+    }
+
     // MARK: - Attachment Loading
 
     private func loadPickedPhotos() {
@@ -674,6 +644,7 @@ struct ChatView: View {
         photoPickerItems = []
         Task {
             for item in items {
+                guard remainingImageAttachmentSlots > 0 else { break }
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let jpeg = ChatService.downscaledJPEG(from: data)
                 else { continue }
@@ -684,6 +655,20 @@ struct ChatView: View {
                 ))
             }
         }
+    }
+
+    private func attachCapturedPhoto(_ image: UIImage) {
+        defer { showCameraPicker = false }
+        guard remainingImageAttachmentSlots > 0,
+              let sourceData = image.jpegData(compressionQuality: 0.9),
+              let jpeg = ChatService.downscaledJPEG(from: sourceData)
+        else { return }
+
+        pendingAttachments.append(ChatDraftAttachment(
+            data: jpeg,
+            mimeType: "image/jpeg",
+            filename: "camera-photo.jpg"
+        ))
     }
 
     private func importPDF(_ result: Result<URL, Error>) {
@@ -717,12 +702,46 @@ struct ChatView: View {
         }
 
         let attachments = pendingAttachments
-        pendingAttachments = []
+        let result: ChatSubmissionResult
+        if let editingMessageID,
+           let message = thread.safeMessages.first(where: { $0.id == editingMessageID }) {
+            result = chatService.submitEdit(
+                trimmed,
+                attachments: attachments,
+                replacing: message,
+                in: thread
+            )
+        } else {
+            result = chatService.submit(trimmed, attachments: attachments, in: thread)
+        }
+
+        if case .accepted = result {
+            pendingAttachments = []
+            draft = ""
+            self.editingMessageID = nil
+        }
+    }
+
+    private func beginEditing(_ message: ChatMessage) {
+        guard message.role == .user, !chatService.isStreaming else { return }
+        editingMessageID = message.id
+        draft = message.text
+        pendingAttachments = message.safeAttachments.map {
+            ChatDraftAttachment(data: $0.data, mimeType: $0.mimeType, filename: $0.filename)
+        }
+        inputFocused = true
+    }
+
+    private func cancelEditing() {
+        guard editingMessageID != nil else { return }
+        editingMessageID = nil
         draft = ""
-        _ = chatService.submit(trimmed, attachments: attachments, in: thread)
+        pendingAttachments = []
+        inputFocused = false
     }
 
     private func startNewThread() {
+        cancelEditing()
         let thread = ChatThread()
         modelContext.insert(thread)
         activeThread = thread
@@ -738,11 +757,15 @@ struct ChatView: View {
 private struct ScopedChatTranscript: View {
     @Environment(ChatService.self) private var chatService
     let thread: ChatThread
+    let onEdit: (ChatMessage) -> Void
 
     @Query private var messages: [ChatMessage]
+    @Query private var runs: [ChatAgentRun]
+    @State private var infoMessage: ChatMessage?
 
-    init(thread: ChatThread) {
+    init(thread: ChatThread, onEdit: @escaping (ChatMessage) -> Void) {
         self.thread = thread
+        self.onEdit = onEdit
         let threadID = thread.id
         _messages = Query(
             filter: #Predicate<ChatMessage> { message in
@@ -753,6 +776,12 @@ private struct ScopedChatTranscript: View {
                 SortDescriptor(\ChatMessage.timestamp),
                 SortDescriptor(\ChatMessage.id)
             ]
+        )
+        _runs = Query(
+            filter: #Predicate<ChatAgentRun> { run in
+                run.thread?.id == threadID
+            },
+            sort: [SortDescriptor(\ChatAgentRun.createdAt, order: .reverse)]
         )
     }
 
@@ -775,14 +804,45 @@ private struct ScopedChatTranscript: View {
                     }
                 }
             } else {
-                ChatBubble(message: message)
-                    .contextMenu { bubbleMenu(for: message) }
+                chatMessageRow(message)
             }
         }
         .onAppear { chatService.repairTranscriptOrdering(in: thread) }
         .onChange(of: messages.map(\.transcriptOrdinal)) {
             chatService.repairTranscriptOrdering(in: thread)
         }
+        .sheet(item: $infoMessage) { message in
+            NavigationStack {
+                ChatResponseInfoView(
+                    message: message,
+                    run: message.runID.flatMap { runID in
+                        runs.first { $0.id == runID }
+                    },
+                    contextUsage: chatService.contextUsage,
+                    contextWarning: chatService.contextWarning
+                )
+            }
+        }
+    }
+
+    private func chatMessageRow(_ message: ChatMessage) -> some View {
+        HStack {
+            if message.role == .user { Spacer(minLength: 40) }
+
+            ChatBubble(message: message)
+                // Attach the menu to the visible bubble, not the full-width
+                // alignment row. The latter made iOS preview an invisible
+                // spacer as a large blank rectangle on long press.
+                .contextMenu {
+                    bubbleMenu(for: message)
+                } preview: {
+                    ChatBubble(message: message)
+                        .frame(maxWidth: 320)
+                }
+
+            if message.role == .model { Spacer(minLength: 40) }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func isFirstToolInGroup(at index: Int) -> Bool {
@@ -813,6 +873,22 @@ private struct ScopedChatTranscript: View {
             Label("Copy", systemImage: "doc.on.doc")
         }
 
+        if message.role == .user, !chatService.isStreaming {
+            Button {
+                onEdit(message)
+            } label: {
+                Label("Edit Message", systemImage: "pencil")
+            }
+        }
+
+        if message.role == .model {
+            Button {
+                infoMessage = message
+            } label: {
+                Label("Info", systemImage: "info.circle")
+            }
+        }
+
         if message.role == .model,
            message.id == messages.last?.id,
            !chatService.isStreaming {
@@ -836,69 +912,122 @@ private struct ScopedChatTranscript: View {
     }
 }
 
-private struct ChatCompletedRunDetails: View {
-    @Query private var runs: [ChatAgentRun]
-
-    init(threadID: UUID) {
-        _runs = Query(
-            filter: #Predicate<ChatAgentRun> { run in
-                run.thread?.id == threadID
-            },
-            sort: [SortDescriptor(\ChatAgentRun.createdAt, order: .reverse)]
-        )
-    }
-
-    private var completedRuns: [ChatAgentRun] {
-        Array(runs.filter { $0.phase.isTerminal }.prefix(3))
-    }
+private struct ChatResponseInfoView: View {
+    @Environment(\.dismiss) private var dismiss
+    let message: ChatMessage
+    let run: ChatAgentRun?
+    let contextUsage: ChatContextUsage?
+    let contextWarning: String?
 
     var body: some View {
-        ForEach(completedRuns) { run in
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 5) {
-                    detail("Rounds", run.roundRecords.count.formatted())
+        Form {
+            Section("Generation") {
+                infoRow("Status", run?.phase.rawValue.capitalized ?? "Completed")
+                infoRow("Provider", message.providerID ?? run?.providerID ?? "Unknown")
+                infoRow("Model", message.modelID ?? run?.modelID ?? "Unknown")
+                if let baseModel = run?.baseModelID, baseModel != run?.modelID {
+                    infoRow("Resolved model", baseModel)
+                }
+                if let requestID = message.providerRequestID ?? run?.providerRequestID {
+                    infoRow("Request ID", requestID)
+                }
+            }
+
+            if let run {
+                Section("Performance") {
+                    infoRow("Rounds", run.roundRecords.count.formatted())
+                    if let firstEvent = run.roundRecords.compactMap(\.firstProviderEventMs).first {
+                        infoRow("First provider event", duration(firstEvent))
+                    }
                     if let ttft = run.roundRecords.compactMap(\.firstVisibleTextMs).first {
-                        detail("TTFT", "\(ttft) ms")
+                        infoRow("First visible text", duration(ttft))
                     }
-                    detail("Tool time", "\(run.cumulativeToolLatencyMs) ms")
-                    detail("Tokens", "\(run.reportedInputTokens) in · \(run.reportedOutputTokens) out · \(run.reportedThinkingTokens) reasoning")
+                    let roundDuration = run.roundRecords.reduce(0) { $0 + $1.durationMs }
+                    infoRow("Model time", duration(roundDuration))
+                    infoRow("Tool time", duration(run.cumulativeToolLatencyMs))
+                    if let started = run.requestStartedAt, let completed = run.requestCompletedAt {
+                        infoRow("Total", elapsed(started, completed))
+                    }
+                    infoRow("Retries", run.roundRecords.reduce(0) { $0 + $1.retryCount }.formatted())
+                }
+
+                Section("Usage") {
+                    infoRow("Input", run.reportedInputTokens.formatted())
+                    infoRow("Cached input", run.reportedCachedInputTokens.formatted())
+                    infoRow("Output", run.reportedOutputTokens.formatted())
+                    infoRow("Reasoning", run.reportedThinkingTokens.formatted())
                     if let cost = knownCost(run) {
-                        detail("Cost", cost.formatted(.currency(code: "USD")))
+                        infoRow("Estimated cost", cost.formatted(.currency(code: "USD")))
                     } else {
-                        detail("Cost", "Usage only")
-                    }
-                    detail("Retries", run.roundRecords.reduce(0) { $0 + $1.retryCount }.formatted())
-                    if let requestID = run.providerRequestID {
-                        detail("Request ID", requestID)
+                        infoRow("Cost", "Usage only")
                     }
                 }
-                .font(.caption)
-                .textSelection(.enabled)
-                .padding(.top, 6)
-            } label: {
-                Label(
-                    "\(run.phase.rawValue.capitalized) · \(run.modelID)",
-                    systemImage: run.phase == .completed ? "checkmark.circle" : "exclamationmark.circle"
-                )
-                .font(.caption)
             }
-            .padding(10)
-            .glassEffect(in: .rect(cornerRadius: 14))
+
+            Section("Context Window") {
+                if let usage = contextUsage {
+                    infoRow("Next request estimate", "~\(compactTokens(usage.displayedTokens))")
+                    infoRow("Selected limit", compactTokens(usage.selectedLimit))
+                    infoRow("Reserved output", compactTokens(usage.reservedOutputTokens))
+                    infoRow("Reserved tools", compactTokens(usage.reservedToolTokens))
+                    if let reported = usage.reportedInputTokens {
+                        infoRow("Last reported input", compactTokens(reported))
+                    }
+                    if let cached = usage.reportedCachedInputTokens {
+                        infoRow("Last reported cached", compactTokens(cached))
+                    }
+                    if usage.isCompacted { infoRow("Compacted", "Yes") }
+                    if usage.isEstimateFrozen { infoRow("Estimate", "Frozen during generation") }
+                    if let explanation = usage.explanation ?? contextWarning {
+                        Text(explanation)
+                            .font(.caption)
+                            .foregroundStyle(usage.isContextLimited ? .orange : .secondary)
+                    }
+                } else if let run {
+                    infoRow("Selected limit", compactTokens(run.selectedContextLimit))
+                    infoRow("Input used", compactTokens(run.reportedInputTokens))
+                    infoRow("Compactions", run.compactionCount.formatted())
+                } else {
+                    Text("Context details are unavailable for this older response.")
+                        .foregroundStyle(.secondary)
+                }
+            }
         }
+        .navigationTitle("Response Info")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { dismiss() }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func knownCost(_ run: ChatAgentRun) -> Double? {
-        let values = run.roundRecords.compactMap(\.estimatedCostUSD)
-        guard values.count == run.roundRecords.count, !values.isEmpty else { return nil }
-        return values.reduce(0, +)
+        let costs = run.roundRecords.compactMap(\.estimatedCostUSD)
+        guard !costs.isEmpty, costs.count == run.roundRecords.count else { return nil }
+        return costs.reduce(0, +)
     }
 
-    private func detail(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label).foregroundStyle(.secondary)
-            Spacer()
-            Text(value).multilineTextAlignment(.trailing)
-        }
+    private func duration(_ milliseconds: Int) -> String {
+        milliseconds >= 1_000
+            ? (Double(milliseconds) / 1_000).formatted(.number.precision(.fractionLength(1))) + " s"
+            : "\(milliseconds) ms"
+    }
+
+    private func elapsed(_ start: Date, _ end: Date) -> String {
+        duration(Int(max(0, end.timeIntervalSince(start)) * 1_000))
+    }
+
+    private func compactTokens(_ count: Int) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", Double(count) / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.1fk", Double(count) / 1_000) }
+        return count.formatted()
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        LabeledContent(label, value: value)
+            .textSelection(.enabled)
     }
 }
 
@@ -908,21 +1037,15 @@ struct ChatBubble: View {
     let message: ChatMessage
 
     var body: some View {
-        HStack {
-            if message.role == .user {
-                Spacer(minLength: 40)
-                bubbleContent
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(.regular.tint(.blue.opacity(0.35)), in: .rect(cornerRadius: 20))
-            } else {
-                bubbleContent
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .glassEffect(in: .rect(cornerRadius: 20))
-                Spacer(minLength: 40)
-            }
-        }
+        bubbleContent
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .glassEffect(
+                message.role == .user
+                    ? .regular.tint(.blue.opacity(0.35))
+                    : .regular,
+                in: .rect(cornerRadius: 20)
+            )
     }
 
     private var bubbleContent: some View {
@@ -1050,11 +1173,17 @@ struct ChatThreadListView: View {
 
     @Query(sort: \ChatThread.updatedAt, order: .reverse)
     private var threads: [ChatThread]
+    @Query(sort: \ChatAttachment.createdAt, order: .reverse)
+    private var attachments: [ChatAttachment]
 
     /// Threads that have at least one message — lazily created empties from
     /// "New Conversation" taps are hidden until used.
     private var visibleThreads: [ChatThread] {
         threads.filter { !($0.messages ?? []).isEmpty }
+    }
+
+    private var libraryAttachments: [ChatAttachment] {
+        attachments.filter { $0.message?.thread != nil }
     }
 
     var body: some View {
@@ -1068,14 +1197,57 @@ struct ChatThreadListView: View {
                     }
                 } else {
                     List {
-                        ForEach(visibleThreads) { thread in
-                            Button {
-                                activeThread = thread
-                                dismiss()
-                            } label: {
-                                threadRow(thread)
+                        if !libraryAttachments.isEmpty {
+                            Section("Images & Files") {
+                                attachmentLibrary
+                                    .listRowInsets(EdgeInsets(
+                                        top: OFJSpace.s6,
+                                        leading: OFJSpace.s16,
+                                        bottom: OFJSpace.s8,
+                                        trailing: OFJSpace.s16
+                                    ))
                             }
-                            .buttonStyle(.plain)
+                        }
+
+                        ForEach(visibleThreads) { thread in
+                            HStack(spacing: OFJSpace.s8) {
+                                Button {
+                                    open(thread)
+                                } label: {
+                                    threadRow(thread)
+                                }
+                                .buttonStyle(.plain)
+
+                                Menu {
+                                    Button {
+                                        Task { await chatService.regenerateTitle(in: thread) }
+                                    } label: {
+                                        Label("Regenerate Title", systemImage: "sparkles")
+                                    }
+                                    .disabled(chatService.titleGenerationThreadIDs.contains(thread.id))
+
+                                    Divider()
+
+                                    Button(role: .destructive) {
+                                        delete(thread)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                } label: {
+                                    Group {
+                                        if chatService.titleGenerationThreadIDs.contains(thread.id) {
+                                            ProgressView().controlSize(.small)
+                                        } else {
+                                            Image(systemName: "ellipsis")
+                                        }
+                                    }
+                                    .frame(
+                                        minWidth: OFJLayout.minimumHitTarget,
+                                        minHeight: OFJLayout.minimumHitTarget
+                                    )
+                                }
+                                .accessibilityLabel("Conversation actions")
+                            }
                             .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
@@ -1094,6 +1266,49 @@ struct ChatThreadListView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Done") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var attachmentLibrary: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            LazyHStack(spacing: OFJSpace.s8) {
+                ForEach(libraryAttachments) { attachment in
+                    Button {
+                        if let thread = attachment.message?.thread {
+                            open(thread)
+                        }
+                    } label: {
+                        VStack(alignment: .leading, spacing: OFJSpace.s4) {
+                            if attachment.isImage,
+                               let image = UIImage(data: attachment.data) {
+                                Image(uiImage: image)
+                                    .resizable()
+                                    .scaledToFill()
+                                    .frame(width: 76, height: 64)
+                                    .clipped()
+                            } else {
+                                Image(systemName: attachment.isPDF ? "doc.richtext.fill" : "doc.fill")
+                                    .font(.title2)
+                                    .frame(width: 76, height: 64)
+                                    .background(Color.secondary.opacity(0.10))
+                            }
+
+                            Text(attachment.isImage ? "Photo" : attachment.filename)
+                                .font(.caption2)
+                                .lineLimit(1)
+                                .frame(width: 76, alignment: .leading)
+                        }
+                        .compositingGroup()
+                        .clipShape(.rect(cornerRadius: OFJRadius.badge))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        attachment.isImage
+                            ? "Open conversation containing photo"
+                            : "Open conversation containing \(attachment.filename)"
+                    )
                 }
             }
         }
@@ -1126,5 +1341,10 @@ struct ChatThreadListView: View {
             activeThread = nil
         }
         modelContext.delete(thread)
+    }
+
+    private func open(_ thread: ChatThread) {
+        activeThread = thread
+        dismiss()
     }
 }

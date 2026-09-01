@@ -6,6 +6,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct FoodBankView: View {
     // ── Environment ───────────────────────────────────────────────
@@ -16,7 +17,7 @@ struct FoodBankView: View {
     @Environment(UserGoals.self) private var goals
 
     /// Date to log foods to (passed from DailyLogView when opened via radial menu)
-    var logDate: Date = .now
+    var logDate: Date = AppPresentationDate.now
 
     // ── SwiftData Query: fetches all SavedFood sorted by most recently created ──
     @Query(sort: \SavedFood.createdAt, order: .reverse)
@@ -178,8 +179,6 @@ struct FoodBankView: View {
             // Sheets launched from the "+" menu.
             .sheet(item: $addSheet) { sheet in
                 switch sheet {
-                case .aiSearch:
-                    AIFoodSearchView(logDate: logDate)
                 case .compositeFood:
                     CompositeFoodBuilderView()
                 case .nutritionCalculator:
@@ -229,6 +228,14 @@ struct FoodBankView: View {
                                     (recommendation.hasIncompleteNutrition ? " Nutrition incomplete." : "")
                                 )
                                 .accessibilityHint("Opens an editable food log with the recommended quantity.")
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button {
+                                        removeFromShelf(food)
+                                    } label: {
+                                        Label("Remove from Shelf", systemImage: "cabinet")
+                                    }
+                                    .tint(.orange)
+                                }
                             }
                         }
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -300,6 +307,7 @@ struct FoodBankView: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("food-bank.food.\(food.id.uuidString)")
         .contextMenu {
             Button {
                 selectedLog = .standard(food)
@@ -328,14 +336,6 @@ struct FoodBankView: View {
                     regenerateFoodIcon(for: food)
                 } label: {
                     Label(foodIconActionTitle(for: food), systemImage: useGeneratedFoodIconImages ? "photo.badge.plus" : "sparkles")
-                }
-            }
-
-            if food.hasGeneratedFoodIconImage {
-                Button {
-                    pixelPassFoodIcon(for: food)
-                } label: {
-                    Label("Pixel Pass", systemImage: "wand.and.sparkles")
                 }
             }
 
@@ -429,13 +429,6 @@ struct FoodBankView: View {
     /// scan a label, enter manually, or search the Open Food Facts database.
     private var addMenu: some View {
         Menu {
-            // AI Search — selected AI provider with web grounding
-            Button {
-                addSheet = .aiSearch
-            } label: {
-                Label("AI Search", systemImage: "sparkles")
-            }
-
             // Composite Food — build a saved food from snapshot copies of Food Bank items
             Button {
                 addSheet = .compositeFood
@@ -495,12 +488,6 @@ struct FoodBankView: View {
             } else {
                 await scanService.refreshFoodEmoji(for: food)
             }
-        }
-    }
-
-    private func pixelPassFoodIcon(for food: SavedFood) {
-        Task {
-            await scanService.pixelPassFoodIconImage(for: food)
         }
     }
 
@@ -614,6 +601,13 @@ struct FoodBankView: View {
         tursoMirror.scheduleMirror(reason: "food_bank_shelf_changed")
     }
 
+    private func removeFromShelf(_ food: SavedFood) {
+        guard food.isOnShelf else { return }
+        food.isOnShelf = false
+        try? modelContext.save()
+        tursoMirror.scheduleMirror(reason: "food_bank_shelf_removed_from_suggestion")
+    }
+
     private func shelfConfiguration(_ preferences: Preferences) -> ShelfRecommendationConfiguration {
         var hardCaps: Set<ShelfNutrient> = []
         if preferences.shelfHardCapCalories { hardCaps.insert(.calories) }
@@ -696,11 +690,11 @@ private enum FoodBankLogSelection: Identifiable {
 private struct ShelfSuggestionRow: View {
     let food: SavedFood
     let recommendation: ShelfRecommendation
+    @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(.orange)
+            foodIcon
                 .frame(width: 28, height: 44)
                 .accessibilityHidden(true)
 
@@ -728,10 +722,31 @@ private struct ShelfSuggestionRow: View {
         .padding(.vertical, 5)
         .contentShape(.rect)
     }
+
+    /// Shows the food's own icon — generated image when the user opted into
+    /// image icons, otherwise its emoji — falling back to the generic sparkle
+    /// only when the food has neither.
+    @ViewBuilder
+    private var foodIcon: some View {
+        if useGeneratedIconImages,
+           let data = food.generatedIconImageData,
+           let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
+        } else if let emoji = food.normalizedEmoji {
+            Text(emoji)
+                .font(.title3)
+        } else {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.orange)
+        }
+    }
 }
 
-private enum FoodBankAddSheet: Identifiable {
-    case aiSearch
+enum FoodBankAddSheet: String, Identifiable, CaseIterable {
     case compositeFood
     case nutritionCalculator
     case openFoodFacts
@@ -739,17 +754,7 @@ private enum FoodBankAddSheet: Identifiable {
     case archive
     case brandManager
 
-    var id: String {
-        switch self {
-        case .aiSearch: "aiSearch"
-        case .compositeFood: "compositeFood"
-        case .nutritionCalculator: "nutritionCalculator"
-        case .openFoodFacts: "openFoodFacts"
-        case .manualEntry: "manualEntry"
-        case .archive: "archive"
-        case .brandManager: "brandManager"
-        }
-    }
+    var id: String { rawValue }
 }
 
 // MARK: - Sort Order

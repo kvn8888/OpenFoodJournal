@@ -14,10 +14,14 @@ struct ShelfRecommendationSettingsView: View {
                 Toggle("Recommendations", isOn: enabledBinding)
 
                 Stepper(value: suggestionCountBinding, in: 1...5) {
-                    LabeledContent(
-                        "Number of suggestions",
-                        value: preferences.clampedShelfSuggestionCount.formatted()
-                    )
+                    LabeledContent {
+                        Text(preferences.clampedShelfSuggestionCount.formatted())
+                            .ofjNumericTextTransition(
+                                value: preferences.clampedShelfSuggestionCount
+                            )
+                    } label: {
+                        Text("Number of suggestions")
+                    }
                 }
 
                 Picker("Show recommendations after", selection: triggerBinding) {

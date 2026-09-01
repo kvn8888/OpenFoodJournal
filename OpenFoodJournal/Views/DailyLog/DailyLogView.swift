@@ -4,47 +4,77 @@
 import SwiftUI
 import SwiftData
 
+enum JournalRoute: CaseIterable, Hashable {
+    case settings
+}
+
 struct DailyLogView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(UserGoals.self) private var goals
 
-    @State private var selectedDate: Date = .now
+    @Query private var journalLogs: [DailyLog]
+
+    @State private var selectedDate: Date = AppPresentationDate.now
     @State private var presentedSheet: DailyLogSheet?
     @State private var selectedEntry: NutritionEntry?
     // Captures the selected date when the user opens the scan camera,
     // so the result is logged to the correct day even if the calendar changes.
-    @State private var scanDate: Date = .now
+    @State private var scanDate: Date = AppPresentationDate.now
 
-    private var log: DailyLog? {
-        // Reading changeCount ensures SwiftUI re-evaluates this property
-        // after any NutritionStore write (e.g. entry moved to a different day)
-        _ = nutritionStore.changeCount
-        return nutritionStore.fetchLog(for: selectedDate)
+    init() {
+        _journalLogs = Query(JournalDayData.fetchDescriptor(referenceDate: AppPresentationDate.now))
+    }
+
+    private var selectedMonthAndYear: String {
+        selectedDate.formatted(.dateTime.month(.wide).year())
+    }
+
+    private var isShowingToday: Bool {
+        Calendar.current.isDate(selectedDate, inSameDayAs: AppPresentationDate.now)
     }
 
     var body: some View {
+        // Query observes collection membership (including a formerly empty
+        // day). Reading each selected log's entry values here also observes
+        // edits and relationship moves, including changes outside NutritionStore.
+        // Derive once per render, then give both components the same values.
+        let logsByDate = JournalDayData.preferredLogs(from: journalLogs)
+        let totalsByDate = JournalDayData.totalsByDate(from: logsByDate)
+        let selectedDay = Calendar.current.startOfDay(for: selectedDate)
+        let log = logsByDate[selectedDay]
+        let totals = totalsByDate[selectedDay] ?? .zero
+        let progressByDate = totalsByDate.mapValues { $0.calorieProgress(goal: goals.dailyCalories) }
+        let selectedCalorieState = OFJColor.journalCalorieState(
+            for: totals.calorieProgress(goal: goals.dailyCalories)
+        )
+
         NavigationStack {
             ZStack(alignment: .bottom) {
+                JournalCalorieBackground(state: selectedCalorieState)
+
                 // Replaced ScrollView+LazyVStack with List so that .swipeActions on
                 // EntryRowView and MealSectionView actually fire — swipeActions is a
                 // List-only modifier in SwiftUI and is silently ignored in a LazyVStack.
                 List {
                     // Calendar strip — clear background, no separator, matches original padding
-                    WeeklyCalendarStrip(selectedDate: $selectedDate)
+                    WeeklyCalendarStrip(
+                        selectedDate: $selectedDate,
+                        calorieProgressByDate: progressByDate
+                    )
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 0, trailing: 16))
+                        .listRowInsets(OFJLayout.calendarListRowInsets)
 
                     // Macro summary card — tap to view full nutrition details
-                    MacroSummaryBar(log: log, goals: goals)
+                    MacroSummaryBar(totals: totals, goals: goals)
                         .background {
-                            NavigationLink("", destination: NutritionDetailView())
+                            NavigationLink("", destination: NutritionDetailView(referenceDate: selectedDate))
                                 .opacity(0)
                         }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
+                        .listRowInsets(OFJLayout.standardListRowInsets)
 
                     // Meal sections — MealSectionView returns a Section{} so each
                     // meal type becomes a sticky List section with its header
@@ -64,7 +94,7 @@ struct DailyLogView: View {
                         }
                     } else {
                         EmptyLogView()
-                            .padding(.top, 40)
+                            .padding(.top, OFJLayout.emptyStateTopPadding)
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                             .frame(maxWidth: .infinity, alignment: .center)
@@ -73,7 +103,7 @@ struct DailyLogView: View {
 
                     // Spacer so the last entry is never hidden behind the radial FAB
                     Color.clear
-                        .frame(height: 100)
+                        .frame(height: OFJLayout.journalBottomClearance)
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
                 }
@@ -86,28 +116,28 @@ struct DailyLogView: View {
                         id: "foodbank",
                         label: "Food Bank",
                         icon: "refrigerator",
-                        color: .purple,
+                        color: OFJColor.foodBankAction,
                         action: { presentedSheet = .foodBank }
                     ),
                     RadialMenuItem(
                         id: "containers",
                         label: "Containers",
                         icon: "scalemass",
-                        color: .orange,
+                        color: OFJColor.containerAction,
                         action: { presentedSheet = .containers }
                     ),
                     RadialMenuItem(
                         id: "manual",
                         label: "Manual",
                         icon: "pencil",
-                        color: .green,
+                        color: OFJColor.manualAction,
                         action: { presentedSheet = .manualEntry }
                     ),
                     RadialMenuItem(
                         id: "scan",
                         label: "Scan",
                         icon: "camera.fill",
-                        color: .blue,
+                        color: OFJColor.scanAction,
                         action: {
                             scanDate = selectedDate
                             presentedSheet = .scan
@@ -115,8 +145,34 @@ struct DailyLogView: View {
                     ),
                 ])
             }
-            .navigationTitle("Journal")
+            .navigationTitle(selectedMonthAndYear)
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                if !isShowingToday {
+                    ToolbarItem(id: "journal.today", placement: .topBarTrailing) {
+                        Button("Today", action: selectToday)
+                            .accessibilityIdentifier("journal.today")
+                    }
+                }
+
+                // Separate, stable toolbar identities let the system animate
+                // the Liquid Glass regrouping while keeping the gear alive.
+                // Wrapping both controls in one conditional HStack makes the
+                // toolbar treat the whole pill as replaceable content.
+                ToolbarItem(id: "journal.settings", placement: .topBarTrailing) {
+                    NavigationLink(value: JournalRoute.settings) {
+                        Label("Settings", systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
+                    .accessibilityIdentifier("journal.settings")
+                }
+            }
+            .navigationDestination(for: JournalRoute.self) { route in
+                switch route {
+                case .settings:
+                    SettingsView()
+                }
+            }
         }
         .sheet(item: $presentedSheet) { sheet in
             switch sheet {
@@ -174,8 +230,37 @@ struct DailyLogView: View {
         }
     }
 
+    private func selectToday() {
+        withAnimation(OFJMotion.standardSpring) {
+            selectedDate = AppPresentationDate.now
+        }
+    }
+
     private func deleteEntry(_ entry: NutritionEntry) {
         nutritionStore.delete(entry)
+    }
+}
+
+struct JournalCalorieBackground: View {
+    let state: OFJColor.JournalCalorieState
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack {
+            colorScheme == .dark
+                ? Color(red: 0.035, green: 0.035, blue: 0.04)
+                : Color.white
+
+            RadialGradient(
+                stops: zip(state.backgroundGradientColors(for: colorScheme), OFJLayout.journalGradientLocations)
+                    .map { Gradient.Stop(color: $0.0, location: $0.1) },
+                center: .top,
+                startRadius: 16,
+                endRadius: OFJLayout.journalGradientEndRadius
+            )
+        }
+        .ignoresSafeArea()
+        .accessibilityHidden(true)
     }
 }
 
@@ -207,7 +292,6 @@ private struct ScanResultSheet: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(MealTimeSettings.self) private var mealTimeSettings
-    @Environment(TursoMirrorService.self) private var tursoMirror
     @Environment(\.dismiss) private var dismiss
 
     @Bindable var entry: NutritionEntry
@@ -259,7 +343,7 @@ private struct ScanResultSheet: View {
             applyDefaultMealTypeIfNeeded()
         }
         .sheet(item: $savedFoodToTrack, onDismiss: finishScanResult) { food in
-            NewContainerSheet(preselectedFood: food)
+            NewContainerSheet(preselectedFood: food, logDate: logDate)
         }
     }
 
@@ -276,9 +360,7 @@ private struct ScanResultSheet: View {
 
     private func saveReviewedFood() -> SavedFood {
         let saved = SavedFood(from: entry)
-        nutritionStore.modelContext.insert(saved)
-        try? nutritionStore.modelContext.save()
-        tursoMirror.scheduleMirror(reason: "scan_save_to_food_bank")
+        nutritionStore.addSavedFood(saved, mirrorReason: "scan_save_to_food_bank")
         return saved
     }
 
@@ -298,13 +380,13 @@ private struct ScanProgressOverlay: View {
     let expectsThinkingTrace: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: OFJSpace.s14) {
+            HStack(spacing: OFJSpace.s12) {
                 ProgressView()
                     .controlSize(.large)
                     .tint(.white)
 
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: OFJSpace.s2) {
                     Text("Analyzing...")
                         .font(.headline)
                         .foregroundStyle(.white)
@@ -315,7 +397,7 @@ private struct ScanProgressOverlay: View {
             }
 
             if expectsThinkingTrace || !thinkingTrace.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: OFJSpace.s8) {
                     Label("Analyzing", systemImage: "brain.head.profile")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.9))
@@ -338,13 +420,13 @@ private struct ScanProgressOverlay: View {
                         }
                     }
                 }
-                .padding(.top, 2)
+                .padding(.top, OFJSpace.s2)
             }
         }
         .frame(maxWidth: 320, alignment: .leading)
-        .padding(24)
-        .glassEffect(in: .rect(cornerRadius: 20))
-        .padding(.horizontal, 24)
+        .padding(OFJSpace.s24)
+        .glassEffect(in: .rect(cornerRadius: OFJRadius.card))
+        .padding(.horizontal, OFJSpace.s24)
     }
 }
 
@@ -352,7 +434,7 @@ private struct ScanProgressOverlay: View {
 
 private struct EmptyLogView: View {
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: OFJSpace.s16) {
             Image(systemName: "fork.knife.circle")
                 .font(.system(size: 56))
                 .foregroundStyle(.secondary)
@@ -363,7 +445,7 @@ private struct EmptyLogView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, OFJSpace.s40)
         }
     }
 }

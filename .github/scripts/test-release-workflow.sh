@@ -35,6 +35,65 @@ if [[ -z "${external_group_id}" || "${external_group_id}" == "${internal_group_i
   exit 1
 fi
 
+release_runner="$(jq -r '.xcodeRunner' ci/release-config.json)"
+required_xcode_version="$(jq -r '.requiredXcodeVersion' ci/release-config.json)"
+required_xcode_build="$(jq -r '.requiredXcodeBuild' ci/release-config.json)"
+xcode_app_version="${required_xcode_version#Xcode }"
+developer_dir="/Applications/Xcode_${xcode_app_version}.app/Contents/Developer"
+
+for workflow in \
+  .github/workflows/cloud-ci.yml \
+  .github/workflows/testflight.yml \
+  .github/workflows/app-store.yml \
+  .github/workflows/testflight-external.yml \
+  .github/workflows/release-credentials-check.yml
+do
+  if ! grep -Fq "runs-on: ${release_runner}" "${workflow}"; then
+    echo "${workflow} does not use the configured release runner ${release_runner}." >&2
+    exit 1
+  fi
+done
+
+for workflow in \
+  .github/workflows/cloud-ci.yml \
+  .github/workflows/testflight.yml \
+  .github/workflows/app-store.yml
+do
+  if ! grep -Fq "DEVELOPER_DIR: ${developer_dir}" "${workflow}"; then
+    echo "${workflow} does not select configured ${required_xcode_version} (${required_xcode_build})." >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq 'gemini-image-contract:' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow is missing the protected Gemini image contract job." >&2
+  exit 1
+fi
+if ! grep -Fq 'testGeminiFoodIconImageLiveContract' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow does not execute the production Gemini image contract test." >&2
+  exit 1
+fi
+if ! grep -Fq 'OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}' .github/workflows/testflight.yml; then
+  echo "TestFlight workflow does not source the Gemini canary key from the protected environment." >&2
+  exit 1
+fi
+
+for required in \
+  'TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS: "1"' \
+  'TEST_RUNNER_OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}' \
+  'bash .github/scripts/verify-live-test-log.sh'
+do
+  if ! grep -Fq "$required" .github/workflows/testflight.yml; then
+    echo "TestFlight live-test forwarding/result gate is missing: $required" >&2
+    exit 1
+  fi
+done
+bash .github/scripts/test-live-test-log.sh
+if grep -Fq 'path: ${{ runner.temp }}/GeminiFoodImageContract.xcresult' .github/workflows/testflight.yml; then
+  echo "Protected live-test results must not be uploaded with forwarded credentials." >&2
+  exit 1
+fi
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
@@ -60,7 +119,8 @@ what_to_test="${fixture_root}/what-to-test.txt"
 generated_notes="${fixture_root}/generated-notes.txt"
 generated_metadata="${fixture_root}/generated-metadata.json"
 printf '%s\n' '- fix: repair dietary-energy reconciliation' > "${what_to_test}"
-env -u GH_TOKEN RUNNER_TEMP="${fixture_root}" \
+env -u GH_TOKEN -u BIFROST_BASE_URL -u BIFROST_VIRTUAL_KEY -u BIFROST_AUTHORIZATION \
+  RUNNER_TEMP="${fixture_root}" \
   bash .github/scripts/generate-release-notes.sh \
   1.4 \
   11 \
@@ -68,7 +128,7 @@ env -u GH_TOKEN RUNNER_TEMP="${fixture_root}" \
   "${what_to_test}" \
   "${generated_notes}" \
   "${generated_metadata}" \
-  openai/gpt-4.1 >/dev/null
+  openai/gpt-5.6-sol >/dev/null
 grep -q 'repair dietary-energy reconciliation' "${generated_notes}"
 if grep -q 'fix:' "${generated_notes}"; then
   echo "Deterministic public notes leaked a conventional-commit prefix." >&2
@@ -76,6 +136,48 @@ if grep -q 'fix:' "${generated_notes}"; then
 fi
 test "$(jq -r '.source' "${generated_metadata}")" = "deterministic-git-history"
 test "$(jq -r '.requiresHumanApproval' "${generated_metadata}")" = "true"
+
+# The prompt lives outside the script; a rename or a lost placeholder would
+# otherwise only surface as silently degraded notes during a real release.
+for prompt_file in ci/prompts/whats-new-system.txt ci/prompts/whats-new-user.txt; do
+  if [[ ! -s "${prompt_file}" ]]; then
+    echo "Missing or empty release-note prompt: ${prompt_file}" >&2
+    exit 1
+  fi
+done
+for placeholder in '{{VERSION}}' '{{EVIDENCE}}'; do
+  if ! grep -qF "${placeholder}" ci/prompts/whats-new-user.txt; then
+    echo "Release-note prompt lost the ${placeholder} placeholder." >&2
+    exit 1
+  fi
+done
+if ! grep -qE '^\{\{EVIDENCE\}\}$' ci/prompts/whats-new-user.txt; then
+  echo "{{EVIDENCE}} must sit alone on its own line for substitution to work." >&2
+  exit 1
+fi
+
+# The router applies no cross-provider routing of its own, so the configured
+# fallback chain is the only thing standing between one provider outage and
+# changelog-style release notes.
+notes_model="$(jq -r '.releaseNotesModel' ci/release-config.json)"
+if ! jq -e '.releaseNotesFallbackModels | type == "array" and length > 0' \
+  ci/release-config.json >/dev/null; then
+  echo "ci/release-config.json must list at least one release-note fallback model." >&2
+  exit 1
+fi
+if ! jq -e --arg model "${notes_model}" \
+  '.releaseNotesFallbackModels | all(. != $model)' \
+  ci/release-config.json >/dev/null; then
+  echo "The primary release-note model must not appear in its own fallback chain." >&2
+  exit 1
+fi
+# Models must stay unprefixed so the router keeps choosing the provider. A
+# "provider/model" name silently pins the release to one upstream.
+if jq -e '[.releaseNotesModel] + .releaseNotesFallbackModels | any(test("/"))' \
+  ci/release-config.json >/dev/null; then
+  echo "Release-note models must be unprefixed so the router selects the provider." >&2
+  exit 1
+fi
 
 promotion_repo="${fixture_root}/promotion-repo"
 mkdir -p \

@@ -37,8 +37,8 @@ struct WhatsNewSheet: View {
                         FeatureRow(
                             icon: "sparkles",
                             color: .purple,
-                            title: "AI Search and Better Scans",
-                            description: "Search nutrition with Gemini, scan multiple angles, and watch clearer scan progress while results are prepared."
+                            title: "Better Scans",
+                            description: "Scan multiple angles and watch clearer progress while nutrition results are prepared."
                         )
 
                         FeatureRow(

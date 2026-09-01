@@ -133,7 +133,9 @@ struct OnboardingView: View {
 
     private var selectedAPIKeyBinding: Binding<String> {
         switch selectedAIProvider {
-        case .gemini:
+        // The OpenAI-compatible provider is configured in Settings (it also
+        // needs a base URL); onboarding only offers Gemini and OpenRouter.
+        case .gemini, .openAICompatible:
             return $onboardingAPIKey
         case .openRouter:
             return $onboardingOpenRouterAPIKey
@@ -160,7 +162,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 32)
 
             Picker("AI Provider", selection: $aiProviderRawValue) {
-                ForEach(AIProvider.allCases) { provider in
+                ForEach(AIProvider.onboardingChoices) { provider in
                     Text(provider.displayName).tag(provider.rawValue)
                 }
             }
@@ -219,7 +221,7 @@ struct OnboardingView: View {
                                 guard !trimmed.isEmpty else { return }
                                 KeychainService.save(trimmed, for: selectedAIProvider.keychainAccount)
                                 switch selectedAIProvider {
-                                case .gemini:
+                                case .gemini, .openAICompatible:
                                     apiKeySaved = true
                                     onboardingAPIKey = ""
                                 case .openRouter:
@@ -458,6 +460,7 @@ struct OnboardingView: View {
                 Text("\(Int(value.wrappedValue)) \(unit)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: value.wrappedValue)
             }
             Slider(value: value, in: range, step: step)
                 .tint(Color.accentColor)

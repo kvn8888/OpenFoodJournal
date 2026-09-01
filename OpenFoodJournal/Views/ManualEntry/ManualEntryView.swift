@@ -74,13 +74,11 @@ struct ManualEntryView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(MealTimeSettings.self) private var mealTimeSettings
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
-    @Environment(TursoMirrorService.self) private var tursoMirror
 
     let defaultDate: Date
 
-    /// Optional food data to pre-fill the form with. OFF search and AI Search
-    /// both use this so users can review/edit before saving.
+    /// Optional food data to pre-fill the form with. OFF search and future
+    /// providers use this so users can review/edit before saving.
     let prefill: ManualEntryPrefill?
 
     // Form state
@@ -124,7 +122,7 @@ struct ManualEntryView: View {
         self.prefill = ManualEntryPrefill(product: prefillProduct)
     }
 
-    /// Initializer with a general prefill value for AI Search or future sources.
+    /// Initializer with a general prefill value for provider-backed or future sources.
     init(defaultDate: Date, prefill: ManualEntryPrefill) {
         self.defaultDate = defaultDate
         self.prefill = prefill
@@ -365,9 +363,7 @@ struct ManualEntryView: View {
         // Optionally save to Food Bank for quick re-logging
         if saveToFoodBank {
             let savedFood = SavedFood(from: entry)
-            modelContext.insert(savedFood)
-            try? modelContext.save()
-            tursoMirror.scheduleMirror(reason: "manual_food_bank_save")
+            nutritionStore.addSavedFood(savedFood, mirrorReason: "manual_food_bank_save")
         }
 
         dismiss()

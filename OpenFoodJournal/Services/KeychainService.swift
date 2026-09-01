@@ -31,6 +31,15 @@ enum KeychainService {
     /// account prevents provider switching or backups from exposing it.
     static let azureOpenAIAPIKeyAccount = "azure-openai-api-key"
 
+    static let openAIAPIKeyAccount = "openai-api-key"
+    static let anthropicAPIKeyAccount = "anthropic-api-key"
+    static let museSparkAPIKeyAccount = "muse-spark-api-key"
+
+    /// One key for the user's custom OpenAI-compatible endpoint (Meta Model
+    /// API, LiteLLM, self-hosted vLLM, …). Shared by scan, Assistant, and
+    /// food-icon image generation because they target the same base URL.
+    static let openAICompatibleAPIKeyAccount = "openai-compatible-api-key"
+
     /// Tavily is an independent Assistant research provider. Its credential
     /// is never shared with the selected conversation model or exported.
     static let tavilyAPIKeyAccount = "tavily-api-key"
@@ -38,6 +47,7 @@ enum KeychainService {
     /// Parallel Search is independent from the conversation model and Tavily,
     /// so it receives its own non-exportable Keychain account.
     static let parallelAPIKeyAccount = "parallel-api-key"
+    static let exaAPIKeyAccount = "exa-api-key"
 
     /// Optional Turso mirror credentials. These are user-owned debugging
     /// database secrets and must never be copied into UserDefaults or logs.
@@ -149,6 +159,15 @@ enum KeychainService {
         load(for: azureOpenAIAPIKeyAccount)
     }
 
+    static var hasOpenAIAPIKey: Bool { load(for: openAIAPIKeyAccount) != nil }
+    static var openAIAPIKey: String? { load(for: openAIAPIKeyAccount) }
+    static var hasAnthropicAPIKey: Bool { load(for: anthropicAPIKeyAccount) != nil }
+    static var anthropicAPIKey: String? { load(for: anthropicAPIKeyAccount) }
+    static var hasMuseSparkAPIKey: Bool { load(for: museSparkAPIKeyAccount) != nil }
+    static var museSparkAPIKey: String? { load(for: museSparkAPIKeyAccount) }
+    static var hasOpenAICompatibleAPIKey: Bool { load(for: openAICompatibleAPIKeyAccount) != nil }
+    static var openAICompatibleAPIKey: String? { load(for: openAICompatibleAPIKeyAccount) }
+
     static var hasTavilyAPIKey: Bool {
         load(for: tavilyAPIKeyAccount) != nil
     }
@@ -164,6 +183,9 @@ enum KeychainService {
     static var parallelAPIKey: String? {
         load(for: parallelAPIKeyAccount)
     }
+
+    static var hasExaAPIKey: Bool { load(for: exaAPIKeyAccount) != nil }
+    static var exaAPIKey: String? { load(for: exaAPIKeyAccount) }
 
     /// Retrieves the API key for whichever provider is currently selected.
     static func apiKey(for provider: AIProvider) -> String? {

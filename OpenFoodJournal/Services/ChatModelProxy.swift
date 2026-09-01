@@ -532,6 +532,138 @@ private struct ParallelErrorEnvelope: Decodable {
     let error: APIError
 }
 
+// MARK: - Exa Search adapter
+
+/// Exa is another provider-neutral research backend. It returns source text
+/// and citations to the existing agent loop; it never becomes a second chat
+/// model and never receives journal history or attachment contents.
+@MainActor
+final class ExaChatWebSearchProvider: ChatWebSearchProviding {
+    static let searchURL = URL(string: "https://api.exa.ai/search")!
+
+    private let apiKey: String
+    private let session: URLSession
+    private let maxResults: Int
+
+    init(apiKey: String, session: URLSession = .shared, maxResults: Int = 5) {
+        self.apiKey = apiKey
+        self.session = session
+        self.maxResults = min(max(1, maxResults), 10)
+    }
+
+    func search(request searchRequest: ChatWebSearchRequest) async throws -> ChatWebSearchResult {
+        let queryParts = ([searchRequest.objective] + searchRequest.searchQueries)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .reduce(into: [String]()) { unique, value in
+                if !unique.contains(value) { unique.append(value) }
+            }
+        let query = queryParts
+            .joined(separator: " ")
+        guard !query.isEmpty else { throw ChatError.invalidResponse }
+
+        var request = URLRequest(url: Self.searchURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.httpBody = try JSONEncoder().encode(ExaSearchRequest(
+            query: query,
+            type: "auto",
+            numResults: maxResults,
+            contents: .init(text: true, highlights: true)
+        ))
+
+        let startedAt = ContinuousClock.now
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request)
+        } catch is CancellationError {
+            throw ChatError.cancelled
+        } catch {
+            throw ChatError.networkError(error)
+        }
+        let elapsed = startedAt.duration(to: .now).components
+        let measuredDurationMs = Int(
+            elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
+        )
+        guard let http = response as? HTTPURLResponse else { throw ChatError.invalidResponse }
+        guard (200..<300).contains(http.statusCode) else {
+            let decoded = try? JSONDecoder().decode(JSONValue.self, from: data)
+            let message = decoded?["error"]?.stringValue
+                ?? decoded?["message"]?.stringValue
+                ?? "Exa search failed"
+            throw ChatError.serverError(http.statusCode, message)
+        }
+
+        let payload: ExaSearchResponse
+        do {
+            payload = try JSONDecoder().decode(ExaSearchResponse.self, from: data)
+        } catch {
+            throw ChatError.invalidResponse
+        }
+        let sources = payload.results.map { result in
+            let content = result.text ?? result.highlights?.joined(separator: "\n")
+            return ChatWebSearchSource(
+                url: result.url,
+                title: result.title,
+                content: content,
+                score: result.score
+            )
+        }
+        let evidence = sources.enumerated().map { index, source in
+            "[\(index + 1)] \(source.title ?? source.url)\nURL: \(source.url)\n\(source.content ?? "")"
+        }.joined(separator: "\n\n")
+        return ChatWebSearchResult(
+            text: evidence,
+            usage: nil,
+            citations: sources.map {
+                ChatSourceCitation(url: $0.url, title: $0.title, startIndex: nil, endIndex: nil)
+            },
+            providerRequestID: payload.requestId ?? http.value(forHTTPHeaderField: "x-request-id"),
+            providerID: AssistantResearchProvider.exa.rawValue,
+            modelID: "exa-auto",
+            durationMs: payload.searchTime.map { Int($0.rounded()) } ?? measuredDurationMs,
+            sources: sources,
+            estimatedCostUSD: payload.costDollars?.total,
+            pricingSource: payload.costDollars == nil ? nil : "Exa API reported request cost"
+        )
+    }
+
+    func testSearch() async throws {
+        _ = try await search(request: ChatWebSearchRequest(
+            objective: "OpenFoodJournal Exa API connection test",
+            searchQueries: ["OpenFoodJournal"]
+        ))
+    }
+}
+
+private struct ExaSearchRequest: Encodable {
+    struct Contents: Encodable {
+        let text: Bool
+        let highlights: Bool
+    }
+    let query: String
+    let type: String
+    let numResults: Int
+    let contents: Contents
+}
+
+private struct ExaSearchResponse: Decodable {
+    struct Result: Decodable {
+        let title: String?
+        let url: String
+        let text: String?
+        let highlights: [String]?
+        let score: Double?
+    }
+    struct Cost: Decodable { let total: Double? }
+    let requestId: String?
+    let searchTime: Double?
+    let costDollars: Cost?
+    let results: [Result]
+}
+
 /// A complete, configured provider target. Authentication, deployment names,
 /// endpoint selection, and routing never leak into the shared agent loop.
 nonisolated struct ChatProxyConfiguration: Equatable, Sendable {
@@ -682,11 +814,24 @@ enum ConfiguredChatModelProxyFactory {
                 resolver: azureHostResolver
             )
             endpoint = normalized
+        } else if let selectedEndpoint = selection.endpoint {
+            endpoint = selectedEndpoint
         } else {
-            endpoint = selection.endpoint
+            endpoint = switch selection.provider {
+            case .openAI: URL(string: "https://api.openai.com/v1")
+            case .anthropic: URL(string: "https://api.anthropic.com/v1")
+            case .museSpark: URL(string: "https://api.meta.ai/v1")
+            case .gemini, .openRouter, .azureOpenAI, .openAICompatible: nil
+            }
         }
-        // Do not retrieve or attach credentials until an Azure destination has
-        // passed structure, suffix, and public-address validation.
+        // A custom OpenAI-compatible target has no default host to fall back
+        // to — an unconfigured or malformed base URL must fail before any
+        // credential is attached.
+        if selection.provider == .openAICompatible, endpoint == nil {
+            throw ChatError.serverError(400, "Configure the OpenAI-compatible base URL in Settings.")
+        }
+        // Do not retrieve or attach credentials until a user-entered Azure
+        // destination has passed structure, suffix, and public-address checks.
         guard let apiKey = apiKeyProvider(selection.provider), !apiKey.isEmpty else {
             throw ChatError.noAPIKey(selection.provider.displayName)
         }
@@ -703,6 +848,12 @@ enum ConfiguredChatModelProxyFactory {
             return OpenRouterChatModelProxy(configuration: configuration, session: session)
         case .azureOpenAI:
             return AzureOpenAIChatModelProxy(configuration: configuration, session: session)
+        case .openAI:
+            return OpenAIResponsesChatModelProxy(configuration: configuration, session: session)
+        case .anthropic:
+            return AnthropicChatModelProxy(configuration: configuration, session: session)
+        case .museSpark, .openAICompatible:
+            return MuseSparkChatModelProxy(configuration: configuration, session: session)
         }
     }
 }
@@ -1233,17 +1384,410 @@ final class OpenRouterChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
     }
 }
 
-// MARK: - Azure OpenAI Responses adapter
+// MARK: - Anthropic Messages adapter
 
 @MainActor
-final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
+final class AnthropicChatModelProxy: ChatModelProxy {
+    private struct ToolBuffer { var id = ""; var name = ""; var arguments = "" }
+    private struct ThinkingBuffer { var text = ""; var signature = "" }
+
+    private let configuration: ChatProxyConfiguration
+    private let session: URLSession
+    var descriptor: ChatModelDescriptor { configuration.descriptor }
+
+    init(configuration: ChatProxyConfiguration, session: URLSession = .shared) {
+        precondition(configuration.descriptor.provider == .anthropic)
+        precondition(configuration.endpoint != nil)
+        self.configuration = configuration
+        self.session = session
+    }
+
+    func streamTurn(
+        request: ChatModelRequest,
+        onEvent: @escaping @MainActor (ChatModelStreamEvent) -> Void
+    ) async throws -> ChatModelTurn {
+        guard let url = configuration.endpoint?.appendingPathComponent("messages") else {
+            throw ChatError.invalidResponse
+        }
+        onEvent(.encodingStarted)
+        let body = try Self.encodedTurnRequest(configuration: configuration, request: request)
+        onEvent(.requestEncoded(byteCount: body.count))
+        var urlRequest = URLRequest(url: url)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue(configuration.apiKey, forHTTPHeaderField: "x-api-key")
+        urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        urlRequest.httpBody = body
+
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            let delegate = ChatStreamTaskDelegate(rejectRedirects: true) { metrics in
+                Task { @MainActor in onEvent(.transportMetrics(metrics)) }
+            }
+            (bytes, response) = try await session.bytes(for: urlRequest, delegate: delegate)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw ChatError.networkError(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw ChatError.invalidResponse }
+        let headerRequestID = http.value(forHTTPHeaderField: "request-id")
+            ?? http.value(forHTTPHeaderField: "x-request-id")
+        onEvent(.responseHeaders(
+            statusCode: http.statusCode,
+            requestID: headerRequestID,
+            retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+        ))
+        guard (200..<300).contains(http.statusCode) else {
+            var errorData = Data()
+            for try await byte in bytes { errorData.append(byte) }
+            let value = try? JSONDecoder().decode(JSONValue.self, from: errorData)
+            throw ChatError.serverError(
+                http.statusCode,
+                value?["error"]?["message"]?.stringValue ?? "Anthropic request failed"
+            )
+        }
+
+        var turn = ChatModelTurn()
+        turn.providerRequestID = headerRequestID
+        turn.providerID = AssistantProvider.anthropic.rawValue
+        var modelTurnID = UUID().uuidString
+        var toolBuffers: [Int: ToolBuffer] = [:]
+        var thinkingBuffers: [Int: ThinkingBuffer] = [:]
+        var cachedInput = 0
+        var uncachedInput = 0
+        var output = 0
+        let decoder = JSONDecoder()
+
+        for try await rawLine in bytes.lines {
+            try Task.checkCancellation()
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("data:") else { continue }
+            let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+            guard let data = payload.data(using: .utf8),
+                  let event = try? decoder.decode(JSONValue.self, from: data) else { continue }
+            let eventType = event["type"]?.stringValue ?? "anthropic.event"
+            onEvent(.providerEvent(kind: eventType))
+            switch eventType {
+            case "message_start":
+                if let message = event["message"] {
+                    modelTurnID = message["id"]?.stringValue ?? modelTurnID
+                    turn.providerRequestID = headerRequestID ?? message["id"]?.stringValue
+                    turn.resolvedModelID = message["model"]?.stringValue
+                    uncachedInput = Int(message["usage"]?["input_tokens"]?.doubleValue ?? 0)
+                    cachedInput = Int(message["usage"]?["cache_read_input_tokens"]?.doubleValue ?? 0)
+                        + Int(message["usage"]?["cache_creation_input_tokens"]?.doubleValue ?? 0)
+                }
+            case "content_block_start":
+                let index = Int(event["index"]?.doubleValue ?? 0)
+                guard let block = event["content_block"] else { continue }
+                switch block["type"]?.stringValue {
+                case "text":
+                    if turn.textOrdinal == nil { turn.textOrdinal = index }
+                    if let text = block["text"]?.stringValue, !text.isEmpty {
+                        turn.text += text
+                        onEvent(.visibleText(turn.text))
+                    }
+                case "tool_use":
+                    let initialInput = block["input"]
+                    let initialArguments = initialInput?.objectValue?.isEmpty == false
+                        ? (initialInput?.jsonString ?? "")
+                        : ""
+                    toolBuffers[index] = ToolBuffer(
+                        id: block["id"]?.stringValue ?? UUID().uuidString,
+                        name: block["name"]?.stringValue ?? "",
+                        arguments: initialArguments
+                    )
+                case "thinking", "redacted_thinking":
+                    thinkingBuffers[index] = ThinkingBuffer(
+                        text: block["thinking"]?.stringValue ?? "",
+                        signature: block["signature"]?.stringValue ?? ""
+                    )
+                default: break
+                }
+            case "content_block_delta":
+                let index = Int(event["index"]?.doubleValue ?? 0)
+                guard let delta = event["delta"] else { continue }
+                switch delta["type"]?.stringValue {
+                case "text_delta":
+                    if turn.textOrdinal == nil { turn.textOrdinal = index }
+                    if let text = delta["text"]?.stringValue {
+                        turn.text += text
+                        onEvent(.visibleText(turn.text))
+                    }
+                case "input_json_delta":
+                    toolBuffers[index, default: ToolBuffer()].arguments += delta["partial_json"]?.stringValue ?? ""
+                case "thinking_delta":
+                    thinkingBuffers[index, default: ThinkingBuffer()].text += delta["thinking"]?.stringValue ?? ""
+                case "signature_delta":
+                    thinkingBuffers[index, default: ThinkingBuffer()].signature += delta["signature"]?.stringValue ?? ""
+                default: break
+                }
+            case "content_block_stop":
+                let index = Int(event["index"]?.doubleValue ?? 0)
+                if let buffer = toolBuffers.removeValue(forKey: index), !buffer.name.isEmpty {
+                    let call = ChatModelCall(
+                        callID: buffer.id,
+                        thoughtSignature: nil,
+                        modelTurnID: modelTurnID,
+                        modelTurnIndex: index,
+                        name: buffer.name,
+                        args: JSONValue.parse(buffer.arguments) ?? .object([:])
+                    )
+                    turn.calls.append(call)
+                    onEvent(.functionCall(call))
+                }
+                if let buffer = thinkingBuffers.removeValue(forKey: index), !buffer.signature.isEmpty {
+                    turn.continuations.append(ChatProviderContinuation(
+                        providerID: AssistantProvider.anthropic.rawValue,
+                        modelTurnID: modelTurnID,
+                        ordinal: index,
+                        kind: "thinking.signature",
+                        payload: .object([
+                            "type": .string("thinking"),
+                            "thinking": .string(buffer.text),
+                            "signature": .string(buffer.signature),
+                        ])
+                    ))
+                }
+            case "message_delta":
+                output = Int(event["usage"]?["output_tokens"]?.doubleValue ?? Double(output))
+            case "error":
+                throw ChatError.serverError(
+                    0,
+                    event["error"]?["message"]?.stringValue ?? "Anthropic stream failed"
+                )
+            default: break
+            }
+        }
+        let usage = ChatTokenUsage(
+            input: uncachedInput + cachedInput,
+            cachedInput: cachedInput,
+            output: output,
+            thinking: 0
+        )
+        turn.usage = usage
+        onEvent(.usage(usage))
+        onEvent(.completed)
+        return turn
+    }
+
+    static func encodedTurnRequest(
+        configuration: ChatProxyConfiguration,
+        request: ChatModelRequest
+    ) throws -> Data {
+        var object: [String: JSONValue] = [
+            "model": .string(configuration.descriptor.deploymentIdentifier),
+            "max_tokens": .number(Double(min(
+                max(1, configuration.descriptor.capabilities.maximumOutputTokens),
+                16_384
+            ))),
+            "system": .string(request.systemPrompt),
+            "messages": .array(messages(for: request)),
+            "stream": .bool(true),
+        ]
+        if !request.tools.isEmpty {
+            object["tools"] = .array(request.tools.map { tool in
+                .object([
+                    "name": .string(tool.name),
+                    "description": .string(tool.description),
+                    "input_schema": tool.parameters ?? .object(["type": .string("object")]),
+                ])
+            })
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(JSONValue.object(object))
+    }
+
+    private static func messages(for request: ChatModelRequest) -> [JSONValue] {
+        request.messages.compactMap { message in
+            var blocks: [JSONValue] = []
+            for part in message.parts {
+                switch part {
+                case .text(let text):
+                    blocks.append(.object(["type": .string("text"), "text": .string(text)]))
+                case .attachment(let attachment):
+                    let source: JSONValue = .object([
+                        "type": .string("base64"),
+                        "media_type": .string(attachment.mimeType),
+                        "data": .string(attachment.data.base64EncodedString()),
+                    ])
+                    blocks.append(.object([
+                        "type": .string(attachment.mimeType.hasPrefix("image/") ? "image" : "document"),
+                        "source": source,
+                    ]))
+                case .providerContinuation(let continuation):
+                    if continuation.providerID == AssistantProvider.anthropic.rawValue {
+                        blocks.append(continuation.payload)
+                    }
+                case .functionCall(let call):
+                    blocks.append(.object([
+                        "type": .string("tool_use"),
+                        "id": .string(call.callID),
+                        "name": .string(call.name),
+                        "input": call.args,
+                    ]))
+                case .functionResponse(let response):
+                    blocks.append(.object([
+                        "type": .string("tool_result"),
+                        "tool_use_id": .string(response.callID),
+                        "content": .string(response.response.jsonString),
+                    ]))
+                }
+            }
+            guard !blocks.isEmpty else { return nil }
+            return .object([
+                "role": .string(message.role == .model ? "assistant" : "user"),
+                "content": .array(blocks),
+            ])
+        }
+    }
+}
+
+// MARK: - Muse Spark / OpenAI-compatible adapter
+
+/// Meta's Model API is OpenAI Chat Completions compatible. Keeping this as a
+/// thin adapter lets Muse Spark use the shared agent contract without coupling
+/// the app to OpenRouter's endpoint or routing extensions. The same adapter
+/// serves the user-configured OpenAI-compatible provider, which speaks the
+/// identical `/chat/completions` wire format against a custom base URL.
+@MainActor
+final class MuseSparkChatModelProxy: ChatModelProxy {
+    private let configuration: ChatProxyConfiguration
+    private let session: URLSession
+    var descriptor: ChatModelDescriptor { configuration.descriptor }
+
+    init(configuration: ChatProxyConfiguration, session: URLSession = .shared) {
+        precondition(
+            configuration.descriptor.provider == .museSpark
+                || configuration.descriptor.provider == .openAICompatible
+        )
+        precondition(configuration.endpoint != nil)
+        self.configuration = configuration
+        self.session = session
+    }
+
+    func streamTurn(
+        request: ChatModelRequest,
+        onEvent: @escaping @MainActor (ChatModelStreamEvent) -> Void
+    ) async throws -> ChatModelTurn {
+        guard let endpoint = configuration.endpoint?.appendingPathComponent("chat/completions") else {
+            throw ChatError.invalidResponse
+        }
+        onEvent(.encodingStarted)
+        let body = try OpenRouterChatModelProxy.encodedTurnRequest(
+            model: descriptor.deploymentIdentifier,
+            request: request,
+            routingMode: .automatic
+        )
+        onEvent(.requestEncoded(byteCount: body.count))
+        var urlRequest = URLRequest(url: endpoint)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.httpBody = body
+
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            let delegate = ChatStreamTaskDelegate(rejectRedirects: true) { metrics in
+                Task { @MainActor in onEvent(.transportMetrics(metrics)) }
+            }
+            (bytes, response) = try await session.bytes(for: urlRequest, delegate: delegate)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw ChatError.networkError(error)
+        }
+        guard let http = response as? HTTPURLResponse else { throw ChatError.invalidResponse }
+        let requestID = http.value(forHTTPHeaderField: "x-request-id")
+        onEvent(.responseHeaders(
+            statusCode: http.statusCode,
+            requestID: requestID,
+            retryAfter: http.value(forHTTPHeaderField: "Retry-After").flatMap(TimeInterval.init)
+        ))
+        guard (200..<300).contains(http.statusCode) else {
+            var errorData = Data()
+            for try await byte in bytes { errorData.append(byte) }
+            let envelope = try? JSONDecoder().decode(ORErrorEnvelope.self, from: errorData)
+            throw ChatError.serverError(
+                http.statusCode,
+                envelope?.error?.message ?? "\(descriptor.provider.displayName) request failed"
+            )
+        }
+
+        var turn = ChatModelTurn()
+        turn.providerRequestID = requestID
+        turn.providerID = descriptor.provider.rawValue
+        let modelTurnID = UUID().uuidString
+        var callBuffers: [Int: (id: String?, name: String, arguments: String)] = [:]
+        let decoder = JSONDecoder()
+        for try await rawLine in bytes.lines {
+            try Task.checkCancellation()
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.hasPrefix("data:") else { continue }
+            let payload = String(line.dropFirst("data:".count)).trimmingCharacters(in: .whitespaces)
+            if payload == "[DONE]" { break }
+            guard let data = payload.data(using: .utf8),
+                  let chunk = try? decoder.decode(ORStreamChunk.self, from: data) else { continue }
+            onEvent(.providerEvent(kind: "muse.chunk"))
+            if let model = chunk.model, !model.isEmpty { turn.resolvedModelID = model }
+            if let usage = chunk.usage {
+                let normalized = ChatTokenUsage(
+                    input: usage.promptTokens ?? 0,
+                    output: usage.completionTokens ?? 0,
+                    thinking: 0
+                )
+                turn.usage = normalized
+                onEvent(.usage(normalized))
+            }
+            guard let delta = chunk.choices?.first?.delta else { continue }
+            if let content = delta.content, !content.isEmpty {
+                if turn.textOrdinal == nil { turn.textOrdinal = 0 }
+                turn.text += content
+                onEvent(.visibleText(turn.text))
+            }
+            for fragment in delta.toolCalls ?? [] {
+                let index = fragment.index ?? 0
+                var buffer = callBuffers[index] ?? (id: nil, name: "", arguments: "")
+                if let id = fragment.id { buffer.id = id }
+                if let name = fragment.function?.name { buffer.name += name }
+                if let arguments = fragment.function?.arguments { buffer.arguments += arguments }
+                callBuffers[index] = buffer
+            }
+        }
+        for index in callBuffers.keys.sorted() {
+            guard let buffer = callBuffers[index], !buffer.name.isEmpty else { continue }
+            let call = ChatModelCall(
+                callID: buffer.id ?? UUID().uuidString,
+                thoughtSignature: nil,
+                modelTurnID: modelTurnID,
+                modelTurnIndex: index,
+                name: buffer.name,
+                args: JSONValue.parse(buffer.arguments) ?? .object([:])
+            )
+            turn.calls.append(call)
+            onEvent(.functionCall(call))
+        }
+        onEvent(.completed)
+        return turn
+    }
+}
+
+// MARK: - OpenAI Responses adapter (OpenAI and Azure)
+
+@MainActor
+final class OpenAIResponsesChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
     private let configuration: ChatProxyConfiguration
     private let session: URLSession
 
     var descriptor: ChatModelDescriptor { configuration.descriptor }
 
     init(configuration: ChatProxyConfiguration, session: URLSession = .shared) {
-        precondition(configuration.descriptor.provider == .azureOpenAI)
+        precondition(
+            configuration.descriptor.provider == .azureOpenAI
+                || configuration.descriptor.provider == .openAI
+        )
         precondition(configuration.endpoint != nil)
         self.configuration = configuration
         self.session = session
@@ -1306,7 +1850,7 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                   let event = try? decoder.decode(JSONValue.self, from: data)
             else { continue }
 
-            let eventType = event["type"]?.stringValue ?? "azure.event"
+            let eventType = event["type"]?.stringValue ?? "openai.event"
             onEvent(.providerEvent(kind: eventType))
 
             switch eventType {
@@ -1346,7 +1890,7 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
             case "response.failed", "error":
                 let message = event["error"]?["message"]?.stringValue
                     ?? event["message"]?.stringValue
-                    ?? "Azure OpenAI response failed."
+                    ?? "OpenAI response failed."
                 throw ChatError.serverError(0, message)
             default:
                 continue
@@ -1356,7 +1900,10 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         let responseValue = completedResponse ?? .object([
             "output": .array(completedItems.keys.sorted().compactMap { completedItems[$0] }),
         ])
-        var turn = Self.normalizedTurn(from: responseValue)
+        var turn = Self.normalizedTurn(
+            from: responseValue,
+            providerID: descriptor.provider.rawValue
+        )
         if turn.text.isEmpty { turn.text = streamedText }
         turn.providerRequestID = httpResponse.value(forHTTPHeaderField: "x-request-id")
             ?? turn.providerRequestID
@@ -1368,7 +1915,7 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
 
     func searchWeb(prompt: String) async throws -> ChatWebSearchResult {
         guard descriptor.capabilities.supportsWebSearch else {
-            throw ChatError.serverError(400, "This Azure deployment does not support native web search.")
+            throw ChatError.serverError(400, "This model does not support native web search.")
         }
 
         let body: JSONValue = .object([
@@ -1407,14 +1954,17 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
             throw Self.serverError(statusCode: httpResponse.statusCode, data: data)
         }
         let decoded = try JSONDecoder().decode(JSONValue.self, from: data)
-        let turn = Self.normalizedTurn(from: decoded)
+        let turn = Self.normalizedTurn(
+            from: decoded,
+            providerID: descriptor.provider.rawValue
+        )
         return ChatWebSearchResult(
             text: turn.text,
             usage: turn.usage,
             citations: turn.citations,
             providerRequestID: httpResponse.value(forHTTPHeaderField: "x-request-id")
                 ?? turn.providerRequestID,
-            providerID: AssistantProvider.azureOpenAI.rawValue,
+            providerID: descriptor.provider.rawValue,
             modelID: turn.resolvedModelID ?? descriptor.deploymentIdentifier
         )
     }
@@ -1436,13 +1986,17 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
 
     private func makeRequest(body: JSONValue) throws -> URLRequest {
         guard let baseURL = configuration.endpoint else {
-            throw ChatError.serverError(400, "Configure an Azure OpenAI resource endpoint.")
+            throw ChatError.invalidResponse
         }
         let url = baseURL.appendingPathComponent("responses")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(configuration.apiKey, forHTTPHeaderField: "api-key")
+        if descriptor.provider == .azureOpenAI {
+            request.setValue(configuration.apiKey, forHTTPHeaderField: "api-key")
+        } else {
+            request.setValue("Bearer \(configuration.apiKey)", forHTTPHeaderField: "Authorization")
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         request.httpBody = try encoder.encode(body)
@@ -1457,7 +2011,10 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         var object: [String: JSONValue] = [
             "model": .string(descriptor.deploymentIdentifier),
             "instructions": .string(request.systemPrompt),
-            "input": .array(inputItems(for: request.messages)),
+            "input": .array(inputItems(
+                for: request.messages,
+                providerID: descriptor.provider.rawValue
+            )),
             "tools": .array(request.tools.map(toolItem)),
             "parallel_tool_calls": .bool(true),
             "include": .array([.string("reasoning.encrypted_content")]),
@@ -1481,7 +2038,10 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         ])
     }
 
-    private static func inputItems(for messages: [ChatModelMessage]) -> [JSONValue] {
+    private static func inputItems(
+        for messages: [ChatModelMessage],
+        providerID: String
+    ) -> [JSONValue] {
         var items: [JSONValue] = []
         for message in messages {
             var content: [JSONValue] = []
@@ -1517,7 +2077,7 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                     }
                 case .providerContinuation(let continuation):
                     flushContent()
-                    if continuation.providerID == AssistantProvider.azureOpenAI.rawValue {
+                    if continuation.providerID == providerID {
                         items.append(continuation.payload)
                     }
                 case .functionCall(let call):
@@ -1542,10 +2102,14 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         return items
     }
 
-    private static func normalizedTurn(from response: JSONValue) -> ChatModelTurn {
+    private static func normalizedTurn(
+        from response: JSONValue,
+        providerID: String
+    ) -> ChatModelTurn {
         let responseID = response["id"]?.stringValue ?? UUID().uuidString
         var turn = ChatModelTurn()
         turn.providerRequestID = responseID
+        turn.providerID = providerID
         turn.resolvedModelID = response["model"]?.stringValue
 
         if let usage = response["usage"] {
@@ -1564,7 +2128,7 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                 // encrypted payload. Azure requires byte-for-byte replay.
                 if item["encrypted_content"]?.stringValue != nil {
                     turn.continuations.append(ChatProviderContinuation(
-                        providerID: AssistantProvider.azureOpenAI.rawValue,
+                        providerID: providerID,
                         modelTurnID: responseID,
                         ordinal: ordinal,
                         kind: "reasoning.encrypted_content",
@@ -1615,7 +2179,10 @@ final class AzureOpenAIChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
     }
 }
 
-/// Azure API calls never need cross-origin redirects. Rejecting every redirect
+/// Source-compatible name retained for Azure-specific tests and Settings code.
+typealias AzureOpenAIChatModelProxy = OpenAIResponsesChatModelProxy
+
+/// Provider API calls never need cross-origin redirects. Rejecting every redirect
 /// guarantees the custom `api-key` header cannot be forwarded to a destination
 /// that did not pass the configured endpoint validation.
 private final class ChatStreamTaskDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {

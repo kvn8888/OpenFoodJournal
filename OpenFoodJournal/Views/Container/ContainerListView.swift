@@ -62,7 +62,7 @@ struct ContainerListView: View {
                 case .complete(let container):
                     CompleteContainerSheet(container: container, logDate: logDate)
                 case .newContainer(let food):
-                    NewContainerSheet(preselectedFood: food)
+                    NewContainerSheet(preselectedFood: food, logDate: logDate)
                 }
             }
             .alert("Food No Longer Available", isPresented: $showMissingFoodAlert) {
@@ -184,6 +184,7 @@ private struct ActiveContainerRow: View {
                 // Start weight and days tracking
                 HStack(spacing: 8) {
                     Label("\(Int(container.startWeight))g", systemImage: "scalemass")
+                        .ofjNumericTextTransition(value: container.startWeight)
                     Text("·")
                     Text(daysTracked)
                 }
@@ -226,6 +227,7 @@ private struct CompletedContainerRow: View {
                 Text("Consumed \(Int(grams))g")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+                    .ofjNumericTextTransition(value: grams)
             }
 
             // Macro summary
@@ -252,6 +254,7 @@ private struct MacroPill: View {
         Text("\(label) \(Int(value))")
             .font(.caption2)
             .fontWeight(.semibold)
+            .ofjNumericTextTransition(value: value)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(color.opacity(0.15), in: .capsule)

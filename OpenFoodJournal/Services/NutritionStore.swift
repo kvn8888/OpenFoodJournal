@@ -15,6 +15,12 @@ protocol NutritionEntryHealthSyncing: AnyObject {
     func deleteNutritionSamples(forEntryID entryID: UUID) async
 }
 
+enum JournalFoodBankSaveResult {
+    case saved(SavedFood)
+    case alreadySaved(SavedFood)
+    case failed
+}
+
 @Observable
 @MainActor
 final class NutritionStore {
@@ -26,6 +32,8 @@ final class NutritionStore {
     private let healthSyncer: (any NutritionEntryHealthSyncing)?
     @ObservationIgnored
     private let isHealthSyncEnabled: () -> Bool
+    @ObservationIgnored
+    private weak var foodImageGenerationQueue: (any SavedFoodImageGenerationQueuing)?
     /// Bumped on every write so SwiftUI views that read it re-evaluate their computed properties
     private(set) var changeCount = 0
 
@@ -41,18 +49,142 @@ final class NutritionStore {
         self.isHealthSyncEnabled = isHealthSyncEnabled
     }
 
+    /// Connects the persistence boundary to the app's configured image
+    /// generator after both services have been constructed.
+    func configureFoodImageGenerationQueue(_ queue: any SavedFoodImageGenerationQueuing) {
+        foodImageGenerationQueue = queue
+    }
+
+    /// Canonical creation path for user-created Food Bank items. Generation is
+    /// requested only after SwiftData has saved the food successfully, so the
+    /// queue never points at an item that failed to persist.
+    @discardableResult
+    func addSavedFood(_ food: SavedFood, mirrorReason: String = "saved_food_created") -> Bool {
+        modelContext.insert(food)
+        guard save(mirrorReason: mirrorReason) else { return false }
+        foodImageGenerationQueue?.enqueueFoodIconImageGeneration(for: food.id)
+        return true
+    }
+
+    /// Copy exactly the logged portion, not the original template's baseline.
+    /// Never repoint savedFoodID: it may identify the calculator that produced
+    /// this entry. The reverse source ID deduplicates repeated save gestures.
+    func saveJournalEntryToFoodBank(_ entry: NutritionEntry) -> JournalFoodBankSaveResult {
+        let entryID = entry.id
+        var descriptor = FetchDescriptor<SavedFood>(predicate: #Predicate { $0.sourceJournalEntryID == entryID })
+        descriptor.fetchLimit = 1
+        do {
+            if let existing = try modelContext.fetch(descriptor).first {
+                if existing.isArchivedInFoodBank {
+                    let oldArchivedAt = existing.archivedAt
+                    let oldLastUsedAt = existing.lastUsedAt
+                    existing.restoreFromFoodBankArchive()
+                    guard save(mirrorReason: "journal_food_restored") else {
+                        existing.archivedAt = oldArchivedAt
+                        existing.lastUsedAt = oldLastUsedAt
+                        return .failed
+                    }
+                }
+                return .alreadySaved(existing)
+            }
+        } catch {
+            return .failed
+        }
+        let food = SavedFood(from: entry)
+        food.sourceJournalEntryID = entry.id
+        guard addSavedFood(food, mirrorReason: "journal_food_saved") else {
+            modelContext.delete(food)
+            return .failed
+        }
+        return .saved(food)
+    }
+
+    @discardableResult
+    func saveCalculatorCustomization(
+        for calculator: SavedFood,
+        name: String,
+        selections: [CalculatorSelection]
+    ) -> Bool {
+        let previous = calculator.calculatorCustomizations
+        guard calculator.rememberCalculatorCustomization(name: name, selections: selections) else { return false }
+        guard save(mirrorReason: "calculator_customization_saved") else {
+            calculator.calculatorCustomizations = previous
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    func deleteCalculatorCustomization(_ id: UUID, from calculator: SavedFood) -> Bool {
+        let previous = calculator.calculatorCustomizations
+        calculator.calculatorCustomizations.removeAll { $0.id == id }
+        guard save(mirrorReason: "calculator_customization_deleted") else {
+            calculator.calculatorCustomizations = previous
+            return false
+        }
+        return true
+    }
+
+    /// A single persistence boundary remembers reusable choices alongside the
+    /// newly logged nutrition snapshot. Reusing a preset never logs by itself.
+    @discardableResult
+    func logCalculatorBuild(
+        from calculator: SavedFood,
+        name: String,
+        selections: [CalculatorSelection],
+        mealType: MealType,
+        to date: Date
+    ) -> Bool {
+        let previous = calculator.calculatorCustomizations
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard calculator.rememberCalculatorCustomization(name: name, selections: selections) else { return false }
+        let totals = SavedFood.calculatorTotals(for: calculator.calculatorIngredients, selections: selections)
+        let entry = NutritionEntry(
+            name: name, mealType: mealType, scanMode: .manual,
+            calories: totals.calories, protein: totals.protein, carbs: totals.carbs, fat: totals.fat,
+            micronutrients: totals.micronutrients, servingSize: "1 meal",
+            brand: calculator.brand ?? calculator.name, servingQuantity: 1, servingUnit: "meal",
+            savedFoodID: calculator.id
+        )
+        entry.selectionSummary = SavedFood.calculatorSelectionSummary(
+            for: calculator.calculatorIngredients, selections: selections
+        )
+        guard log(entry, to: date) else {
+            calculator.calculatorCustomizations = previous
+            modelContext.delete(entry)
+            return false
+        }
+        return true
+    }
+
     // MARK: - Log Entry
 
-    func log(_ entry: NutritionEntry, to date: Date) {
+    @discardableResult
+    func log(_ entry: NutritionEntry, to date: Date) -> Bool {
         let log = fetchOrCreateLog(for: date)
         entry.timestamp = Self.timestamp(on: date, preservingTimeFrom: entry.timestamp)
         modelContext.insert(entry)
         link(entry, to: log)
         markHealthKitSyncStaleIfNeeded(entry)
         refreshSavedFoodUsageIfLinked(to: entry)
-        if save() {
-            scheduleHealthSync(for: entry)
-        }
+        guard save() else { return false }
+        scheduleHealthSync(for: entry)
+        return true
+    }
+
+    /// Logs a food portion that has already been fully measured with an
+    /// empty-container tare. Unlike gross-weight tracking, this is a complete
+    /// journal mutation and must not create a pending TrackedContainer.
+    @discardableResult
+    func logTaredFood(
+        _ plan: TareFoodLogPlan,
+        from food: SavedFood,
+        mealType: MealType,
+        to date: Date
+    ) -> NutritionEntry {
+        let entry = plan.makeNutritionEntry(from: food, mealType: mealType)
+        log(entry, to: date)
+        return entry
     }
 
     private func refreshSavedFoodUsageIfLinked(to entry: NutritionEntry) {
@@ -344,8 +476,8 @@ final class NutritionStore {
 
     // MARK: - Save (public for use in edit flows)
 
-    func saveChanges() {
-        save()
+    func saveChanges(mirrorReason: String = "nutrition_store_save") {
+        save(mirrorReason: mirrorReason)
     }
 
     /// Finds the most recent quantity and unit used for this Food Bank item.
@@ -779,10 +911,10 @@ final class NutritionStore {
     }
 
     @discardableResult
-    private func save() -> Bool {
+    private func save(mirrorReason: String = "nutrition_store_save") -> Bool {
         do {
             try modelContext.save()
-            tursoMirror?.scheduleMirror(reason: "nutrition_store_save")
+            tursoMirror?.scheduleMirror(reason: mirrorReason)
             changeCount += 1
             return true
         } catch {

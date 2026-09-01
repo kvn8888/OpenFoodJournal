@@ -17,6 +17,6 @@ printf '%s\n' "${xcode_details}"
 if [[ "${actual_version}" != "${expected_version}" || "${actual_build}" != "${expected_build}" ]]; then
   echo "The hosted image no longer matches the pinned OpenFoodJournal toolchain." >&2
   echo "Expected ${expected_version} (${expected_build}); received ${actual_version} (${actual_build})." >&2
-  echo "Review the xcode-27 runner image before changing ci/release-config.json." >&2
+  echo "Review the configured hosted runner image before changing ci/release-config.json." >&2
   exit 1
 fi
