@@ -169,7 +169,7 @@ struct MacroSummaryBar: View {
             let value = totals.micronutrients[nutrient.id] ?? 0
             MacroRingView(
                 value: value,
-                goal: nutrient.dailyValue,
+                goal: goals.dailyValue(for: nutrient),
                 color: colorForSlot(slotIndex),
                 label: nutrient.name,
                 unit: nutrient.unit,
@@ -237,6 +237,7 @@ private struct NutrientPickerSheet: View {
     let slotIndex: Int
     let otherSlotIDs: [String]
     @Environment(\.dismiss) private var dismiss
+    @Environment(UserGoals.self) private var goals
     @State private var searchText = ""
 
     /// Current value for the slot being edited
@@ -330,7 +331,7 @@ private struct NutrientPickerSheet: View {
                                     HStack {
                                         Text(nutrient.name)
                                         Spacer()
-                                        Text(nutrientDailyValueText(nutrient))
+                                        Text(nutrientDailyValueText(nutrient, goal: goals.dailyValue(for: nutrient)))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                         if nutrient.id == currentID {
@@ -480,6 +481,7 @@ private struct InlineNutrientPicker: View {
     @Binding var slots: [String]
     let otherSlotIDs: [String]
     @Environment(\.dismiss) private var dismiss
+    @Environment(UserGoals.self) private var goals
     @State private var searchText = ""
 
     private var currentID: String { slots[slotIndex] }
@@ -553,7 +555,7 @@ private struct InlineNutrientPicker: View {
                                 HStack {
                                     Text(nutrient.name)
                                     Spacer()
-                                    Text(nutrientDailyValueText(nutrient))
+                                    Text(nutrientDailyValueText(nutrient, goal: goals.dailyValue(for: nutrient)))
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                     if nutrient.id == currentID {
@@ -574,9 +576,10 @@ private struct InlineNutrientPicker: View {
     }
 }
 
-private func nutrientDailyValueText(_ nutrient: KnownMicronutrient) -> String {
-    guard nutrient.dailyValue > 0 else { return "No DV" }
-    return "\(nutrient.dailyValue.formatted(.number.precision(.fractionLength(0)))) \(nutrient.unit)/day"
+private func nutrientDailyValueText(_ nutrient: KnownMicronutrient, goal: Double) -> String {
+    guard goal > 0 else { return "No DV" }
+    let suffix = goal == nutrient.dailyValue ? "" : " (yours)"
+    return "\(goal.formatted(.number.precision(.fractionLength(0)))) \(nutrient.unit)/day\(suffix)"
 }
 
 #Preview {

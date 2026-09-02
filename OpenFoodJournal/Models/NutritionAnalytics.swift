@@ -9,8 +9,11 @@ struct NutritionMetric: Identifiable, Hashable {
     let goal: Double
     var macro: NutrientKind.MacroType? = nil
 
-    static func known(_ nutrient: KnownMicronutrient) -> Self {
-        Self(id: nutrient.id, name: nutrient.name, unit: nutrient.unit, goal: nutrient.dailyValue)
+    /// `overrides` carries the user's own daily targets; an absent entry keeps
+    /// the FDA Daily Value.
+    static func known(_ nutrient: KnownMicronutrient, overrides: [String: Double] = [:]) -> Self {
+        Self(id: nutrient.id, name: nutrient.name, unit: nutrient.unit,
+             goal: MicronutrientGoalSettings.dailyValue(for: nutrient, overrides: overrides))
     }
 
     static func macros(goals: UserGoals) -> [Self] {
@@ -63,7 +66,8 @@ struct NutritionAnalytics {
     let valuesByDate: [Date: [String: Double]]
     let trackedMicros: [NutritionMetric]
 
-    init(logs: [DailyLog], calendar: Calendar = .current, foodName: String? = nil) {
+    init(logs: [DailyLog], calendar: Calendar = .current, foodName: String? = nil,
+         micronutrientGoals: [String: Double] = [:]) {
         self.calendar = calendar
         let preferred = JournalDayData.preferredLogs(from: logs, calendar: calendar)
         var days: [Date: [NutritionEntry]] = [:]
@@ -82,7 +86,7 @@ struct NutritionAnalytics {
                                     ("macro:carbs", entry.carbs), ("macro:fat", entry.fat)] where value.isFinite && value >= 0 {
                     values[id, default: 0] += value
                 }
-                for (metric, value) in Self.micros(in: entry) {
+                for (metric, value) in Self.micros(in: entry, overrides: micronutrientGoals) {
                     metrics[metric.id] = metric
                     values[metric.id, default: 0] += value
                 }
@@ -132,7 +136,7 @@ struct NutritionAnalytics {
             .sorted { $0.value == $1.value ? $0.foodName < $1.foodName : $0.value > $1.value }
     }
 
-    static func micros(in entry: NutritionEntry) -> [(NutritionMetric, Double)] {
+    static func micros(in entry: NutritionEntry, overrides: [String: Double] = [:]) -> [(NutritionMetric, Double)] {
         var result: [(NutritionMetric, Double)] = []
         var seen = Set<String>()
         // Prefer exact canonical keys over display-name aliases within one entry.
@@ -151,7 +155,7 @@ struct NutritionAnalytics {
             let metric: NutritionMetric
             let value: Double
             if let known, let converted {
-                metric = .known(known)
+                metric = .known(known, overrides: overrides)
                 value = converted
             } else {
                 // Never sum incompatible units (e.g. IU and mcg), or invent a
