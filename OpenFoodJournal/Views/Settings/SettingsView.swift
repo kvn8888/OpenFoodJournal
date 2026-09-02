@@ -144,6 +144,19 @@ struct SettingsView: View {
                 NavigationLink("Daily Macro Goals") {
                     GoalsEditorView()
                 }
+                NavigationLink {
+                    MicronutrientGoalsEditorView()
+                } label: {
+                    HStack {
+                        Text("Micronutrient Goals")
+                        Spacer()
+                        Text(goals.micronutrientOverrides.isEmpty
+                             ? "FDA values"
+                             : "\(goals.micronutrientOverrides.count) custom")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline)
+                    }
+                }
                 HStack {
                     Text("Calories")
                     Spacer()
@@ -1612,6 +1625,7 @@ struct SettingsView: View {
                     useGeneratedFoodIconImages: useGeneratedFoodIconImages,
                     showJournalFoodImages: showJournalFoodImages,
                     pinnedMicronutrientIDs: PinnedMicronutrientSettings.decode(pinnedMicronutrientIDsRaw),
+                    micronutrientGoalOverrides: goals.micronutrientOverrides,
                     offContributeEnabled: offContributeEnabled,
                     breakfastStartMinutes: mealTimeSettings.breakfastStartMinutes,
                     lunchStartMinutes: mealTimeSettings.lunchStartMinutes,
@@ -1687,6 +1701,7 @@ struct SettingsView: View {
             useGeneratedFoodIconImages = backup.appSettings.useGeneratedFoodIconImages
             showJournalFoodImages = backup.appSettings.showJournalFoodImages
             pinnedMicronutrientIDsRaw = PinnedMicronutrientSettings.encode(backup.appSettings.pinnedMicronutrientIDs)
+            goals.micronutrientOverrides = backup.appSettings.micronutrientGoalOverrides
             offContributeEnabled = backup.appSettings.offContributeEnabled
             mealTimeSettings.breakfastStartMinutes = backup.appSettings.breakfastStartMinutes
             mealTimeSettings.lunchStartMinutes = backup.appSettings.lunchStartMinutes
