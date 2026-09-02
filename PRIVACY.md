@@ -1,119 +1,120 @@
 # Privacy Policy — OpenFoodJournal
 
-**Last Updated:** June 27, 2026
+**Last Updated:** August 31, 2026
 
-OpenFoodJournal ("the App") is an open-source food journaling application. This privacy policy explains what data we collect, how it's used, and your rights.
+OpenFoodJournal ("the App") is an open-source food journaling application. This privacy policy explains what data the App handles, how it is used, which services may process it, and your choices.
 
-## Data We Collect
+## Data the App Handles
 
-### Food & Nutrition Data
-- Food names, brands, and nutritional information you enter or scan
-- Daily food logs and meal entries
-- Macro and micronutrient tracking data
-- Saved food templates, composite foods, nutrition calculators, serving mappings, and container tracking data
-- Meal-time preferences, goals, archive state, and app settings
+### Food, Nutrition, and Assistant Data
 
-This data is stored locally on your device using SwiftData and synced across your devices via **Apple iCloud (CloudKit Private Database)**. Your data is stored in your personal iCloud account — we do not have access to it.
+The App may store:
 
-### Camera Images
-When you use the scan feature, the App captures photos of food items or nutrition labels. These images are:
-- Sent directly from your device to **Google's Gemini AI** via HTTPS to extract nutritional information
-- **Not stored on any server** — Google processes the image and returns structured nutrition data
-- **Not stored on your device** after processing is complete
+- Food names, brands, nutrition estimates, daily logs, and meal entries
+- Macro and micronutrient values, goals, meal times, serving mappings, and preferences
+- Saved foods, composites, nutrition calculators, Shelf state, and container tracking records
+- Assistant conversations, attachments, tool activity, saved sources, context summaries, and usage totals
+- Optional generated food icons and related metadata
 
-You provide your own Google Gemini API key to enable scanning. Your API key is stored securely in the iOS Keychain on your device — it is never transmitted to us or any third party other than Google.
+This information is stored locally with SwiftData and may sync through your Apple iCloud private database. OpenFoodJournal does not operate an account service and does not have access to your private iCloud database.
 
-### Gemini Diagnostics and Usage Totals
-When you use Gemini-powered features such as label scans, food-photo scans, AI Search, nutrition-calculator OCR, or optional food emoji generation, the App stores local diagnostic logs for troubleshooting. These logs may include:
-- Operation type, status, selected model, duration, and error details
-- Prompt text and non-image response text returned by Gemini
-- Request metadata such as image dimensions, JPEG sizes, response timing, token usage, and estimated cost
+### Camera, Photo, and File Inputs
 
-These logs **never include your Gemini API key or raw image bytes**. They are stored locally with your app data, can be exported from Settings, and are pruned to a 30-day window.
+When you scan food or a nutrition label, the App sends the selected images directly from your device to the AI provider you configured so it can return an editable nutrition estimate. Scan images are not retained as raw scan photos after the request completes.
 
-### Health Data (Apple HealthKit)
-If you opt in, the App:
-- **Writes** nutritional data such as calories, protein, carbs, fat, and supported dietary micronutrients to Apple Health
-- **Reads** active energy burned (`HKQuantityTypeIdentifierActiveEnergyBurned`) to calculate your net calorie balance for the day
+When you intentionally attach an image or PDF to an Assistant conversation, that attachment and related conversation source records may remain in the conversation and sync through your private iCloud database. Generated food icons may also be saved with Food Bank or Journal records.
 
-We:
-- **Never read any other HealthKit data** — only the active energy type listed above
-- **Never send HealthKit data to any server**
-- **Never use HealthKit data for advertising or marketing**
-- **Never share HealthKit data with third parties**
+### API Keys and Service Credentials
 
-You can disable HealthKit integration at any time in Settings.
+API keys, Azure endpoints, and optional Turso credentials are stored in the iOS Keychain. Secrets are excluded from OpenFoodJournal backups and diagnostics. Requests are authenticated directly with the provider you selected; OpenFoodJournal does not receive your keys.
 
-### Macro Goals & Preferences
-Your daily calorie and macro goals, meal-time settings, and UI preferences (e.g., ring display configuration) are stored locally on your device using UserDefaults or SwiftData.
+### AI Diagnostics and Usage Information
 
-## Data Processing
+The App can record operational information such as provider and model names, request and run identifiers, token usage, estimated or reported cost, duration, timeout or retry state, and redacted error details.
 
-### Google Gemini AI (Direct API)
-When you use Gemini-powered features, images and/or text prompts are sent directly from your device via HTTPS to **Google's Gemini AI** (`generativelanguage.googleapis.com`) for nutritional analysis, nutrition search, OCR, or emoji generation. There is no intermediary OpenFoodJournal server — your device communicates with Google's API directly using your personal API key.
+Detailed AI diagnostics do not include prompts, answers, tool arguments or results, journal or HealthKit values, source URLs or content, attachments, raw provider responses, chain-of-thought, API keys, or image bytes. When you configure Turso diagnostics, detailed events are sent to your own Turso database and expire after 14 days. A bounded local delivery outbox may temporarily retain pending redacted events for up to 48 hours. Conversation history, terminal run state, and usage or cost aggregates may be retained with the rest of your app data.
 
-- Images are sent as part of a single API request and are **not stored** by the App after processing
-- Google may process and temporarily retain the image per their API terms
-- No personally identifiable information is intentionally included in the request — only the food image or prompt content needed for the feature
-- You can revoke access at any time by deleting your API key in Settings or revoking it at [Google AI Studio](https://aistudio.google.com/apikey)
+## Apple Health
 
-Google's use of data sent to Gemini is governed by [Google's Privacy Policy](https://policies.google.com/privacy) and [Google's Generative AI Terms](https://ai.google.dev/gemini-api/terms).
+Apple Health integration is optional. If you grant access, the App may:
 
-## Data Storage & Sync
+- Write calories, protein, carbohydrates, fat, and supported dietary micronutrients to Apple Health
+- Read active energy burned to show calorie balance and answer an Assistant request that explicitly includes Apple Health energy
 
-All your food journal data is stored in **Apple's iCloud Private Database** via CloudKit. This means:
-- Your data lives in your personal iCloud account
-- We have **no ability to read, access, or delete** your cloud data
-- Data syncs automatically across your devices signed into the same Apple ID
-- Apple's iCloud terms and privacy policy apply to this storage
+The App does not read other HealthKit categories. HealthKit data is not used for advertising, marketing, tracking, insurance, or data mining.
+
+If you ask the Assistant to use Apple Health energy, the returned active-energy value becomes part of the tool result sent to the AI provider you selected so it can answer your request. You can avoid this processing by not requesting HealthKit-backed Assistant context, revoke Health access in iOS Settings, or disable Apple Health integration in the App.
+
+OpenFoodJournal uses deterministic identifiers for its own Apple Health samples so edits can replace prior OpenFoodJournal-owned values instead of creating duplicates.
+
+## Third-Party Processing
+
+OpenFoodJournal does not operate a required proxy server. Depending on the features and providers you choose, your device may communicate directly with the following services over HTTPS.
+
+### AI Conversation, Scan, and Image Providers
+
+- Google Gemini
+- OpenRouter
+- Microsoft Azure OpenAI
+- OpenAI
+- Anthropic
+- Meta Muse Spark or another user-configured OpenAI-compatible endpoint
+
+The request may contain the text, image, PDF, source excerpt, journal fact, or tool result needed for the feature you initiated. Each provider processes data under its own terms and privacy policy. Provider settings are optional, and you can remove a saved key at any time.
+
+### Web Research Providers
+
+Assistant web research may use model-native search or a separately configured provider such as Tavily, Parallel, or Exa. Search queries and returned source material are processed by the selected service. URLs that you ask the Assistant to fetch are downloaded directly by the App and may be saved as conversation source artifacts.
+
+### Open Food Facts
+
+When you search Open Food Facts or scan a barcode, the search text or barcode is sent to the public Open Food Facts service. Results are shown for review before you save them.
+
+### models.dev
+
+The App may fetch public model capability and pricing metadata from models.dev. This refresh does not include your API keys, prompts, journal, attachments, or HealthKit values.
+
+### Apple iCloud
+
+SwiftData uses your private CloudKit database to sync supported app records across devices signed into the same Apple ID. Apple's iCloud terms and privacy policy apply.
 
 ### Optional Turso Mirror
-The App can optionally mirror a copy of your OpenFoodJournal data to a Turso database that you configure yourself. This feature is off by default.
 
-If you enable it:
-- You provide the Turso database URL and auth token
-- Credentials are stored in the iOS Keychain
-- Food logs, saved foods, containers, preferences, and optionally diagnostic logs may be pushed to your Turso database
-- OpenFoodJournal does not operate or access that database
-- You can disable the mirror or delete the credentials in Settings
+You may configure your own Turso database. If enabled, the App can mirror food logs, saved foods, containers, preferences, settings, usage aggregates, and redacted diagnostics to that database. OpenFoodJournal does not operate or have access to your Turso database. You control the database, credentials, retention outside the App's diagnostic expiry, and deletion.
 
-## No User Accounts
+## No User Accounts, Ads, or Tracking
 
-The App does not require or support user accounts. Each device operates independently, with iCloud handling cross-device sync for devices on the same Apple ID. We do not collect email addresses, usernames, passwords, or any personal identifiers.
+The App does not require an OpenFoodJournal account and does not collect an email address, username, password, advertising identifier, or cross-app tracking identifier. It does not include an advertising or analytics SDK and does not display ads.
 
-## No Tracking or Analytics
+OpenFoodJournal does not sell or rent your data. Data is disclosed only to the services described above when needed for a feature you choose, to your private iCloud database for sync, or to your own Turso database when you explicitly configure it.
 
-The App does not:
-- Use any analytics SDKs or tracking frameworks
-- Collect device identifiers or advertising identifiers
-- Track your usage patterns or behavior
-- Display advertisements
+## Your Choices and Deletion
 
-## No Third-Party Data Sharing
+You can:
 
-We do not sell, rent, or share your data with third parties for advertising or marketing. Data is sent only as described above: to Apple iCloud for sync, to Google Gemini when you use Gemini-powered features, and to your own Turso database only if you explicitly configure the optional mirror.
+- Review and edit AI-generated nutrition before saving it
+- Remove provider keys, Azure settings, and Turso credentials in Settings
+- Disable Apple Health integration or revoke Health permissions in iOS Settings
+- Disable optional Turso mirroring and diagnostics
+- Export spreadsheet data, a restore-grade JSON backup, or redacted diagnostics
+- Delete individual Journal, Food Bank, Assistant, source, or container records in the App
+- Delete OpenFoodJournal's Apple Health samples in the Health app
+- Delete local app data by uninstalling the App
+- Delete synced app data through iOS Settings → Apple ID → iCloud → Manage Storage → OpenFoodJournal
+- Delete data in any provider account or user-owned Turso database through that service
 
-## Data Deletion
-
-To delete your data:
-- **Local data**: Uninstall the App from your device
-- **iCloud data**: Go to iOS Settings → [Your Name] → iCloud → Manage Storage → OpenFoodJournal → Delete Data
-- **Gemini API key or Turso credentials**: Delete them from Settings
-- **Apple Health samples**: Manage or delete OpenFoodJournal Health data in the Apple Health app
-- **Both local and iCloud data**: Uninstalling the App and removing iCloud data permanently deletes all your information
+Removing the App from one device does not automatically delete records already synced to iCloud or sent to a provider you selected. Those services apply their own retention and deletion rules.
 
 ## Children's Privacy
 
-The App is not directed at children under 13. We do not knowingly collect data from children.
+The App is not directed at children under 13. OpenFoodJournal does not knowingly collect children's personal information.
 
 ## Changes to This Policy
 
-We may update this privacy policy from time to time. Changes will be posted in the App's source code repository and reflected in the "Last Updated" date above.
+We may update this policy when the App's data practices change. Updates are posted in the source repository with a revised "Last Updated" date.
 
-## Open Source
+## Open Source and Contact
 
-OpenFoodJournal is open-source software. You can review the complete source code to verify our privacy practices at: [https://github.com/kvn8888/OpenFoodJournal](https://github.com/kvn8888/OpenFoodJournal)
+The source code is available at [github.com/kvn8888/OpenFoodJournal](https://github.com/kvn8888/OpenFoodJournal).
 
-## Contact
-
-For privacy questions or concerns, please open an issue on our GitHub repository.
+For privacy questions, requests, or concerns, open an issue at [github.com/kvn8888/OpenFoodJournal/issues](https://github.com/kvn8888/OpenFoodJournal/issues).

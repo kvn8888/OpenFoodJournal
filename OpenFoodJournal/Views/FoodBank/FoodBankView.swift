@@ -6,6 +6,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 
 struct FoodBankView: View {
     // ── Environment ───────────────────────────────────────────────
@@ -689,11 +690,11 @@ private enum FoodBankLogSelection: Identifiable {
 private struct ShelfSuggestionRow: View {
     let food: SavedFood
     let recommendation: ShelfRecommendation
+    @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "sparkles")
-                .foregroundStyle(.orange)
+            foodIcon
                 .frame(width: 28, height: 44)
                 .accessibilityHidden(true)
 
@@ -720,6 +721,28 @@ private struct ShelfSuggestionRow: View {
         }
         .padding(.vertical, 5)
         .contentShape(.rect)
+    }
+
+    /// Shows the food's own icon — generated image when the user opted into
+    /// image icons, otherwise its emoji — falling back to the generic sparkle
+    /// only when the food has neither.
+    @ViewBuilder
+    private var foodIcon: some View {
+        if useGeneratedIconImages,
+           let data = food.generatedIconImageData,
+           let image = UIImage(data: data) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 28, height: 28)
+                .clipShape(Circle())
+        } else if let emoji = food.normalizedEmoji {
+            Text(emoji)
+                .font(.title3)
+        } else {
+            Image(systemName: "sparkles")
+                .foregroundStyle(.orange)
+        }
     }
 }
 

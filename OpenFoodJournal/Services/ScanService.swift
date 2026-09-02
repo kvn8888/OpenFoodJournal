@@ -307,6 +307,34 @@ struct GeminiGeneratedFoodIconPayload: Sendable {
     let mimeType: String
 }
 
+// MARK: - OpenAI-Compatible Images API Types
+
+/// OpenAI Images API (`/v1/images/generations`) request, which is also the
+/// wire format for Meta's Muse Image. The body is intentionally minimal —
+/// optional parameters like `size` and `response_format` are rejected by some
+/// compatible servers, so only universally supported fields are sent.
+struct OpenAICompatibleImageGenerationRequest: Encodable, Sendable {
+    let model: String
+    let prompt: String
+    let n: Int
+}
+
+/// OpenAI Images API response. Depending on the provider and model the image
+/// arrives as base64 (`b64_json`) or as a signed URL; both are supported.
+struct OpenAICompatibleImageResponseEnvelope: Decodable, Sendable {
+    struct Item: Decodable, Sendable {
+        let b64JSON: String?
+        let url: String?
+
+        enum CodingKeys: String, CodingKey {
+            case b64JSON = "b64_json"
+            case url
+        }
+    }
+
+    let data: [Item]?
+}
+
 private struct GeminiInteractionResponseEnvelope: Decodable {
     let interaction: GeminiInteractionResource?
     let usage: GeminiInteractionUsage?
@@ -1080,7 +1108,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             geminiConfig = .foodEmoji
         }
 
-        guard provider == .openRouter else {
+        guard provider != .gemini else {
             return AIRequestConfig(
                 provider: .gemini,
                 primary: geminiConfig.primary,
@@ -1091,10 +1119,28 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
 
         let defaults = UserDefaults.standard
-        let liteModel = AIProviderSettings.openRouterLiteModel(in: defaults)
-        let proModel = AIProviderSettings.openRouterProModel(in: defaults)
-        let emojiModel = AIProviderSettings.openRouterEmojiModel(in: defaults)
-        let routingMode = OpenRouterRoutingMode.stored(in: defaults)
+        let liteModel: String
+        let proModel: String
+        let emojiModel: String
+        let routingMode: OpenRouterRoutingMode
+        switch provider {
+        case .openRouter:
+            liteModel = AIProviderSettings.openRouterLiteModel(in: defaults)
+            proModel = AIProviderSettings.openRouterProModel(in: defaults)
+            emojiModel = AIProviderSettings.openRouterEmojiModel(in: defaults)
+            routingMode = OpenRouterRoutingMode.stored(in: defaults)
+        case .openAICompatible:
+            liteModel = AIProviderSettings.openAICompatibleLiteModel(in: defaults)
+            proModel = AIProviderSettings.openAICompatibleProModel(in: defaults)
+            emojiModel = AIProviderSettings.openAICompatibleEmojiModel(in: defaults)
+            // Provider-routing preferences are an OpenRouter body extension.
+            routingMode = .automatic
+        case .gemini:
+            liteModel = geminiConfig.primary
+            proModel = geminiConfig.primary
+            emojiModel = geminiConfig.primary
+            routingMode = .automatic
+        }
         let primaryModel: String
         let fallbackModel: String
 
@@ -1111,7 +1157,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
 
         return AIRequestConfig(
-            provider: .openRouter,
+            provider: provider,
             primary: primaryModel,
             fallback: fallbackModel,
             thinkingLevel: geminiConfig.thinkingLevel,
@@ -1121,6 +1167,59 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
     private func apiKey(for config: AIRequestConfig) -> String? {
         KeychainService.apiKey(for: config.provider)
+    }
+
+    // MARK: Food Icon Image Backend
+
+    /// A fully resolved image-generation target: provider, credential, model,
+    /// and (for the OpenAI-compatible provider) the images endpoint.
+    private struct FoodIconImageBackend {
+        let provider: FoodIconImageProvider
+        let apiKey: String
+        let model: String
+        /// `{base}/images/generations` for the OpenAI-compatible provider;
+        /// nil for Gemini, which uses the fixed Interactions endpoint.
+        let imagesURL: URL?
+    }
+
+    private var selectedFoodIconImageProvider: FoodIconImageProvider {
+        FoodIconImageProvider.stored()
+    }
+
+    /// Short actionable hint for the currently selected image provider, used
+    /// to compose progress/status messages.
+    private var foodIconImageKeyHint: String {
+        switch selectedFoodIconImageProvider {
+        case .gemini: "Add a Gemini API key"
+        case .openAICompatible: "Add an OpenAI-compatible API key and base URL"
+        }
+    }
+
+    /// Resolves the selected image provider into a usable backend, or nil when
+    /// its credential (or, for custom endpoints, the base URL) is missing.
+    private func foodIconImageBackend() -> FoodIconImageBackend? {
+        let provider = selectedFoodIconImageProvider
+        guard let apiKey = KeychainService.load(for: provider.keychainAccount)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty else { return nil }
+
+        switch provider {
+        case .gemini:
+            return FoodIconImageBackend(
+                provider: .gemini,
+                apiKey: apiKey,
+                model: Self.foodIconImageModel,
+                imagesURL: nil
+            )
+        case .openAICompatible:
+            guard let baseURL = AIProviderSettings.openAICompatibleBaseURL() else { return nil }
+            return FoodIconImageBackend(
+                provider: .openAICompatible,
+                apiKey: apiKey,
+                model: AIProviderSettings.openAICompatibleImageModel(),
+                imagesURL: baseURL.appendingPathComponent("images/generations")
+            )
+        }
     }
 
     // MARK: - Scan
@@ -1662,12 +1761,10 @@ final class ScanService: SavedFoodImageGenerationQueuing {
               UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey) else {
             return
         }
-        guard KeychainService.geminiAPIKey?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty != nil else {
+        guard foodIconImageBackend() != nil else {
             foodEmojiCompletedCount = 0
             foodEmojiTotalCount = foodIconGenerationQueue.outstandingCount
-            foodEmojiProgressMessage = "\(foodIconGenerationQueue.outstandingCount.formatted()) food image\(foodIconGenerationQueue.outstandingCount == 1 ? "" : "s") queued. Add a Gemini API key to start."
+            foodEmojiProgressMessage = "\(foodIconGenerationQueue.outstandingCount.formatted()) food image\(foodIconGenerationQueue.outstandingCount == 1 ? "" : "s") queued. \(foodIconImageKeyHint) to start."
             return
         }
 
@@ -1678,9 +1775,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
     private func processQueuedFoodIconImages() async {
         guard let modelContext,
-              let apiKey = KeychainService.geminiAPIKey?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .nilIfEmpty else {
+              let backend = foodIconImageBackend() else {
             foodIconGenerationWorker = nil
             return
         }
@@ -1708,7 +1803,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         while !Task.isCancelled,
               UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.autoGenerateKey),
               UserDefaults.standard.bool(forKey: FoodBankEmojiSettings.useGeneratedIconImagesKey),
-              KeychainService.hasGeminiAPIKey,
+              foodIconImageBackend() != nil,
               let foodID = foodIconGenerationQueue.beginNext() {
             foodEmojiTotalCount = completedCount + foodIconGenerationQueue.outstandingCount
 
@@ -1734,7 +1829,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
                 failedCount += 1
             } else {
                 do {
-                    let icon = try await generateFoodIconImagePayload(for: food, apiKey: apiKey)
+                    let icon = try await generateFoodIconImagePayload(for: food, backend: backend)
                     apply(icon, to: food)
                     clearGenerationFailure(
                         storageKey: Self.foodIconImageFailureCacheStorageKey,
@@ -1880,10 +1975,8 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         guard !isAssigningFoodEmojis else { return }
         guard let modelContext else { return }
 
-        guard let apiKey = KeychainService.geminiAPIKey?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty else {
-            foodEmojiProgressMessage = "Add a Gemini API key to generate food images."
+        guard let backend = foodIconImageBackend() else {
+            foodEmojiProgressMessage = "\(foodIconImageKeyHint) to generate food images."
             foodEmojiCompletedCount = 0
             foodEmojiTotalCount = 0
             return
@@ -1962,7 +2055,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             let cacheKey = foodIconImageFailureCacheKey(for: food)
 
             do {
-                let icon = try await generateFoodIconImagePayload(for: food, apiKey: apiKey)
+                let icon = try await generateFoodIconImagePayload(for: food, backend: backend)
                 apply(icon, to: food)
                 clearGenerationFailure(storageKey: Self.foodIconImageFailureCacheStorageKey, cacheKey: cacheKey)
                 pendingPersistenceCount += 1
@@ -2029,10 +2122,8 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         guard let modelContext else { return }
         guard force || food.needsFoodBankGeneratedIconImage else { return }
 
-        guard let apiKey = KeychainService.geminiAPIKey?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty else {
-            foodEmojiProgressMessage = "Add a Gemini API key to generate food images."
+        guard let backend = foodIconImageBackend() else {
+            foodEmojiProgressMessage = "\(foodIconImageKeyHint) to generate food images."
             return
         }
         let cacheKey = foodIconImageFailureCacheKey(for: food)
@@ -2052,7 +2143,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
 
         do {
-            let icon = try await generateFoodIconImagePayload(for: food, apiKey: apiKey)
+            let icon = try await generateFoodIconImagePayload(for: food, backend: backend)
             apply(icon, to: food)
             clearGenerationFailure(storageKey: Self.foodIconImageFailureCacheStorageKey, cacheKey: cacheKey)
             try modelContext.save()
@@ -2090,9 +2181,15 @@ final class ScanService: SavedFoodImageGenerationQueuing {
 
     private func foodIconImageFailureCacheKey(for food: SavedFood) -> String {
         let prompt = Self.foodIconImagePrompt(name: food.name, brand: food.brand)
+        // Keyed to the active provider+model so switching image providers
+        // retries foods that recently failed on the other backend.
+        let provider = selectedFoodIconImageProvider
+        let model = provider == .gemini
+            ? Self.foodIconImageModel
+            : AIProviderSettings.openAICompatibleImageModel()
         return generationFailureCacheKey(
             version: Self.foodIconImageGenerationCacheVersion,
-            model: Self.foodIconImageModel,
+            model: "\(provider.rawValue):\(model)",
             foodID: food.id,
             prompt: prompt
         )
@@ -2292,14 +2389,19 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return emoji
     }
 
-    private func generateFoodIconImagePayload(for food: SavedFood, apiKey: String) async throws -> GeminiGeneratedFoodIconPayload {
+    private func generateFoodIconImagePayload(
+        for food: SavedFood,
+        backend: FoodIconImageBackend
+    ) async throws -> GeminiGeneratedFoodIconPayload {
         let start = ContinuousClock.now
         let prompt = Self.foodIconImagePrompt(name: food.name, brand: food.brand)
         let requestMetadata = GeminiRequestLogMetadata(
-            apiMethod: "interactions.create",
-            aiProvider: AIProvider.gemini.rawValue,
+            apiMethod: backend.provider == .gemini ? "interactions.create" : "images.generations",
+            aiProvider: backend.provider.rawValue,
             responseMimeType: "image/*",
-            thinkingLevel: Self.foodIconImageThinkingLevel.rawValue,
+            thinkingLevel: backend.provider == .gemini
+                ? Self.foodIconImageThinkingLevel.rawValue
+                : "none",
             includeThoughts: false,
             tools: [],
             imageCount: 0,
@@ -2319,13 +2421,19 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
-            let icon = try await callGeminiFoodIconImage(prompt: prompt, apiKey: apiKey, trace: trace)
+            let icon: GeminiGeneratedFoodIconPayload
+            switch backend.provider {
+            case .gemini:
+                icon = try await callGeminiFoodIconImage(prompt: prompt, apiKey: backend.apiKey, trace: trace)
+            case .openAICompatible:
+                icon = try await callOpenAICompatibleFoodIconImage(prompt: prompt, backend: backend, trace: trace)
+            }
             recordGeminiScanLog(
                 operation: .foodIconImage,
                 status: .success,
-                primaryModel: Self.foodIconImageModel,
+                primaryModel: backend.model,
                 fallbackModel: nil,
-                resolvedModel: trace.resolvedModel ?? Self.foodIconImageModel,
+                resolvedModel: trace.resolvedModel ?? backend.model,
                 usedFallback: false,
                 userPrompt: userPrompt,
                 durationMs: msFrom(ContinuousClock.now.duration(to: start)),
@@ -2338,9 +2446,9 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             recordGeminiScanLog(
                 operation: .foodIconImage,
                 status: .failure,
-                primaryModel: Self.foodIconImageModel,
+                primaryModel: backend.model,
                 fallbackModel: nil,
-                resolvedModel: trace.resolvedModel ?? Self.foodIconImageModel,
+                resolvedModel: trace.resolvedModel ?? backend.model,
                 usedFallback: false,
                 userPrompt: userPrompt,
                 durationMs: msFrom(ContinuousClock.now.duration(to: start)),
@@ -2466,6 +2574,152 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return icon
     }
 
+    /// Calls a user-configured OpenAI-compatible `/images/generations` endpoint
+    /// (e.g. Meta's Muse Image) and normalizes the result through the same
+    /// mask/resize pipeline as the Gemini path.
+    private func callOpenAICompatibleFoodIconImage(
+        prompt: String,
+        backend: FoodIconImageBackend,
+        trace: GeminiCallTrace
+    ) async throws -> GeminiGeneratedFoodIconPayload {
+        let attemptStart = ContinuousClock.now
+        var attempt = GeminiModelAttemptLog(
+            model: backend.model,
+            endpoint: backend.imagesURL?.absoluteString ?? "unconfigured"
+        )
+
+        func fail(_ error: Error, stage: String? = nil) throws -> Never {
+            let visible = visibleError(from: error)
+            attempt.durationMs = msFrom(ContinuousClock.now.duration(to: attemptStart))
+            attempt.errorCode = errorCode(from: visible)
+            attempt.errorMessage = errorMessage(from: visible)
+            if let stage {
+                attempt.parseStage = stage
+            }
+            trace.absorb(attempt)
+            self.error = visible as? ScanError
+            throw GeminiCallFailure(underlying: visible, trace: trace)
+        }
+
+        guard let url = backend.imagesURL else {
+            try fail(
+                ScanError.serverError(0, "Configure the OpenAI-compatible base URL in Settings."),
+                stage: "build_url"
+            )
+        }
+
+        let requestBody = Self.openAICompatibleFoodIconImageRequest(
+            model: backend.model,
+            prompt: prompt
+        )
+
+        var httpRequest = URLRequest(url: url)
+        httpRequest.httpMethod = "POST"
+        httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        httpRequest.setValue("Bearer \(backend.apiKey)", forHTTPHeaderField: "Authorization")
+        httpRequest.httpBody = try JSONEncoder().encode(requestBody)
+        trace.requestPayloadBytes = httpRequest.httpBody?.count
+
+        #if DEBUG
+        print("🧠 OpenAI-compatible food icon image start model=\(backend.model) payloadBytes=\(trace.requestPayloadBytes ?? 0)")
+        #endif
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: httpRequest)
+        } catch {
+            try fail(ScanError.networkError(error), stage: "network")
+        }
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            try fail(ScanError.invalidResponse, stage: "http_response")
+        }
+        attempt.httpStatus = httpResponse.statusCode
+
+        #if DEBUG
+        print("🧠 OpenAI-compatible food icon image HTTP \(httpResponse.statusCode) model=\(backend.model) +\(msFrom(attemptStart.duration(to: ContinuousClock.now)))ms")
+        #endif
+
+        guard (200..<300).contains(httpResponse.statusCode) else {
+            attempt.rawErrorBody = String(data: data, encoding: .utf8)
+            let apiResponse = try? JSONDecoder().decode(OpenRouterErrorEnvelope.self, from: data)
+            let message = apiResponse?.error?.message ?? "HTTP \(httpResponse.statusCode)"
+            try fail(ScanError.serverError(httpResponse.statusCode, message), stage: "http_error")
+        }
+
+        var generatedIcon: GeminiGeneratedFoodIconPayload?
+        var downloadedFromURL = false
+        let envelope = try? JSONDecoder().decode(OpenAICompatibleImageResponseEnvelope.self, from: data)
+        if let item = envelope?.data?.first {
+            if let base64 = item.b64JSON,
+               let decoded = Data(base64Encoded: base64, options: [.ignoreUnknownCharacters]),
+               let mimeType = Self.imageMimeType(for: decoded, declaredMimeType: nil) {
+                generatedIcon = GeminiGeneratedFoodIconPayload(data: decoded, mimeType: mimeType)
+            } else if let urlString = item.url, let remoteURL = URL(string: urlString) {
+                // Some providers return a signed URL instead of inline base64.
+                if let (remoteData, _) = try? await session.data(from: remoteURL),
+                   let mimeType = Self.imageMimeType(for: remoteData, declaredMimeType: nil) {
+                    generatedIcon = GeminiGeneratedFoodIconPayload(data: remoteData, mimeType: mimeType)
+                    downloadedFromURL = true
+                }
+            }
+        }
+        // Last resort: reuse the recursive base64 scanner that already handles
+        // Gemini's response shapes, in case a gateway wraps the payload.
+        if generatedIcon == nil {
+            generatedIcon = Self.extractGeneratedFoodIconImage(from: data)
+        }
+
+        guard let generatedIcon else {
+            let rawText = String(data: data, encoding: .utf8) ?? "<binary response>"
+            try fail(ScanError.invalidGeneratedImageResponse(Self.clippedForLog(rawText)), stage: "image_parse")
+        }
+
+        let semanticMaskData = await foodIconForegroundMasker.transparentPNG(
+            from: generatedIcon.data,
+            maximumPixelDimension: Self.foodIconStoredMaxPixelDimension
+        )
+        let semanticMaskApplied = semanticMaskData != nil
+        let icon = Self.storedFoodIconPayload(
+            from: generatedIcon,
+            semanticMaskData: semanticMaskData
+        )
+
+        attempt.rawResponseJSON = encodedJSONString(
+            GeminiGeneratedFoodIconLogMetadata(
+                originalGeneratedImageBytes: generatedIcon.data.count,
+                storedImageBytes: icon.data.count,
+                storedImageMimeType: icon.mimeType,
+                foregroundMaskMethod: "vision_foreground_instance",
+                foregroundMaskApplied: semanticMaskApplied,
+                storageMaxPixelDimension: Int(Self.foodIconStoredMaxPixelDimension),
+                storageJPEGQuality: Self.foodIconStoredJPEGQuality,
+                promptJSON: prompt,
+                // Custom endpoints do not have an auditable public rate card,
+                // so token counts and costs are reported as zero rather than
+                // estimated with the wrong provider's pricing.
+                reportedInputTokens: 0,
+                reportedOutputTokens: 0,
+                reportedTotalTokens: 0,
+                billableImageOutputTokens: 0,
+                estimatedImageOutputCostUSD: 0,
+                estimatedTotalCostUSD: 0,
+                pricingModel: "Unavailable for OpenAI-compatible endpoints"
+            )
+        )
+        attempt.succeeded = true
+        attempt.parseStage = "complete"
+        attempt.durationMs = msFrom(ContinuousClock.now.duration(to: attemptStart))
+        trace.absorb(attempt)
+
+        #if DEBUG
+        print("🧠 OpenAI-compatible food icon image complete bytes=\(icon.data.count) mime=\(icon.mimeType) viaURL=\(downloadedFromURL) duration=\(attempt.durationMs ?? 0)ms")
+        #endif
+
+        return icon
+    }
+
     /// Vision failure must never discard a successfully generated icon or cause
     /// another billable request. A semantic PNG wins; otherwise the compact
     /// opaque contrast image remains a truthful, usable fallback.
@@ -2501,6 +2755,21 @@ final class ScanService: SavedFoodImageGenerationQueuing {
                 aspectRatio: "1:1",
                 imageSize: "1K"
             )
+        )
+    }
+
+    /// Production payload for the OpenAI-compatible images endpoint, shared
+    /// with the deterministic contract tests. The Images API has no separate
+    /// system-instruction field, so the style rules are prepended to the
+    /// per-food prompt JSON.
+    static func openAICompatibleFoodIconImageRequest(
+        model: String,
+        prompt: String
+    ) -> OpenAICompatibleImageGenerationRequest {
+        OpenAICompatibleImageGenerationRequest(
+            model: model,
+            prompt: "\(Self.foodIconImageSystemInstruction)\n\n\(prompt)",
+            n: 1
         )
     }
 
@@ -2890,8 +3159,8 @@ final class ScanService: SavedFoodImageGenerationQueuing {
                 fallbackModel: config.fallback,
                 trace: trace
             )
-        case .openRouter:
-            return try await callOpenRouterText(
+        case .openRouter, .openAICompatible:
+            return try await callChatCompletionsText(
                 prompt: prompt,
                 images: images,
                 useWebSearch: useWebSearch,
@@ -2899,6 +3168,21 @@ final class ScanService: SavedFoodImageGenerationQueuing {
                 config: config,
                 trace: trace
             )
+        }
+    }
+
+    /// Resolves the OpenAI Chat Completions endpoint for the active provider.
+    /// OpenRouter is fixed; the OpenAI-compatible provider derives it from the
+    /// user's base URL.
+    private static func chatCompletionsURL(for provider: AIProvider) -> URL? {
+        switch provider {
+        case .openRouter:
+            return URL(string: openRouterChatCompletionsURL)
+        case .openAICompatible:
+            return AIProviderSettings.openAICompatibleBaseURL()?
+                .appendingPathComponent("chat/completions")
+        case .gemini:
+            return nil
         }
     }
 
@@ -3104,7 +3388,7 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         return jsonText
     }
 
-    private func callOpenRouterText(
+    private func callChatCompletionsText(
         prompt: String,
         images: [PreparedGeminiImage],
         useWebSearch: Bool,
@@ -3113,11 +3397,12 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         trace: GeminiCallTrace
     ) async throws -> String {
         do {
-            return try await callOpenRouterTextModel(
+            return try await callChatCompletionsTextModel(
                 prompt: prompt,
                 images: images,
                 useWebSearch: useWebSearch,
                 apiKey: apiKey,
+                provider: config.provider,
                 model: config.primary,
                 routingMode: config.openRouterRoutingMode,
                 trace: trace
@@ -3125,14 +3410,15 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         } catch {
             let visible = visibleError(from: error)
             if retryableFallbackStatusCode(visible) != nil, config.fallback != config.primary {
-                scanProgressMessage = "Retrying with OpenRouter fallback..."
+                scanProgressMessage = "Retrying with \(config.provider.displayName) fallback..."
                 trace.usedFallback = true
                 do {
-                    return try await callOpenRouterTextModel(
+                    return try await callChatCompletionsTextModel(
                         prompt: prompt,
                         images: images,
                         useWebSearch: useWebSearch,
                         apiKey: apiKey,
+                        provider: config.provider,
                         model: config.fallback,
                         routingMode: config.openRouterRoutingMode,
                         trace: trace
@@ -3148,16 +3434,18 @@ final class ScanService: SavedFoodImageGenerationQueuing {
         }
     }
 
-    private func callOpenRouterTextModel(
+    private func callChatCompletionsTextModel(
         prompt: String,
         images: [PreparedGeminiImage],
         useWebSearch: Bool,
         apiKey: String,
+        provider: AIProvider,
         model: String,
         routingMode: OpenRouterRoutingMode,
         trace: GeminiCallTrace
     ) async throws -> String {
-        let redactedEndpoint = Self.openRouterChatCompletionsURL
+        let endpointURL = Self.chatCompletionsURL(for: provider)
+        let redactedEndpoint = endpointURL?.absoluteString ?? "unconfigured"
         let attemptStart = ContinuousClock.now
         var attempt = GeminiModelAttemptLog(model: model, endpoint: redactedEndpoint)
         attempt.searchGroundingUsed = useWebSearch
@@ -3175,26 +3463,34 @@ final class ScanService: SavedFoodImageGenerationQueuing {
             throw GeminiCallFailure(underlying: visible, trace: trace)
         }
 
-        guard let url = URL(string: Self.openRouterChatCompletionsURL) else {
-            try fail(ScanError.invalidResponse, stage: "build_url")
+        guard let url = endpointURL else {
+            try fail(
+                ScanError.serverError(0, "Configure the OpenAI-compatible base URL in Settings."),
+                stage: "build_url"
+            )
         }
 
+        let isOpenRouter = provider == .openRouter
         let openRouterRequest = OpenRouterChatRequest(
             model: model,
             messages: [.user(text: prompt, images: images)],
             stream: true,
             temperature: 0,
             responseFormat: .jsonObject,
-            provider: OpenRouterProviderPreferences.from(routingMode),
-            plugins: useWebSearch ? [.web] : nil
+            // Provider routing and the web plugin are OpenRouter body
+            // extensions; generic OpenAI-compatible servers reject them.
+            provider: isOpenRouter ? OpenRouterProviderPreferences.from(routingMode) : nil,
+            plugins: isOpenRouter && useWebSearch ? [.web] : nil
         )
 
         var httpRequest = URLRequest(url: url)
         httpRequest.httpMethod = "POST"
         httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         httpRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        httpRequest.setValue("https://github.com/kvn8888/OpenFoodJournal", forHTTPHeaderField: "HTTP-Referer")
-        httpRequest.setValue("OpenFoodJournal", forHTTPHeaderField: "X-Title")
+        if isOpenRouter {
+            httpRequest.setValue("https://github.com/kvn8888/OpenFoodJournal", forHTTPHeaderField: "HTTP-Referer")
+            httpRequest.setValue("OpenFoodJournal", forHTTPHeaderField: "X-Title")
+        }
         httpRequest.httpBody = try JSONEncoder().encode(openRouterRequest)
         trace.requestPayloadBytes = httpRequest.httpBody?.count
 

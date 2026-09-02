@@ -821,8 +821,14 @@ enum ConfiguredChatModelProxyFactory {
             case .openAI: URL(string: "https://api.openai.com/v1")
             case .anthropic: URL(string: "https://api.anthropic.com/v1")
             case .museSpark: URL(string: "https://api.meta.ai/v1")
-            case .gemini, .openRouter, .azureOpenAI: nil
+            case .gemini, .openRouter, .azureOpenAI, .openAICompatible: nil
             }
+        }
+        // A custom OpenAI-compatible target has no default host to fall back
+        // to — an unconfigured or malformed base URL must fail before any
+        // credential is attached.
+        if selection.provider == .openAICompatible, endpoint == nil {
+            throw ChatError.serverError(400, "Configure the OpenAI-compatible base URL in Settings.")
         }
         // Do not retrieve or attach credentials until a user-entered Azure
         // destination has passed structure, suffix, and public-address checks.
@@ -846,7 +852,7 @@ enum ConfiguredChatModelProxyFactory {
             return OpenAIResponsesChatModelProxy(configuration: configuration, session: session)
         case .anthropic:
             return AnthropicChatModelProxy(configuration: configuration, session: session)
-        case .museSpark:
+        case .museSpark, .openAICompatible:
             return MuseSparkChatModelProxy(configuration: configuration, session: session)
         }
     }
@@ -1639,11 +1645,13 @@ final class AnthropicChatModelProxy: ChatModelProxy {
     }
 }
 
-// MARK: - Muse Spark adapter
+// MARK: - Muse Spark / OpenAI-compatible adapter
 
 /// Meta's Model API is OpenAI Chat Completions compatible. Keeping this as a
 /// thin adapter lets Muse Spark use the shared agent contract without coupling
-/// the app to OpenRouter's endpoint or routing extensions.
+/// the app to OpenRouter's endpoint or routing extensions. The same adapter
+/// serves the user-configured OpenAI-compatible provider, which speaks the
+/// identical `/chat/completions` wire format against a custom base URL.
 @MainActor
 final class MuseSparkChatModelProxy: ChatModelProxy {
     private let configuration: ChatProxyConfiguration
@@ -1651,7 +1659,10 @@ final class MuseSparkChatModelProxy: ChatModelProxy {
     var descriptor: ChatModelDescriptor { configuration.descriptor }
 
     init(configuration: ChatProxyConfiguration, session: URLSession = .shared) {
-        precondition(configuration.descriptor.provider == .museSpark)
+        precondition(
+            configuration.descriptor.provider == .museSpark
+                || configuration.descriptor.provider == .openAICompatible
+        )
         precondition(configuration.endpoint != nil)
         self.configuration = configuration
         self.session = session
@@ -1701,13 +1712,13 @@ final class MuseSparkChatModelProxy: ChatModelProxy {
             let envelope = try? JSONDecoder().decode(ORErrorEnvelope.self, from: errorData)
             throw ChatError.serverError(
                 http.statusCode,
-                envelope?.error?.message ?? "Muse Spark request failed"
+                envelope?.error?.message ?? "\(descriptor.provider.displayName) request failed"
             )
         }
 
         var turn = ChatModelTurn()
         turn.providerRequestID = requestID
-        turn.providerID = AssistantProvider.museSpark.rawValue
+        turn.providerID = descriptor.provider.rawValue
         let modelTurnID = UUID().uuidString
         var callBuffers: [Int: (id: String?, name: String, arguments: String)] = [:]
         let decoder = JSONDecoder()

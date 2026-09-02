@@ -5,6 +5,7 @@
   "teamID": "83B48K23H4",
   "signingCertificateName": "iPhone Distribution",
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
+  "externalTestFlightGroupID": "",
   "primaryLocale": "en-US",
   "xcodeRunner": "macos-26",
   "requiredXcodeVersion": "Xcode 26.6",
@@ -12,6 +13,10 @@
   "ascVersion": "3.1.1",
   "releaseNotesModel": "gpt-5.6-sol",
   "releaseNotesFallbackModels": [
+    "gpt-5.6-terra"
+  ],
+  "storeMetadataModel": "gpt-5.6-sol",
+  "storeMetadataFallbackModels": [
     "gpt-5.6-terra"
   ],
   "ascSHA256": {

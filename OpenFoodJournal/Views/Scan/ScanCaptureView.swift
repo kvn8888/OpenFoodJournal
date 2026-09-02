@@ -94,18 +94,17 @@ private struct LiveScanCaptureView: View {
 
     var body: some View {
         ZStack {
-            // Live camera preview — full screen (starts loading immediately)
-            if camera.isReady {
+            // Attach the preview layer immediately so the sheet is not waiting
+            // on startRunning(). Frames appear when the session queue finishes.
+            if cameraPermissionDenied {
+                Color.black.ignoresSafeArea()
+                CameraPermissionView()
+            } else {
                 CameraPreviewView(
                     session: camera.session,
                     onVisibleCaptureRectChanged: camera.setVisibleCaptureRect
                 )
-                    .ignoresSafeArea()
-            } else {
-                Color.black.ignoresSafeArea()
-                if cameraPermissionDenied {
-                    CameraPermissionView()
-                }
+                .ignoresSafeArea()
             }
 
             if !capturedPhotos.isEmpty && !isCapturingAdditionalPhoto {
@@ -211,7 +210,7 @@ private struct LiveScanCaptureView: View {
             torchOn: camera.torchOn,
             torchAvailable: camera.isTorchAvailable,
             canRetry: scanService.lastSubmittedScan != nil,
-            isBusy: scanService.isScanning,
+            isBusy: scanService.isScanning || !camera.isReady,
             onExit: { dismiss() },
             onRetry: retryLastScan,
             onZoom: camera.setZoom,
@@ -391,7 +390,7 @@ private struct LiveScanCaptureView: View {
 
     /// Takes a photo and transitions to the prompt step
     private func capture() async {
-        guard !scanService.isScanning else { return }
+        guard !scanService.isScanning, camera.isReady else { return }
         let image = await camera.capturePhoto()
         guard let image else { return }
         withAnimation { addCapturedPhoto(image) }
@@ -569,7 +568,9 @@ private struct CameraPermissionView: View {
 
 // MARK: - CameraController
 
-/// Manages the AVCaptureSession lifecycle. Isolated to @MainActor for UI-safe state updates.
+/// UI-facing camera state. Session graph work runs on `sessionQueue` because
+/// `AVCaptureSession.startRunning()` / `stopRunning()` block for hundreds of
+/// milliseconds and must not freeze the scan sheet on the main actor.
 @MainActor
 final class CameraController: NSObject, ObservableObject {
     @Published var isReady = false
@@ -579,10 +580,10 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var availableZoomLevels: [CameraZoomLevel] = [.one]
     @Published private(set) var isTorchAvailable = false
 
-    let session = AVCaptureSession()
-    private var photoOutput = AVCapturePhotoOutput()
-    private var currentVideoInput: AVCaptureDeviceInput?
-    private var activeDevice: AVCaptureDevice?
+    var session: AVCaptureSession { graph.session }
+
+    private let graph = CameraSessionGraph()
+    private let sessionQueue = DispatchQueue(label: "k3vnc.openfoodjournal.camera.session")
     private var visibleCaptureCrop = CameraPreviewCrop.fullFrame
     private var pendingPhotoCapture: PendingPhotoCapture?
 
@@ -603,16 +604,17 @@ final class CameraController: NSObject, ObservableObject {
             return
         }
 
-        session.beginConfiguration()
-        session.sessionPreset = .photo
-        if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
-        session.commitConfiguration()
-
-        refreshAvailableZoomLevels()
-        guard configureVideoInput(for: zoomLevel) else { return }
-
-        session.startRunning()
-        isReady = true
+        let graph = self.graph
+        let initialZoom = zoomLevel
+        let snapshot = await withCheckedContinuation { continuation in
+            sessionQueue.async {
+                continuation.resume(returning: graph.start(initialZoom: initialZoom))
+            }
+        }
+        availableZoomLevels = snapshot.availableZoomLevels
+        zoomLevel = snapshot.zoomLevel
+        isTorchAvailable = snapshot.isTorchAvailable
+        isReady = snapshot.started
     }
 
     func stop() {
@@ -620,7 +622,10 @@ final class CameraController: NSObject, ObservableObject {
             pendingPhotoCapture.continuation.resume(returning: nil)
             self.pendingPhotoCapture = nil
         }
-        if session.isRunning { session.stopRunning() }
+        let graph = self.graph
+        sessionQueue.async {
+            graph.stop()
+        }
     }
 
     func setVisibleCaptureRect(_ rect: CGRect) {
@@ -628,23 +633,30 @@ final class CameraController: NSObject, ObservableObject {
     }
 
     func toggleTorch() {
-        guard let device = activeDevice, device.hasTorch else { return }
-        try? device.lockForConfiguration()
-        torchOn.toggle()
-        device.torchMode = torchOn ? .on : .off
-        device.unlockForConfiguration()
+        let graph = self.graph
+        let shouldEnable = !torchOn
+        sessionQueue.async {
+            let enabled = graph.setTorch(shouldEnable)
+            Task { @MainActor in
+                self.torchOn = enabled
+            }
+        }
     }
 
     func setZoom(_ level: CameraZoomLevel) {
         guard availableZoomLevels.contains(level) else { return }
-        guard let targetDevice = device(for: level) else { return }
-
-        if activeDevice?.uniqueID == targetDevice.uniqueID {
-            applyZoom(level, to: targetDevice)
-            return
+        let graph = self.graph
+        let torchOn = self.torchOn
+        sessionQueue.async {
+            graph.setZoom(level, torchOn: torchOn)
+            let zoom = graph.zoomLevel
+            let torchAvailable = graph.isTorchAvailable
+            Task { @MainActor in
+                self.zoomLevel = zoom
+                self.isTorchAvailable = torchAvailable
+                if !torchAvailable { self.torchOn = false }
+            }
         }
-
-        _ = configureVideoInput(for: level)
     }
 
     func capturePhoto() async -> UIImage? {
@@ -658,9 +670,85 @@ final class CameraController: NSObject, ObservableObject {
                 crop: visibleCaptureCrop,
                 continuation: continuation
             )
-            let settings = AVCapturePhotoSettings()
-            photoOutput.capturePhoto(with: settings, delegate: self)
+            let output = graph.photoOutput
+            sessionQueue.async {
+                output.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
+            }
         }
+    }
+}
+
+/// Capture graph owned by `CameraController`. `@unchecked Sendable` because
+/// every mutation is serialized on the controller's session queue.
+private final class CameraSessionGraph: @unchecked Sendable {
+    let session = AVCaptureSession()
+    let photoOutput = AVCapturePhotoOutput()
+    private(set) var zoomLevel = CameraZoomLevel.one
+    private(set) var availableZoomLevels: [CameraZoomLevel] = [.one]
+    private var currentVideoInput: AVCaptureDeviceInput?
+    private var activeDevice: AVCaptureDevice?
+
+    var isTorchAvailable: Bool { activeDevice?.hasTorch ?? false }
+
+    struct StartSnapshot: Sendable {
+        var started: Bool
+        var zoomLevel: CameraZoomLevel
+        var availableZoomLevels: [CameraZoomLevel]
+        var isTorchAvailable: Bool
+    }
+
+    func start(initialZoom: CameraZoomLevel) -> StartSnapshot {
+        session.beginConfiguration()
+        session.sessionPreset = .photo
+        if session.canAddOutput(photoOutput) { session.addOutput(photoOutput) }
+        session.commitConfiguration()
+
+        refreshAvailableZoomLevels()
+        if !availableZoomLevels.contains(initialZoom) {
+            zoomLevel = availableZoomLevels.contains(.one) ? .one : availableZoomLevels[0]
+        } else {
+            zoomLevel = initialZoom
+        }
+
+        let started = configureVideoInput(for: zoomLevel, torchOn: false)
+        if started {
+            session.startRunning()
+        }
+        return StartSnapshot(
+            started: started && session.isRunning,
+            zoomLevel: zoomLevel,
+            availableZoomLevels: availableZoomLevels,
+            isTorchAvailable: isTorchAvailable
+        )
+    }
+
+    func stop() {
+        if session.isRunning { session.stopRunning() }
+    }
+
+    @discardableResult
+    func setTorch(_ enabled: Bool) -> Bool {
+        guard let device = activeDevice, device.hasTorch else { return false }
+        do {
+            try device.lockForConfiguration()
+            device.torchMode = enabled ? .on : .off
+            device.unlockForConfiguration()
+            return enabled
+        } catch {
+            return false
+        }
+    }
+
+    func setZoom(_ level: CameraZoomLevel, torchOn: Bool) {
+        guard availableZoomLevels.contains(level) else { return }
+        guard let targetDevice = device(for: level) else { return }
+
+        if activeDevice?.uniqueID == targetDevice.uniqueID {
+            applyZoom(level, to: targetDevice, torchOn: torchOn)
+            return
+        }
+
+        _ = configureVideoInput(for: level, torchOn: torchOn)
     }
 
     private func refreshAvailableZoomLevels() {
@@ -673,12 +761,9 @@ final class CameraController: NSObject, ObservableObject {
             }
         }
         availableZoomLevels = levels.isEmpty ? [.one] : levels
-        if !availableZoomLevels.contains(zoomLevel) {
-            zoomLevel = availableZoomLevels.contains(.one) ? .one : availableZoomLevels[0]
-        }
     }
 
-    private func configureVideoInput(for level: CameraZoomLevel) -> Bool {
+    private func configureVideoInput(for level: CameraZoomLevel, torchOn: Bool) -> Bool {
         guard let device = device(for: level),
               let input = try? AVCaptureDeviceInput(device: device)
         else { return false }
@@ -699,10 +784,9 @@ final class CameraController: NSObject, ObservableObject {
         session.addInput(input)
         currentVideoInput = input
         activeDevice = device
-        isTorchAvailable = device.hasTorch
         session.commitConfiguration()
 
-        applyZoom(level, to: device)
+        applyZoom(level, to: device, torchOn: torchOn)
         return true
     }
 
@@ -715,7 +799,7 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
-    private func applyZoom(_ level: CameraZoomLevel, to device: AVCaptureDevice) {
+    private func applyZoom(_ level: CameraZoomLevel, to device: AVCaptureDevice, torchOn: Bool) {
         let factor = min(
             max(level.deviceZoomFactor, device.minAvailableVideoZoomFactor),
             device.maxAvailableVideoZoomFactor
@@ -723,17 +807,13 @@ final class CameraController: NSObject, ObservableObject {
         do {
             try device.lockForConfiguration()
             device.videoZoomFactor = factor
-            if torchOn {
-                if device.hasTorch {
-                    device.torchMode = .on
-                } else {
-                    torchOn = false
-                }
+            if torchOn, device.hasTorch {
+                device.torchMode = .on
             }
             device.unlockForConfiguration()
             zoomLevel = level
         } catch {
-            torchOn = false
+            return
         }
     }
 }
