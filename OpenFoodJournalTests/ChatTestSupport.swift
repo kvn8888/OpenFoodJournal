@@ -347,7 +347,8 @@ final class ChatTestHarness {
         monotonicClock: (any ChatMonotonicClock)? = nil,
         modelCatalog: RuntimeModelCatalog? = nil,
         healthSyncEnabled: Bool = false,
-        automaticallyGeneratesTitles: Bool = false
+        automaticallyGeneratesTitles: Bool = false,
+        automaticallyDecidesPermissions: Bool = true
     ) throws {
         let configuration = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try ModelContainer(
@@ -422,7 +423,7 @@ final class ChatTestHarness {
             retryPolicy: retryPolicy,
             monotonicClock: monotonicClock,
             jitterUnitProvider: { 0 },
-            permissionDecisionProvider: { request in await permissions.decide(request) },
+            permissionDecisionProvider: automaticallyDecidesPermissions ? { request in await permissions.decide(request) } : nil,
             modelCatalog: modelCatalog,
             automaticallyGeneratesTitles: automaticallyGeneratesTitles
         )
