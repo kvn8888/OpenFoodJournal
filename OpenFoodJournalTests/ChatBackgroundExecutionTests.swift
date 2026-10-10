@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import Testing
 @testable import OpenFoodJournal
 
