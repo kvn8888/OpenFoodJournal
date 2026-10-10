@@ -281,6 +281,12 @@ final class ChatService {
     /// Test seam for deterministic checkpoint persistence failures.
     @ObservationIgnored var checkpointSaveHandler: ((ModelContext) throws -> Void)?
     @ObservationIgnored var writeLedgerSaveHandler: ((ModelContext) throws -> Void)?
+    private(set) var queuedCompactionThreadIDs: Set<UUID> = []
+
+    func requestCompaction(in thread: ChatThread) {
+        guard !hasActiveRun else { return }
+        queuedCompactionThreadIDs.insert(thread.id)
+    }
 
     private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
@@ -2076,8 +2082,10 @@ final class ChatService {
         )
         var compacted = false
         var usedDeterministicFallback = false
+        let requestedCompaction = queuedCompactionThreadIDs.remove(thread.id) != nil
+        let requestedBoundary: Int? = requestedCompaction && blocks.count > 1 ? blocks.count - 2 : nil
 
-        if let compactThrough = plan.compactThroughBlockIndex,
+        if let compactThrough = requestedBoundary ?? plan.compactThroughBlockIndex,
            compactThrough < blocks.count {
             let prefix = Array(blocks[...compactThrough])
             let created = try await createCheckpoint(

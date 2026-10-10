@@ -914,6 +914,7 @@ private struct ScopedChatTranscript: View {
 
 private struct ChatResponseInfoView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ChatService.self) private var chatService
     let message: ChatMessage
     let run: ChatAgentRun?
     let contextUsage: ChatContextUsage?
@@ -975,6 +976,13 @@ private struct ChatResponseInfoView: View {
             }
 
             Section("Context Window") {
+                if let thread = message.thread {
+                    Button(chatService.queuedCompactionThreadIDs.contains(thread.id)
+                           ? "Compaction queued for next message" : "Compact on next message") {
+                        chatService.requestCompaction(in: thread)
+                    }
+                    .disabled(chatService.hasActiveRun || chatService.queuedCompactionThreadIDs.contains(thread.id))
+                }
                 if let usage = contextUsage {
                     infoRow("Next request estimate", "~\(compactTokens(usage.displayedTokens))")
                     infoRow("Selected limit", compactTokens(usage.selectedLimit))
