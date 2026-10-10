@@ -266,6 +266,15 @@ final class ChatService {
     @ObservationIgnored private var latestPreparedTranscriptBoundaryID: UUID?
     @ObservationIgnored private var pendingReportedInputTokens: Int?
     @ObservationIgnored private var pendingReportedCachedInputTokens: Int?
+    /// Estimated input of the latest prepared request; a provider-overflow
+    /// recovery is retried only if preparation measurably shrinks it.
+    @ObservationIgnored private var lastPreparedInputEstimate: Int?
+    @ObservationIgnored private var overflowRecoveryInputLimit: Int?
+    /// Paid checkpoint summaries that failed recently, keyed by thread, model,
+    /// and starting boundary, so unchanged context is not billed repeatedly.
+    @ObservationIgnored private var failedSummaryAttempts: [String: Date] = [:]
+    /// Test seam for deterministic checkpoint persistence failures.
+    @ObservationIgnored var checkpointSaveHandler: ((ModelContext) throws -> Void)?
 
     private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
@@ -1539,6 +1548,7 @@ final class ChatService {
         thread: ChatThread
     ) async throws -> AgentTurn {
         var automaticRetries = 0
+        var attemptedOverflowRecovery = false
         currentModelRoundRetryCount = 0
         while true {
             do {
@@ -1549,6 +1559,17 @@ final class ChatService {
                 )
             } catch let error as ChatError {
                 let emittedOutput = lastRoundProviderEventCount > 0 || !streamingText.isEmpty
+                if !attemptedOverflowRecovery,
+                   !emittedOutput,
+                   isContextOverflow(error),
+                   let previousEstimate = lastPreparedInputEstimate {
+                    // One reduction attempt before any visible output or tool
+                    // call. Preparation rejects the retry unless it shrinks.
+                    attemptedOverflowRecovery = true
+                    overflowRecoveryInputLimit = max(1, previousEstimate * 7 / 10)
+                    activeRun?.retryReason = "context_overflow_recovery"
+                    continue
+                }
                 if case .serverError(let code, _) = error,
                    code == 429,
                    !emittedOutput,
@@ -1607,6 +1628,23 @@ final class ChatService {
         case .serverError(let code, _): code == 408 || code == 500 || code == 502 || code == 503 || code == 504
         default: false
         }
+    }
+
+    /// Provider-reported context overflow. Matching is deliberately narrow:
+    /// other 400s (bad tools, auth, schema) must never trigger a reduction.
+    private func isContextOverflow(_ error: ChatError) -> Bool {
+        guard case .serverError(let code, let message) = error, code == 400 || code == 413 else {
+            return false
+        }
+        let lowered = message.lowercased()
+        return [
+            "context_length_exceeded",
+            "maximum context length",
+            "context window",
+            "prompt is too long",
+            "input is too long",
+            "exceeds the context",
+        ].contains { lowered.contains($0) }
     }
 
     private func streamTurn(
@@ -1975,13 +2013,16 @@ final class ChatService {
             for: thread,
             afterMessageID: checkpointPayload?.transcriptBoundaryMessageID
         )
+        let recoveryLimit = overflowRecoveryInputLimit
+        overflowRecoveryInputLimit = nil
         var plan = ChatContextAccumulator.plan(
             systemPrompt: systemPrompt,
             tools: tools,
             checkpointText: checkpointPayload?.promptText,
             blocks: blocks,
             descriptor: selection.descriptor,
-            budget: budget
+            budget: budget,
+            maximumInputTokens: recoveryLimit
         )
         var compacted = false
         var usedDeterministicFallback = false
@@ -1994,6 +2035,7 @@ final class ChatService {
                 blocks: prefix,
                 selection: selection,
                 proxy: proxy,
+                selectedLimit: plan.selectedLimit,
                 in: thread
             )
             checkpoint = created.model
@@ -2011,30 +2053,69 @@ final class ChatService {
                 checkpointText: created.payload.promptText,
                 blocks: blocks,
                 descriptor: selection.descriptor,
-                budget: budget
+                budget: budget,
+                maximumInputTokens: recoveryLimit
             )
         }
 
-        var admittedBlocks = blocks
-        var effective = effectiveMessages(checkpoint: checkpointPayload, blocks: admittedBlocks)
-        var estimated = ChatContextAccumulator.estimate(request: ChatModelRequest(
-            systemPrompt: systemPrompt,
-            messages: effective,
-            tools: tools
-        ))
+        var effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+        var estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
         var contextLimited = false
 
-        // A malformed or unexpectedly large attachment can still leave a
-        // request above the admission budget. Drop only whole, closed turns.
-        while estimated > plan.historyAdmissionLimit, admittedBlocks.count > 1 {
-            admittedBlocks.removeFirst()
-            contextLimited = true
-            effective = effectiveMessages(checkpoint: checkpointPayload, blocks: admittedBlocks)
-            estimated = ChatContextAccumulator.estimate(request: ChatModelRequest(
-                systemPrompt: systemPrompt,
-                messages: effective,
-                tools: tools
-            ))
+        // Older closed turns that still do not fit are folded into the
+        // checkpoint instead of being dropped, so the model keeps a marked
+        // summary and their durable source IDs. The current exchange stays whole.
+        if estimated > plan.historyAdmissionLimit, blocks.count > 1 {
+            let baseTokens = estimatedInput(systemPrompt: systemPrompt, messages: [], tools: tools)
+            let checkpointAllowance = ChatCompactionSupport.checkpointTokenLimit(
+                selectedLimit: plan.selectedLimit
+            )
+            let costs = blocks.map(ChatContextAccumulator.estimate(block:))
+            var remaining = costs.reduce(0, +)
+            var foldCount = 0
+            while foldCount < blocks.count - 1,
+                  baseTokens + checkpointAllowance + remaining > plan.historyAdmissionLimit {
+                remaining -= costs[foldCount]
+                foldCount += 1
+            }
+            let created = try await createCheckpoint(
+                previous: checkpointPayload,
+                blocks: Array(blocks.prefix(max(1, foldCount))),
+                selection: selection,
+                proxy: proxy,
+                selectedLimit: plan.selectedLimit,
+                in: thread
+            )
+            checkpoint = created.model
+            checkpointPayload = created.payload
+            compacted = true
+            activeRun?.compactionCount += 1
+            usedDeterministicFallback = usedDeterministicFallback || created.wasDeterministicFallback
+            blocks = contextBlocks(
+                for: thread,
+                afterMessageID: created.payload.transcriptBoundaryMessageID
+            )
+            effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+            estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
+        }
+
+        // An enormous tool result in a retained exchange becomes a bounded
+        // projection that keeps its call ID; the transcript keeps the full
+        // result. User text and attachments are never silently truncated.
+        if estimated > plan.historyAdmissionLimit {
+            let perResultLimit = max(256, plan.historyAdmissionLimit / 8)
+            let projected = blocks.map {
+                ChatCompactionSupport.projectingOversizedToolResults(
+                    in: $0,
+                    maximumTokens: perResultLimit
+                )
+            }
+            if projected != blocks {
+                blocks = projected
+                contextLimited = true
+                effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+                estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
+            }
         }
 
         guard estimated <= plan.selectedLimit,
@@ -2055,10 +2136,20 @@ final class ChatService {
             )
         }
 
+        if recoveryLimit != nil {
+            guard let previousEstimate = lastPreparedInputEstimate,
+                  estimated < previousEstimate else {
+                throw ChatError.contextLimit(
+                    "The provider reported that this conversation exceeds its context window, and it could not be reduced further. Start a new conversation or choose a model with a larger context."
+                )
+            }
+        }
+        lastPreparedInputEstimate = estimated
+
         if usedDeterministicFallback {
             contextWarning = "Context was compacted with a local fallback because the summary response could not be validated."
         } else if contextLimited {
-            contextWarning = "Some older closed turns were omitted to stay within the selected context limit."
+            contextWarning = "A very large tool result was shortened to fit the selected context limit; the complete result remains in this conversation."
         } else if checkpoint != nil {
             contextWarning = "Older turns are represented by a portable context checkpoint."
         }
@@ -2145,6 +2236,18 @@ final class ChatService {
         )
         pendingReportedInputTokens = nil
         pendingReportedCachedInputTokens = nil
+    }
+
+    private func estimatedInput(
+        systemPrompt: String,
+        messages: [ChatModelMessage],
+        tools: [ChatModelTool]
+    ) -> Int {
+        ChatContextAccumulator.estimate(request: ChatModelRequest(
+            systemPrompt: systemPrompt,
+            messages: messages,
+            tools: tools
+        ))
     }
 
     private func effectiveMessages(
@@ -2251,6 +2354,7 @@ final class ChatService {
         blocks: [ChatContextBlock],
         selection: AssistantModelSelection,
         proxy: any ChatModelProxy,
+        selectedLimit: Int,
         in thread: ChatThread
     ) async throws -> (
         model: ChatContextCheckpoint,
@@ -2262,42 +2366,71 @@ final class ChatService {
         }
         let sourceIDs = uniqueUUIDs((previous?.sourceIDs ?? []) + blocks.flatMap(\.sourceIDs))
         let attachmentIDs = uniqueUUIDs((previous?.attachmentIDs ?? []) + blocks.flatMap(\.attachmentIDs))
+        let failureKey = [
+            thread.id.uuidString,
+            selection.provider.rawValue,
+            selection.descriptor.deploymentIdentifier,
+            previous?.transcriptBoundaryMessageID.uuidString ?? "start",
+        ].joined(separator: "|")
+        var running = previous.map(Self.semantic(from:))
+        var unsummarized = blocks
         var fallback = false
-        let semantic: ChatCheckpointSemantic
 
-        do {
-            var summaryMessages: [ChatModelMessage] = []
-            if let previous {
-                summaryMessages.append(ChatModelMessage(role: .user, parts: [.text(previous.promptText)]))
-            }
-            summaryMessages.append(contentsOf: blocks.flatMap(\.messages))
-            let turn = try await proxy.streamTurn(
-                request: ChatModelRequest(
-                    systemPrompt: Self.checkpointSystemPrompt,
-                    messages: summaryMessages,
-                    tools: []
-                ),
-                onTextUpdate: { _ in }
-            )
-            guard turn.calls.isEmpty,
-                  let decoded = Self.decodeCheckpointSemantic(turn.text)
-            else { throw ChatError.invalidResponse }
-            semantic = decoded
-            recordUsage(
-                selection: selection,
-                usage: turn.usage,
-                grounded: false,
-                succeeded: true,
-                requestKind: "assistant_compaction"
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
+        if let failedAt = failedSummaryAttempts[failureKey],
+           Date().timeIntervalSince(failedAt) < ChatCompactionSupport.failedSummaryCooldown {
+            // The same starting point already failed recently: do not pay
+            // again for an unchanged prefix; condense it locally instead.
             fallback = true
-            semantic = deterministicCheckpoint(previous: previous, blocks: blocks)
+        } else if let summaryBudget = ChatCompactionSupport.summaryBudget(
+            selectedLimit: selectedLimit,
+            maximumOutputTokens: selection.descriptor.capabilities.maximumOutputTokens,
+            instructions: Self.checkpointSystemPrompt
+        ) {
+            var chunks = ChatCompactionSupport.chunks(blocks, inputTokens: summaryBudget.inputTokens)
+            let overflowCount = chunks.count - ChatCompactionSupport.maximumSummaryRequests
+            if overflowCount > 0 {
+                // Bound paid requests: the oldest chunks are condensed locally
+                // and the checkpoint is marked as incomplete evidence.
+                let overflowBlocks = chunks.prefix(overflowCount).flatMap(\.blocks)
+                running = deterministicCheckpoint(previous: running, blocks: overflowBlocks)
+                unsummarized.removeFirst(overflowBlocks.count)
+                chunks.removeFirst(overflowCount)
+                fallback = true
+            }
+            do {
+                for chunk in chunks {
+                    running = try await summarizeCheckpointChunk(
+                        chunk,
+                        previous: running,
+                        budget: summaryBudget,
+                        selection: selection,
+                        proxy: proxy
+                    )
+                    unsummarized.removeFirst(chunk.blocks.count)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failedSummaryAttempts[failureKey] = Date()
+                fallback = true
+            }
+        } else {
+            fallback = true
+        }
+        if !unsummarized.isEmpty {
+            running = deterministicCheckpoint(previous: running, blocks: unsummarized)
+            fallback = true
+        }
+        guard var semantic = running else { throw ChatError.invalidResponse }
+        if fallback {
+            semantic = Self.markingIncompleteEvidence(
+                semantic,
+                startMessageID: blocks.first?.startMessageID ?? boundary.startMessageID,
+                boundaryMessageID: boundary.boundaryMessageID
+            )
         }
 
-        let payload = ChatCheckpointPayload(
+        var payload = ChatCheckpointPayload(
             conversationDecisions: Self.cleaned(semantic.conversationDecisions),
             userConstraints: Self.cleaned(semantic.userConstraints),
             goals: Self.cleaned(semantic.goals),
@@ -2315,6 +2448,10 @@ final class ChatService {
                 ?? thread.safeMessages.first?.timestamp
                 ?? blocks.first?.startTimestamp
         )
+        payload = ChatCompactionSupport.fitted(
+            payload,
+            maximumTokens: ChatCompactionSupport.checkpointTokenLimit(selectedLimit: selectedLimit)
+        )
         guard payload.isStructurallyValid else { throw ChatError.invalidResponse }
         let checkpoint = ChatContextCheckpoint(
             payload: payload,
@@ -2326,12 +2463,100 @@ final class ChatService {
         checkpoint.thread = thread
         modelContext.insert(checkpoint)
         thread.contextCheckpoints?.append(checkpoint)
-        try? modelContext.save()
+        do {
+            if let checkpointSaveHandler {
+                try checkpointSaveHandler(modelContext)
+            } else {
+                try modelContext.save()
+            }
+        } catch {
+            // Withdraw only this attempt's checkpoint. Unrelated pending edits
+            // stay in the shared context and the previous boundary stays active.
+            thread.contextCheckpoints?.removeAll { $0.id == checkpoint.id }
+            modelContext.delete(checkpoint)
+            throw ChatError.contextLimit(
+                "Older conversation context could not be saved as a checkpoint, so nothing was compacted. Try again."
+            )
+        }
         return (checkpoint, payload, fallback)
     }
 
+    /// Summarizes one bounded chunk of portable text, folding it into the
+    /// running checkpoint. No tools, provider continuations, or raw bytes.
+    private func summarizeCheckpointChunk(
+        _ chunk: ChatSummaryChunk,
+        previous: ChatCheckpointSemantic?,
+        budget: ChatSummaryBudget,
+        selection: AssistantModelSelection,
+        proxy: any ChatModelProxy
+    ) async throws -> ChatCheckpointSemantic {
+        var prompt = ""
+        if let previous,
+           let data = try? JSONEncoder().encode(previous),
+           let json = String(data: data, encoding: .utf8) {
+            prompt += "Existing checkpoint JSON. Update it with the exchanges below and keep items that still matter:\n"
+                + ChatCompactionSupport.fitted(json, tokens: budget.checkpointTokens)
+                + "\n\n"
+        }
+        prompt += "Keep the whole JSON response under about \(budget.outputTokens) tokens.\n\n"
+            + "Conversation exchanges to fold into the checkpoint:\n"
+            + chunk.text
+        let turn = try await proxy.streamTurn(
+            request: ChatModelRequest(
+                systemPrompt: Self.checkpointSystemPrompt,
+                messages: [ChatModelMessage(role: .user, parts: [.text(prompt)])],
+                tools: []
+            ),
+            onTextUpdate: { _ in }
+        )
+        let decoded = turn.calls.isEmpty ? Self.decodeCheckpointSemantic(turn.text) : nil
+        recordUsage(
+            selection: selection,
+            usage: turn.usage,
+            grounded: false,
+            succeeded: decoded != nil,
+            requestKind: "assistant_compaction"
+        )
+        // No-progress guard: a summary at least as large as its input cannot
+        // reduce context and would only trigger another paid attempt.
+        guard let decoded,
+              ChatContextAccumulator.estimate(text: turn.text)
+                < ChatContextAccumulator.estimate(text: prompt)
+        else { throw ChatError.invalidResponse }
+        return decoded
+    }
+
+    private static func semantic(from payload: ChatCheckpointPayload) -> ChatCheckpointSemantic {
+        ChatCheckpointSemantic(
+            conversationDecisions: payload.conversationDecisions,
+            userConstraints: payload.userConstraints,
+            goals: payload.goals,
+            unresolvedTasks: payload.unresolvedTasks,
+            toolOutcomes: payload.toolOutcomes,
+            journalFacts: payload.journalFacts
+        )
+    }
+
+    /// A local fallback is lossy. Say so in the checkpoint itself and point
+    /// the model at evidence it can actually reread (source IDs).
+    private static func markingIncompleteEvidence(
+        _ semantic: ChatCheckpointSemantic,
+        startMessageID: UUID,
+        boundaryMessageID: UUID
+    ) -> ChatCheckpointSemantic {
+        let note = "Evidence incomplete: messages \(startMessageID.uuidString) through \(boundaryMessageID.uuidString) were condensed locally without a validated model summary. The original messages remain in this conversation; reread durable evidence with read_conversation_source using the source IDs listed below."
+        return ChatCheckpointSemantic(
+            conversationDecisions: semantic.conversationDecisions,
+            userConstraints: semantic.userConstraints,
+            goals: semantic.goals,
+            unresolvedTasks: semantic.unresolvedTasks + [note],
+            toolOutcomes: semantic.toolOutcomes,
+            journalFacts: semantic.journalFacts
+        )
+    }
+
     private func deterministicCheckpoint(
-        previous: ChatCheckpointPayload?,
+        previous: ChatCheckpointSemantic?,
         blocks: [ChatContextBlock]
     ) -> ChatCheckpointSemantic {
         var decisions = previous?.conversationDecisions ?? []
