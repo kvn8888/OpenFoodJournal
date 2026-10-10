@@ -146,7 +146,7 @@ nonisolated enum ChatCompactionSupport {
         guard value.count > limit else { return value }
         let omitted = value.count - limit
         return String(value.prefix(limit))
-            + " … [\(omitted) characters omitted; the original remains in this conversation]"
+            + " … [\(omitted) characters omitted; original stored in the app, not directly retrievable by the model]"
     }
 
     /// Replaces oversized tool results with a bounded projection. The call ID
@@ -169,7 +169,7 @@ nonisolated enum ChatCompactionSupport {
                     name: response.name,
                     response: .object([
                         "context_projection": .string(
-                            "This result was shortened to fit the selected context limit. The complete result remains in this conversation; reread durable evidence with read_conversation_source using a listed source ID."
+                            "This result was shortened to fit context. The original is stored in the app but cannot be retrieved as transcript text. Listed source IDs belong to this exchange and may not correspond to this result; only those sources can be reopened. Re-run read tools for current journal facts."
                         ),
                         "original_estimated_tokens": .number(Double(tokens)),
                         "preview": .string(clipped(json, limit: max(64, maximumTokens * 3 / 2))),

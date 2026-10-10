@@ -1712,7 +1712,10 @@ final class ChatService {
             systemPrompt: systemPrompt,
             messages: preparedMessages,
             tools: tools,
-            maximumOutputTokens: contextUsage?.reservedOutputTokens
+            maximumOutputTokens: min(effectiveSelection.descriptor.capabilities.maximumOutputTokens,
+                max(1, (contextUsage?.selectedLimit ?? 50_000)
+                    - (contextUsage?.estimatedInputTokens ?? 0)
+                    - (contextUsage?.reservedToolTokens ?? 0)))
         )
         guard let run = activeRun else { throw ChatError.cancelled }
         transition(to: .waitingForProvider, run: run)
@@ -2630,7 +2633,7 @@ final class ChatService {
         startMessageID: UUID,
         boundaryMessageID: UUID
     ) -> ChatCheckpointSemantic {
-        let note = "Evidence incomplete: messages \(startMessageID.uuidString) through \(boundaryMessageID.uuidString) were condensed locally without a validated model summary. The original messages remain in this conversation; reread durable evidence with read_conversation_source using the source IDs listed below."
+        let note = "Evidence incomplete: messages \(startMessageID.uuidString) through \(boundaryMessageID.uuidString) were condensed locally without a validated model summary. Original text is stored in the app but is not directly retrievable by you. Only listed source IDs can be reopened with read_conversation_source; use read tools again for current journal facts and ask the user to restate missing instructions."
         return ChatCheckpointSemantic(
             conversationDecisions: semantic.conversationDecisions,
             userConstraints: semantic.userConstraints,
@@ -2659,7 +2662,9 @@ final class ChatService {
                     let value = Self.clipped(text)
                     guard !value.isEmpty else { continue }
                     if message.role == .user {
-                        constraints.append("User said: \(value)")
+                        // Ordinary conversation isn't automatically a permanent
+                        // rule. Preserve prior constraints separately.
+                        decisions.append("User said: \(value)")
                         unresolved = ["Continue from the latest user request: \(value)"]
                     } else {
                         decisions.append("Assistant said: \(value)")
@@ -3027,7 +3032,7 @@ final class ChatService {
             // Human approval can take arbitrarily long. Release OS execution
             // while waiting; backgrounding preserves a pending action for Continue.
             backgroundExecution?.update(phase: .awaitingApproval, completedEvents: backgroundEventCount)
-            backgroundExecution?.finish(success: true)
+            backgroundExecution?.finish(success: false)
             if applicationIsBackgrounded {
                 suspendForBackgrounding()
                 try Task.checkCancellation()
