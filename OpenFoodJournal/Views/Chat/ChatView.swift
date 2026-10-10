@@ -926,7 +926,17 @@ private struct ChatResponseInfoView: View {
                 infoRow("Provider", message.providerID ?? run?.providerID ?? "Unknown")
                 infoRow("Model", message.modelID ?? run?.modelID ?? "Unknown")
                 if let baseModel = run?.baseModelID, baseModel != run?.modelID {
-                    infoRow("Resolved model", baseModel)
+                    infoRow("Configured model", baseModel)
+                }
+                if let reported = run?.roundRecords.last?.baseModelID {
+                    infoRow("Reported model", reported)
+                    if run?.providerID == AssistantProvider.azureOpenAI.rawValue,
+                       let configured = run?.baseModelID,
+                       configured.lowercased() != reported.lowercased() {
+                        Text("Azure reported a different model from the configured slug. Limits and pricing use the reported model when known; otherwise the app uses a conservative limit and shows usage only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let requestID = message.providerRequestID ?? run?.providerRequestID {
                     infoRow("Request ID", requestID)
