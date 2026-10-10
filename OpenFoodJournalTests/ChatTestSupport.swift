@@ -387,6 +387,12 @@ final class ChatTestHarness {
         let proxy = self.proxy
         let research = self.research
         let permissions = self.permissions
+        let decisionProvider: ((ChatPermissionRequest) async -> ChatPermissionDecision)?
+        if automaticallyDecidesPermissions {
+            decisionProvider = { request in await permissions.decide(request) }
+        } else {
+            decisionProvider = nil
+        }
         service = ChatService(
             modelContext: context,
             nutritionStore: nutritionStore,
@@ -423,7 +429,7 @@ final class ChatTestHarness {
             retryPolicy: retryPolicy,
             monotonicClock: monotonicClock,
             jitterUnitProvider: { 0 },
-            permissionDecisionProvider: automaticallyDecidesPermissions ? { request in await permissions.decide(request) } : nil,
+            permissionDecisionProvider: decisionProvider,
             modelCatalog: modelCatalog,
             automaticallyGeneratesTitles: automaticallyGeneratesTitles
         )
