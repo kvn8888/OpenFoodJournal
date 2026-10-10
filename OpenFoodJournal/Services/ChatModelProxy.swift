@@ -74,6 +74,7 @@ nonisolated struct ChatModelRequest: Equatable, Sendable {
     let systemPrompt: String
     let messages: [ChatModelMessage]
     let tools: [ChatModelTool]
+    var maximumOutputTokens: Int? = nil
 }
 
 nonisolated struct ChatTokenUsage: Equatable, Sendable {
@@ -1062,7 +1063,10 @@ final class GeminiChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         let body = GeminiChatRequest(
             systemInstruction: .init(parts: [GeminiPart(text: request.systemPrompt)]),
             contents: request.messages.map(Self.content),
-            tools: [GeminiToolDecl(functionDeclarations: declarations)]
+            tools: declarations.isEmpty ? nil : [GeminiToolDecl(functionDeclarations: declarations)],
+            generationConfig: request.maximumOutputTokens.map {
+                .init(maxOutputTokens: max(1, $0))
+            }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -1302,7 +1306,8 @@ final class OpenRouterChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                 ))
             },
             provider: .from(routingMode),
-            streamOptions: .init(includeUsage: true)
+            streamOptions: .init(includeUsage: true),
+            maxCompletionTokens: request.maximumOutputTokens.map { max(1, $0) }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -1580,7 +1585,7 @@ final class AnthropicChatModelProxy: ChatModelProxy {
             "model": .string(configuration.descriptor.deploymentIdentifier),
             "max_tokens": .number(Double(min(
                 max(1, configuration.descriptor.capabilities.maximumOutputTokens),
-                16_384
+                max(1, request.maximumOutputTokens ?? 16_384)
             ))),
             "system": .string(request.systemPrompt),
             "messages": .array(messages(for: request)),
@@ -2025,6 +2030,9 @@ final class OpenAIResponsesChatModelProxy: ChatModelProxy, ChatNativeWebSearchin
             object.removeValue(forKey: "tools")
             object.removeValue(forKey: "parallel_tool_calls")
         }
+        if let maximum = request.maximumOutputTokens {
+            object["max_output_tokens"] = .number(Double(max(1, min(maximum, descriptor.capabilities.maximumOutputTokens))))
+        }
         return .object(object)
     }
 
@@ -2276,6 +2284,7 @@ private struct GeminiToolDecl: Encodable {
 }
 
 private struct GeminiChatRequest: Encodable {
+    struct GenerationConfig: Encodable { let maxOutputTokens: Int }
     struct SystemInstruction: Encodable {
         let parts: [GeminiPart]
     }
@@ -2283,6 +2292,7 @@ private struct GeminiChatRequest: Encodable {
     let systemInstruction: SystemInstruction
     let contents: [GeminiContent]
     var tools: [GeminiToolDecl]? = nil
+    var generationConfig: GenerationConfig? = nil
 }
 
 private struct GeminiStreamChunk: Decodable {
@@ -2467,6 +2477,7 @@ private struct ORChatRequest: Encodable {
     var provider: ORProviderPreferences? = nil
     var plugins: [ORPlugin]? = nil
     var streamOptions: StreamOptions? = nil
+    var maxCompletionTokens: Int? = nil
 
     struct StreamOptions: Encodable {
         let includeUsage: Bool
@@ -2479,6 +2490,7 @@ private struct ORChatRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case model, messages, stream, tools, provider, plugins
         case streamOptions = "stream_options"
+        case maxCompletionTokens = "max_completion_tokens"
     }
 }
 
