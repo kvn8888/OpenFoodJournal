@@ -673,6 +673,8 @@ struct AppSettingsRecord: Codable {
     var azureSolDeployment: String
     var azureTerraDeployment: String
     var azureDefaultModel: String
+    var azureSmartModel: String
+    var azureFastModel: String
     var openAIFastModel: String
     var openAISmartModel: String
     var anthropicFastModel: String
@@ -711,6 +713,8 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment: String = "",
         azureTerraDeployment: String = "",
         azureDefaultModel: String = AIProviderSettings.defaultAzureModel.rawValue,
+        azureSmartModel: String = AzureAssistantModel.sol.rawValue,
+        azureFastModel: String = AzureAssistantModel.terra.rawValue,
         openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel,
         openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel,
         anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel,
@@ -748,6 +752,8 @@ struct AppSettingsRecord: Codable {
         self.azureSolDeployment = azureSolDeployment
         self.azureTerraDeployment = azureTerraDeployment
         self.azureDefaultModel = azureDefaultModel
+        self.azureSmartModel = azureSmartModel
+        self.azureFastModel = azureFastModel
         self.openAIFastModel = openAIFastModel
         self.openAISmartModel = openAISmartModel
         self.anthropicFastModel = anthropicFastModel
@@ -787,6 +793,8 @@ struct AppSettingsRecord: Codable {
         case azureSolDeployment
         case azureTerraDeployment
         case azureDefaultModel
+        case azureSmartModel
+        case azureFastModel
         case openAIFastModel
         case openAISmartModel
         case anthropicFastModel
@@ -830,6 +838,8 @@ struct AppSettingsRecord: Codable {
         azureSolDeployment = try container.decodeIfPresent(String.self, forKey: .azureSolDeployment) ?? ""
         azureTerraDeployment = try container.decodeIfPresent(String.self, forKey: .azureTerraDeployment) ?? ""
         azureDefaultModel = try container.decodeIfPresent(String.self, forKey: .azureDefaultModel) ?? AIProviderSettings.defaultAzureModel.rawValue
+        azureSmartModel = try container.decodeIfPresent(String.self, forKey: .azureSmartModel) ?? AzureAssistantModel.sol.rawValue
+        azureFastModel = try container.decodeIfPresent(String.self, forKey: .azureFastModel) ?? AzureAssistantModel.terra.rawValue
         openAIFastModel = try container.decodeIfPresent(String.self, forKey: .openAIFastModel) ?? AIProviderSettings.defaultOpenAIFastModel
         openAISmartModel = try container.decodeIfPresent(String.self, forKey: .openAISmartModel) ?? AIProviderSettings.defaultOpenAISmartModel
         anthropicFastModel = try container.decodeIfPresent(String.self, forKey: .anthropicFastModel) ?? AIProviderSettings.defaultAnthropicFastModel
