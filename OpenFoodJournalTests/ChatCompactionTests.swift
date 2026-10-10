@@ -11,6 +11,33 @@ private struct CheckpointSaveFailure: Error {}
 
 @MainActor
 struct ChatCompactionTests {
+    @Test func manualCompactionIsDeferredUntilTheNextUserSend() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread()
+        _ = harness.insertMessage(.user, text: String(repeating: "Earlier context. ", count: 200), into: thread)
+        _ = harness.insertMessage(.model, text: "Earlier answer", into: thread)
+        harness.service.requestCompaction(in: thread)
+        #expect(harness.proxy.turns.isEmpty)
+        #expect(harness.service.queuedCompactionThreadIDs.contains(thread.id))
+        harness.proxy.enqueue(ChatModelTurn(text: Self.summaryJSON))
+        harness.proxy.enqueue(ChatModelTurn(text: "Continued"))
+        await harness.service.send("Continue", in: thread)
+        #expect(harness.proxy.turns.count == 2)
+        #expect(harness.proxy.turns.first?.request.maximumOutputTokens != nil)
+        #expect(thread.contextCheckpoints?.isEmpty == false)
+        #expect(!harness.service.queuedCompactionThreadIDs.contains(thread.id))
+    }
+
+    @Test func fittingNeverSilentlyDeletesSavedUserConstraints() {
+        let constraint = String(repeating: "An important saved constraint. ", count: 200)
+        let payload = ChatCheckpointPayload(conversationDecisions: [], userConstraints: [constraint], goals: [], unresolvedTasks: [], toolOutcomes: [], journalFacts: [], sourceIDs: [], attachmentIDs: [], transcriptBoundaryMessageID: UUID(), transcriptBoundaryTimestamp: .now)
+        let fitted = ChatCompactionSupport.fitted(payload, maximumTokens: 256)
+        #expect(fitted.userConstraints == [constraint])
+        #expect(ChatContextAccumulator.estimate(text: fitted.promptText) > 256)
+        // The coordinator rejects this oversized checkpoint rather than
+        // activating it or discarding the constraint to make it fit.
+    }
+
     private static let summaryJSON = #"{"conversationDecisions":["Use the saved plan"],"userConstraints":["No peanuts"],"goals":["Answer the latest question"],"unresolvedTasks":[],"toolOutcomes":[],"journalFacts":[]}"#
 
     private func descriptor(limit: Int) -> ChatModelDescriptor {
