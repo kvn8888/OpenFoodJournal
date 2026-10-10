@@ -1230,7 +1230,9 @@ struct ChatFeatureTests {
         for (index, message) in thread.safeMessages.enumerated() {
             message.timestamp = base.addingTimeInterval(Double(index))
         }
-        for index in 0..<32 {
+        // Sized so the compacted prefix fits one bounded summary request;
+        // larger prefixes are chunked into several paid summaries.
+        for index in 0..<10 {
             let padding = String(repeating: "archived context ", count: 350)
             _ = harness.insertMessage(
                 .user,
@@ -1264,7 +1266,7 @@ struct ChatFeatureTests {
         let readRecord = try #require(thread.safeMessages.compactMap(\.toolRecord).last)
         #expect(readRecord.name == "read_conversation_source")
         #expect(readRecord.resultJSON.contains("Evidence survives compacted history"))
-        #expect(thread.safeMessages.count > 30)
+        #expect(thread.safeMessages.count > 20)
         #expect(harness.service.contextUsage?.isCompacted == true)
     }
 

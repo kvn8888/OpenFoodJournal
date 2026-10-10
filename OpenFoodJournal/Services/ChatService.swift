@@ -1677,6 +1677,7 @@ final class ChatService {
             "input is too long",
             "exceeds the context",
         ].contains { lowered.contains($0) }
+            || (lowered.contains("input token count") && lowered.contains("exceed"))
     }
 
     private func streamTurn(
@@ -2237,7 +2238,7 @@ final class ChatService {
         let tools = ChatToolRegistry.all.map {
             ChatModelTool(name: $0.name, description: $0.description, parameters: $0.parameters)
         }
-        let estimate = estimatedInput(systemPrompt: systemPrompt, messages: currentMessages, tools: tools)
+        let estimate = estimatedInput(systemPrompt: systemPrompt + protectedAuthorizationContext(in: thread), messages: currentMessages, tools: tools)
         contextUsage = ChatContextUsage(
             estimatedInputTokens: estimate,
             reportedInputTokens: existing.reportedInputTokens,
@@ -2528,6 +2529,7 @@ final class ChatService {
         } catch {
             // Withdraw only this attempt's checkpoint. Unrelated pending edits
             // stay in the shared context and the previous boundary stays active.
+            failedSummaryAttempts[failureKey] = Date()
             thread.contextCheckpoints?.removeAll { $0.id == checkpoint.id }
             modelContext.delete(checkpoint)
             throw ChatError.contextLimit(
@@ -3425,6 +3427,9 @@ final class ChatService {
     }
 
     private func getActiveEnergy(_ args: JSONValue) async -> ToolOutcome {
+        guard !applicationIsBackgrounded || UIApplication.shared.isProtectedDataAvailable else {
+            return ToolOutcome(result: .object(["error": .string("Apple Health is unavailable while the device is locked. Ask the user to unlock and continue; this is not zero activity.")]), status: .failed)
+        }
         let date = Self.parseDay(args["date"]?.stringValue) ?? Date()
         let energy = await healthKitService.fetchActiveEnergy(for: date)
         return ToolOutcome(result: .object([
@@ -3459,11 +3464,16 @@ final class ChatService {
             }
         ))
         if args["include_active_energy"]?.boolValue == true {
-            let energy = await healthKitService.fetchActiveEnergy(for: date)
-            result["active_energy"] = .object([
-                "kcal": .number(energy.rounded()),
-                "source": .string("Apple Health"),
-            ])
+            if applicationIsBackgrounded && !UIApplication.shared.isProtectedDataAvailable {
+                result["active_energy"] = .null
+                result["active_energy_error"] = .string("Unlock the device to read Apple Health. Energy is unavailable, not zero.")
+            } else {
+                let energy = await healthKitService.fetchActiveEnergy(for: date)
+                result["active_energy"] = .object([
+                    "kcal": .number(energy.rounded()),
+                    "source": .string("Apple Health"),
+                ])
+            }
         }
         return ToolOutcome(result: .object(result))
     }
