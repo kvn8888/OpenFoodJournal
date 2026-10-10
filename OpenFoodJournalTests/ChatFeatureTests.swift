@@ -49,7 +49,8 @@ struct ChatFeatureTests {
             useProModel: false,
             azureSolDeployment: "my-deployment",
             azureSmartModel: "gpt-6.1-sol",
-            azureFastModel: "another-model"
+            azureFastModel: "another-model",
+            offContributeEnabled: false
         )
         let bytes = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: bytes)
