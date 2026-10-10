@@ -280,6 +280,7 @@ final class ChatService {
     @ObservationIgnored private var failedSummaryAttempts: [String: Date] = [:]
     /// Test seam for deterministic checkpoint persistence failures.
     @ObservationIgnored var checkpointSaveHandler: ((ModelContext) throws -> Void)?
+    @ObservationIgnored var writeLedgerSaveHandler: ((ModelContext) throws -> Void)?
 
     private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
@@ -2976,6 +2977,8 @@ final class ChatService {
                 return item
             }()
 
+            // A write cannot start unless its recovery record is durable.
+            try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
             if let cached = cachedWriteOutcome(from: ledger) {
                 return record(cached)
             }
@@ -3001,7 +3004,7 @@ final class ChatService {
             agentRun.approvalState = "pending:\(call.callID)"
             ledger.status = .awaitingApproval
             ledger.approvalState = nil
-            try? modelContext.save()
+            try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
             // Human approval can take arbitrarily long. Release OS execution
             // while waiting; backgrounding preserves a pending action for Continue.
             backgroundExecution?.update(phase: .awaitingApproval, completedEvents: backgroundEventCount)
@@ -3036,7 +3039,7 @@ final class ChatService {
                     startedAt: approvalStartedAt,
                     endedAt: Date(),
                     durationMs: Int(approvalDuration * 1_000),
-                    outcome: Self.approvalOutcome(decision),
+                    outcome: Task.isCancelled ? "interrupted" : Self.approvalOutcome(decision),
                     providerRequestID: providerRequestID
                 ))
                 self.approvalStartedTick = nil
@@ -3057,7 +3060,7 @@ final class ChatService {
                 ledger.resultJSON = outcome.result.jsonString
                 agentRun.state = .running
                 agentRun.approvalState = "denied:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
                 return record(outcome)
             case .calculatorSaved(let id, let name, let count):
                 let outcome = ToolOutcome(result: .object([
@@ -3071,7 +3074,7 @@ final class ChatService {
                 ledger.resultJSON = outcome.result.jsonString
                 agentRun.state = .running
                 agentRun.approvalState = "approved:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
                 return record(outcome)
             case .approved:
                 beginBackgroundExecution(for: agentRun)
@@ -3081,7 +3084,7 @@ final class ChatService {
                 transition(to: .executingTools, run: agentRun)
                 updateToolActivity(call, status: .running, run: agentRun, in: thread)
                 agentRun.approvalState = "approved:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
             }
 
             do {
