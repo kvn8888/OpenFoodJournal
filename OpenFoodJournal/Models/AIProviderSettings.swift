@@ -343,8 +343,8 @@ enum ChatModelCatalog {
             return azureDescriptor(model: azureModel, deployment: model)
         }
         if provider == .openAI,
-           let model = OpenAIAssistantModel(rawValue: base) {
-            return openAIDescriptor(model: model, deployment: model.rawValue)
+           let knownModel = OpenAIAssistantModel(rawValue: base) {
+            return openAIDescriptor(model: knownModel, deployment: model)
         }
         let capabilities: ChatModelCapabilities
         if provider == .anthropic || provider == .museSpark || provider == .openAICompatible {
@@ -366,7 +366,7 @@ enum ChatModelCatalog {
             provider: provider,
             baseModelID: base,
             deploymentIdentifier: model,
-            displayName: model,
+            displayName: base,
             capabilities: capabilities,
             lastVerifiedAt: "2026-07-20"
         )
