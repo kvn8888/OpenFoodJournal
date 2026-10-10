@@ -1681,9 +1681,10 @@ final class ChatService {
 
     private func streamTurn(
         selection: AssistantModelSelection,
-        systemPrompt: String,
+        systemPrompt baseSystemPrompt: String,
         thread: ChatThread
     ) async throws -> AgentTurn {
+        let systemPrompt = baseSystemPrompt + protectedAuthorizationContext(in: thread)
         modelCatalog?.refreshInBackgroundIfNeeded()
         let effectiveSelection = modelCatalog?
             .selectionResolvingRuntimeMetadata(selection) ?? selection
@@ -2579,7 +2580,14 @@ final class ChatService {
               ChatContextAccumulator.estimate(text: turn.text)
                 < ChatContextAccumulator.estimate(text: prompt)
         else { throw ChatError.invalidResponse }
-        return decoded
+        return ChatCheckpointSemantic(
+            conversationDecisions: decoded.conversationDecisions,
+            userConstraints: Self.protectedConstraints((previous?.userConstraints ?? []) + decoded.userConstraints),
+            goals: decoded.goals,
+            unresolvedTasks: decoded.unresolvedTasks,
+            toolOutcomes: decoded.toolOutcomes,
+            journalFacts: decoded.journalFacts
+        )
     }
 
     private static func semantic(from payload: ChatCheckpointPayload) -> ChatCheckpointSemantic {
@@ -2651,7 +2659,7 @@ final class ChatService {
         }
         return ChatCheckpointSemantic(
             conversationDecisions: Self.cleaned(decisions),
-            userConstraints: Self.cleaned(constraints),
+            userConstraints: Self.protectedConstraints(constraints),
             goals: Self.cleaned(goals),
             unresolvedTasks: Self.cleaned(unresolved),
             toolOutcomes: Self.cleaned(outcomes),
@@ -2698,6 +2706,19 @@ final class ChatService {
         var seen: Set<String> = []
         return values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Durable approval outcomes are facts about past calls, not permission to
+    /// repeat them. Rebuild this from the ledger, outside any lossy summary.
+    private func protectedAuthorizationContext(in thread: ChatThread) -> String {
+        let records = (thread.writeExecutions ?? []).sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        guard !records.isEmpty else { return "" }
+        return "\n\nRecorded action outcomes (historical; every new write still requires approval):\n"
+            + records.map { "\($0.toolName) call \($0.providerCallID): \($0.status.rawValue), approval \($0.approvalState ?? "not recorded")." }
+                .joined(separator: "\n")
     }
 
     // MARK: - Tool Execution
