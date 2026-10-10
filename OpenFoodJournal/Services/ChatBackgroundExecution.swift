@@ -29,6 +29,7 @@ final class ChatBackgroundExecution {
     @ObservationIgnored private let scheduler: any ChatBackgroundScheduling
     @ObservationIgnored private var handle: (any ChatBackgroundTaskHandling)?
     @ObservationIgnored private var completedEvents = 0
+    @ObservationIgnored private var attemptID: UUID?
 
     init(scheduler: (any ChatBackgroundScheduling)? = nil) {
         self.scheduler = scheduler ?? AppleChatBackgroundScheduler()
@@ -39,11 +40,13 @@ final class ChatBackgroundExecution {
     func begin(runID: UUID, onExpiration: @escaping @MainActor () -> Void) {
         finish(success: false)
         self.runID = runID
+        let attemptID = UUID()
+        self.attemptID = attemptID
         state = .requesting
         completedEvents = 0
         do {
             try scheduler.submit(runID: runID, onStart: { [weak self] task in
-                guard let self, self.runID == runID, self.state == .requesting else {
+                guard let self, self.attemptID == attemptID, self.state == .requesting else {
                     task.complete(success: false)
                     return
                 }
@@ -51,7 +54,7 @@ final class ChatBackgroundExecution {
                 self.state = .active
                 task.update(subtitle: "Preparing response", completedEvents: 0)
             }, onExpiration: { [weak self] in
-                guard let self, self.runID == runID else { return }
+                guard let self, self.attemptID == attemptID else { return }
                 self.state = .expired
                 // Snapshot/cancel the run before relinquishing execution.
                 onExpiration()
@@ -82,6 +85,7 @@ final class ChatBackgroundExecution {
     func finish(success: Bool) {
         let oldRunID = runID
         runID = nil
+        attemptID = nil
         handle?.complete(success: success)
         handle = nil
         state = .idle
@@ -121,13 +125,15 @@ private final class AppleChatBackgroundTask: ChatBackgroundTaskHandling {
 final class AppleChatBackgroundScheduler: ChatBackgroundScheduling {
     private let scheduler = BGTaskScheduler.shared
     private let prefix = (Bundle.main.bundleIdentifier ?? "k3vnc.OpenFoodJournal") + ".assistantCompletion."
+    private var identifiers: [UUID: String] = [:]
 
     func submit(
         runID: UUID,
         onStart: @escaping @MainActor (any ChatBackgroundTaskHandling) -> Void,
         onExpiration: @escaping @MainActor () -> Void
     ) throws {
-        let identifier = prefix + runID.uuidString
+        let identifier = prefix + UUID().uuidString
+        identifiers[runID] = identifier
         // Continued-processing registration is allowed after launch. A unique
         // run identifier prevents a late OS callback attaching to a newer run.
         let registered = scheduler.register(forTaskWithIdentifier: identifier, using: .main) { task in
@@ -153,6 +159,8 @@ final class AppleChatBackgroundScheduler: ChatBackgroundScheduling {
     }
 
     func cancel(runID: UUID) {
-        scheduler.cancel(taskRequestWithIdentifier: prefix + runID.uuidString)
+        if let identifier = identifiers.removeValue(forKey: runID) {
+            scheduler.cancel(taskRequestWithIdentifier: identifier)
+        }
     }
 }
