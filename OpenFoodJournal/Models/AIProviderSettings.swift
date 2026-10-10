@@ -545,6 +545,9 @@ enum AzureOpenAIEndpoint {
         ".openai.azure.com",
         ".openai.azure.us",
         ".openai.azure.cn",
+        // Foundry's documented OpenAI v1 resource endpoint also supports Responses.
+        // https://learn.microsoft.com/en-us/azure/ai-studio/ai-services/concepts/endpoints
+        ".services.ai.azure.com",
     ]
 
     static func normalizedBaseURL(from rawValue: String) throws -> URL {
