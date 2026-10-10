@@ -692,6 +692,7 @@ struct AppSettingsRecord: Codable {
     var useGeneratedFoodIconImages: Bool
     var showJournalFoodImages: Bool
     var pinnedMicronutrientIDs: [String]
+    var micronutrientGoalOverrides: [String: Double]
     var offContributeEnabled: Bool
     var breakfastStartMinutes: Int
     var lunchStartMinutes: Int
@@ -732,6 +733,7 @@ struct AppSettingsRecord: Codable {
         useGeneratedFoodIconImages: Bool = false,
         showJournalFoodImages: Bool = JournalAppearanceSettings.defaultShowFoodImages,
         pinnedMicronutrientIDs: [String] = [],
+        micronutrientGoalOverrides: [String: Double] = [:],
         offContributeEnabled: Bool,
         breakfastStartMinutes: Int = MealScheduleDefaults.breakfastStartMinutes,
         lunchStartMinutes: Int = MealScheduleDefaults.lunchStartMinutes,
@@ -771,6 +773,7 @@ struct AppSettingsRecord: Codable {
         self.useGeneratedFoodIconImages = useGeneratedFoodIconImages
         self.showJournalFoodImages = showJournalFoodImages
         self.pinnedMicronutrientIDs = PinnedMicronutrientSettings.normalized(pinnedMicronutrientIDs)
+        self.micronutrientGoalOverrides = MicronutrientGoalSettings.normalized(micronutrientGoalOverrides)
         self.offContributeEnabled = offContributeEnabled
         self.breakfastStartMinutes = breakfastStartMinutes
         self.lunchStartMinutes = lunchStartMinutes
@@ -812,6 +815,7 @@ struct AppSettingsRecord: Codable {
         case useGeneratedFoodIconImages
         case showJournalFoodImages
         case pinnedMicronutrientIDs
+        case micronutrientGoalOverrides
         case offContributeEnabled
         case breakfastStartMinutes
         case lunchStartMinutes
@@ -858,6 +862,9 @@ struct AppSettingsRecord: Codable {
         showJournalFoodImages = try container.decodeIfPresent(Bool.self, forKey: .showJournalFoodImages) ?? JournalAppearanceSettings.defaultShowFoodImages
         pinnedMicronutrientIDs = PinnedMicronutrientSettings.normalized(
             try container.decodeIfPresent([String].self, forKey: .pinnedMicronutrientIDs) ?? []
+        )
+        micronutrientGoalOverrides = MicronutrientGoalSettings.normalized(
+            try container.decodeIfPresent([String: Double].self, forKey: .micronutrientGoalOverrides) ?? [:]
         )
         offContributeEnabled = try container.decodeIfPresent(Bool.self, forKey: .offContributeEnabled) ?? false
         breakfastStartMinutes = try container.decodeIfPresent(Int.self, forKey: .breakfastStartMinutes) ?? MealScheduleDefaults.breakfastStartMinutes

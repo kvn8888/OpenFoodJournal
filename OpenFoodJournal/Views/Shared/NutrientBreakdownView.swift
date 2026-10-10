@@ -46,13 +46,6 @@ enum NutrientKind {
         case .macro(let m): m.unit
         }
     }
-
-    var dailyValue: Double {
-        switch self {
-        case .micro(let n): n.dailyValue
-        case .macro: 0 // handled via UserGoals
-        }
-    }
 }
 
 struct NutrientBreakdownView: View {
@@ -81,7 +74,7 @@ struct NutrientBreakdownView: View {
     /// The daily value target, using UserGoals for macros
     private var effectiveDailyValue: Double {
         switch kind {
-        case .micro(let n): n.dailyValue
+        case .micro(let n): goals.dailyValue(for: n)
         case .macro(let m):
             switch m {
             case .calories: goals.dailyCalories
