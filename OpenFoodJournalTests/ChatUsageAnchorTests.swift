@@ -4,6 +4,25 @@ import Testing
 
 @MainActor
 struct ChatUsageAnchorTests {
+    @Test func incompleteResponsesTurnIsNotReturnedAsASuccess() async throws {
+        let payload = #"""
+        data: {"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"},"output":[]}}
+
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!, payload)
+        }
+        defer { StubChatURLProtocol.handler = nil }
+        let proxy = OpenAIResponsesChatModelProxy(configuration: ChatProxyConfiguration(descriptor: selection.descriptor, apiKey: "fixture", endpoint: selection.endpoint), session: StubChatURLProtocol.session())
+        do {
+            _ = try await proxy.streamTurn(request: request, onTextUpdate: { _ in })
+            Issue.record("An incomplete provider response must fail explicitly")
+        } catch let error as ChatError {
+            if case .serverError(_, let message) = error { #expect(message.contains("stopped before finishing")) }
+            else { Issue.record("Unexpected error: \(error)") }
+        }
+    }
+
     private var selection: AssistantModelSelection {
         AssistantModelSelection(descriptor: ChatModelCatalog.azureDescriptor(baseModelID: "model-a", deployment: "Prod-A"), endpoint: URL(string: "https://sample.openai.azure.com/openai/v1"), routingMode: .automatic)
     }

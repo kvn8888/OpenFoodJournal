@@ -28,6 +28,26 @@ private final class FakeBackgroundScheduler: ChatBackgroundScheduling {
 
 @MainActor
 struct ChatBackgroundExecutionTests {
+    @Test func interruptedPartialToolStreamMustNotExecuteItsPendingCall() async throws {
+        let harness = try ChatTestHarness()
+        let thread = harness.makeThread()
+        _ = harness.insertMessage(.user, text: "Set goal", into: thread)
+        let run = ChatAgentRun(providerID: "gemini", modelID: "test-primary")
+        run.state = .interrupted
+        run.pendingCallsPayload = try JSONEncoder().encode([ChatModelCall(callID: "partial", thoughtSignature: nil, modelTurnID: "unfinished-turn", modelTurnIndex: 0, name: "update_goals", args: .object(["calories": .number(2300)]))])
+        run.modelTurnID = nil
+        run.thread = thread
+        harness.context.insert(run)
+        thread.agentRuns?.append(run)
+        try harness.context.save()
+        harness.proxy.enqueue(ChatModelTurn(text: "Recovered from the last complete boundary"))
+        await harness.service.resumeInterruptedRun(in: thread)
+        #expect(harness.goals.dailyCalories == 2000)
+        #expect(harness.permissions.requests.isEmpty)
+        #expect(run.pendingCallsPayload == nil)
+        #expect(harness.proxy.turns.count == 1)
+    }
+
     @Test func admittedRunContinuesUntilSystemExpiryThenSavesPartialAnswer() async throws {
         let harness = try ChatTestHarness()
         let scheduler = FakeBackgroundScheduler()
