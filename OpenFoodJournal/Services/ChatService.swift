@@ -4139,27 +4139,19 @@ final class ChatService {
             } else {
                 selectedModel = AIProviderSettings.azureDefaultModel(in: defaults)
             }
-            let primaryDeployment = AIProviderSettings.azureDeployment(for: selectedModel, in: defaults)
             let terraDeployment = AIProviderSettings.azureDeployment(for: .terra, in: defaults)
             let fallbackModel: AzureAssistantModel = terraDeployment.isEmpty ? selectedModel : .terra
-            let fallbackDeployment = terraDeployment.isEmpty ? primaryDeployment : terraDeployment
             let endpoint = try? AzureOpenAIEndpoint.normalizedBaseURL(
                 from: AIProviderSettings.azureEndpoint(in: defaults)
             )
             return ChatRequestConfig(
                 primary: AssistantModelSelection(
-                    descriptor: ChatModelCatalog.azureDescriptor(
-                        model: selectedModel,
-                        deployment: primaryDeployment
-                    ),
+                    descriptor: AIProviderSettings.azureDescriptor(for: selectedModel, in: defaults),
                     endpoint: endpoint,
                     routingMode: .automatic
                 ),
                 fallback: AssistantModelSelection(
-                    descriptor: ChatModelCatalog.azureDescriptor(
-                        model: fallbackModel,
-                        deployment: fallbackDeployment
-                    ),
+                    descriptor: AIProviderSettings.azureDescriptor(for: fallbackModel, in: defaults),
                     endpoint: endpoint,
                     routingMode: .automatic
                 )
