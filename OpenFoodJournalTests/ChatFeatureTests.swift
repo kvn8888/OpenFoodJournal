@@ -31,6 +31,19 @@ struct ChatFeatureTests {
         #expect(ChatPricingCatalog.pricing(for: selection) == nil)
     }
 
+    @Test func azureFoundryResourceEndpointPreservesHostAndRejectsLookalikes() throws {
+        let endpoint = try AzureOpenAIEndpoint.normalizedBaseURL(from: "https://sample.services.ai.azure.com/openai/v1/")
+        #expect(endpoint.absoluteString == "https://sample.services.ai.azure.com/openai/v1")
+        for value in ["https://sample.services.ai.azure.com.evil.example",
+                      "http://sample.services.ai.azure.com",
+                      "https://key@sample.services.ai.azure.com",
+                      "https://sample.services.ai.azure.com/models"] {
+            #expect(throws: AzureOpenAIEndpoint.ValidationError.self) {
+                _ = try AzureOpenAIEndpoint.normalizedBaseURL(from: value)
+            }
+        }
+    }
+
     @Test func azureModelSlugsRoundTripAndLegacyBackupsKeepTheirDefaults() throws {
         let original = AppSettingsRecord(
             useProModel: false,
