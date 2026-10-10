@@ -34,6 +34,8 @@ struct SettingsView: View {
     @AppStorage(AIProviderSettings.azureSolDeploymentKey) private var azureSolDeployment: String = ""
     @AppStorage(AIProviderSettings.azureTerraDeploymentKey) private var azureTerraDeployment: String = ""
     @AppStorage(AIProviderSettings.azureDefaultModelKey) private var azureDefaultModelRawValue: String = AIProviderSettings.defaultAzureModel.rawValue
+    @AppStorage(AIProviderSettings.azureSmartModelKey) private var azureSmartModel: String = AzureAssistantModel.sol.rawValue
+    @AppStorage(AIProviderSettings.azureFastModelKey) private var azureFastModel: String = AzureAssistantModel.terra.rawValue
     @AppStorage(AIProviderSettings.openAIFastModelKey) private var openAIFastModel: String = AIProviderSettings.defaultOpenAIFastModel
     @AppStorage(AIProviderSettings.openAISmartModelKey) private var openAISmartModel: String = AIProviderSettings.defaultOpenAISmartModel
     @AppStorage(AIProviderSettings.anthropicFastModelKey) private var anthropicFastModel: String = AIProviderSettings.defaultAnthropicFastModel
@@ -339,10 +341,12 @@ struct SettingsView: View {
 
                         azureDeploymentRow(
                             model: .sol,
+                            modelSlug: $azureSmartModel,
                             deployment: $azureSolDeployment
                         )
                         azureDeploymentRow(
                             model: .terra,
+                            modelSlug: $azureFastModel,
                             deployment: $azureTerraDeployment
                         )
 
@@ -1088,7 +1092,7 @@ struct SettingsView: View {
         case .gemini, .openRouter:
             "Fast uses the lightweight model; Smart uses the deeper model. Context is compacted before reaching the selected limit."
         case .azureOpenAI:
-            "Deployment names are the identifiers configured in your Azure resource. Limits come from the app's dated capability catalog; connection tests check reachability. Azure calls are stateless and API keys stay in Keychain."
+            "For each tier, enter the base model slug (for example, gpt-6.1-sol) and your Azure deployment name. The slug is used for model limits and pricing; the deployment routes requests through Responses. Unknown models use a conservative context limit until runtime metadata is available. API keys stay in Keychain."
         case .openAI:
             "OpenAI uses the Responses API with stateless, portable conversation replay. Model slugs remain editable and capabilities refresh from the runtime catalog."
         case .anthropic:
@@ -1096,16 +1100,21 @@ struct SettingsView: View {
         case .museSpark:
             "Muse Spark uses Meta's OpenAI-compatible Model API. The model slug is runtime-editable so app updates are not required when Meta changes models."
         case .openAICompatible:
-            "Connects to any OpenAI-compatible /chat/completions endpoint via the base URL above — Meta Model API, LiteLLM, OpenRouter-style gateways, or self-hosted vLLM. Fast and Smart slugs are runtime-editable."
+            "Uses the Chat Completions API at the base URL above. For an Azure resource, select Azure OpenAI instead: it uses Responses and supports custom model slugs and deployment names. Fast and Smart slugs are runtime-editable."
         }
     }
 
     @ViewBuilder
     private func azureDeploymentRow(
         model: AzureAssistantModel,
+        modelSlug: Binding<String>,
         deployment: Binding<String>
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
+            TextField("\(model.displayName) base model slug", text: modelSlug)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .accessibilityIdentifier("settings.azure-model.\(model.rawValue)")
             TextField("\(model.displayName) deployment name", text: deployment)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -1167,7 +1176,7 @@ struct SettingsView: View {
                     return
                 }
                 let descriptor = ChatModelCatalog.azureDescriptor(
-                    model: model,
+                    baseModelID: AIProviderSettings.azureBaseModelID(for: model),
                     deployment: trimmedDeployment
                 )
                 let proxy = AzureOpenAIChatModelProxy(
@@ -1595,6 +1604,8 @@ struct SettingsView: View {
                     azureSolDeployment: azureSolDeployment,
                     azureTerraDeployment: azureTerraDeployment,
                     azureDefaultModel: azureDefaultModelRawValue,
+                    azureSmartModel: azureSmartModel,
+                    azureFastModel: azureFastModel,
                     openAIFastModel: openAIFastModel,
                     openAISmartModel: openAISmartModel,
                     anthropicFastModel: anthropicFastModel,
@@ -1670,6 +1681,8 @@ struct SettingsView: View {
             azureSolDeployment = backup.appSettings.azureSolDeployment
             azureTerraDeployment = backup.appSettings.azureTerraDeployment
             azureDefaultModelRawValue = backup.appSettings.azureDefaultModel
+            azureSmartModel = backup.appSettings.azureSmartModel
+            azureFastModel = backup.appSettings.azureFastModel
             openAIFastModel = backup.appSettings.openAIFastModel
             openAISmartModel = backup.appSettings.openAISmartModel
             anthropicFastModel = backup.appSettings.anthropicFastModel
