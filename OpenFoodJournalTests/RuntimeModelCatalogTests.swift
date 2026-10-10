@@ -27,7 +27,8 @@ struct RuntimeModelCatalogTests {
         let fixture = #"""
         {"azure":{"id":"azure","name":"Azure","models":{
           "future-azure-fixture":{"id":"future-azure-fixture","name":"Fixture",
-            "tool_call":true,"modalities":{"input":["text","image","pdf"],"output":["text"]},
+            "attachment":true,"reasoning":true,"tool_call":true,
+            "modalities":{"input":["text","image","pdf"],"output":["text"]},
             "limit":{"context":300000,"input":250000,"output":50000},
             "cost":{"input":0.7,"output":1.4,"cache_read":0.07}}
         }}}
