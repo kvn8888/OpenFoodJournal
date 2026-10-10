@@ -8,6 +8,50 @@ import UIKit
 
 @MainActor
 struct ChatFeatureTests {
+    @Test func azureSlotsPreserveLegacySettingsAndAcceptArbitraryBaseModels() throws {
+        let suite = "AzureModels.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("existing-smart-deployment", forKey: AIProviderSettings.azureSolDeploymentKey)
+        defaults.set(AzureAssistantModel.sol.rawValue, forKey: AIProviderSettings.azureDefaultModelKey)
+        #expect(AIProviderSettings.azureDefaultModel(in: defaults) == .sol)
+        #expect(AIProviderSettings.azureBaseModelID(for: .sol, in: defaults) == "gpt-5.6-sol")
+
+        defaults.set("  gpt-6.1-sol\n", forKey: AIProviderSettings.azureSmartModelKey)
+        defaults.set("future-fast-model", forKey: AIProviderSettings.azureFastModelKey)
+        defaults.set("fast-deployment", forKey: AIProviderSettings.azureTerraDeploymentKey)
+        let smart = AIProviderSettings.azureDescriptor(for: .sol, in: defaults)
+        let fast = AIProviderSettings.azureDescriptor(for: .terra, in: defaults)
+        #expect(smart.baseModelID == "gpt-6.1-sol")
+        #expect(smart.deploymentIdentifier == "existing-smart-deployment")
+        #expect(fast.baseModelID == "future-fast-model")
+        #expect(fast.deploymentIdentifier == "fast-deployment")
+        #expect(smart.capabilities.maximumInputTokens == 50_000)
+        let selection = AssistantModelSelection(descriptor: smart, endpoint: nil, routingMode: .automatic)
+        #expect(ChatPricingCatalog.pricing(for: selection) == nil)
+    }
+
+    @Test func azureModelSlugsRoundTripAndLegacyBackupsKeepTheirDefaults() throws {
+        let original = AppSettingsRecord(
+            useProModel: false,
+            azureSolDeployment: "my-deployment",
+            azureSmartModel: "gpt-6.1-sol",
+            azureFastModel: "another-model"
+        )
+        let bytes = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(AppSettingsRecord.self, from: bytes)
+        #expect(decoded.azureSmartModel == "gpt-6.1-sol")
+        #expect(decoded.azureFastModel == "another-model")
+        #expect(decoded.azureSolDeployment == "my-deployment")
+        var legacy = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: Any])
+        legacy.removeValue(forKey: "azureSmartModel")
+        legacy.removeValue(forKey: "azureFastModel")
+        let old = try JSONDecoder().decode(AppSettingsRecord.self, from: JSONSerialization.data(withJSONObject: legacy))
+        #expect(old.azureSmartModel == AzureAssistantModel.sol.rawValue)
+        #expect(old.azureFastModel == AzureAssistantModel.terra.rawValue)
+        #expect(old.azureSolDeployment == "my-deployment")
+    }
+
     @Test func textConversationUsesSharedProxyContractAndPersistsReply() async throws {
         let harness = try ChatTestHarness()
         harness.proxy.enqueue(ChatModelTurn(
@@ -1521,6 +1565,44 @@ struct ChatProviderAdapterContractTests {
         #expect(turn.calls.first?.name == "get_goals")
         #expect(turn.providerRequestID == "meta-request")
         #expect(turn.usage == ChatTokenUsage(input: 30, output: 6, thinking: 0))
+    }
+
+    @MainActor
+    @Test func customAzureModelSendsToolsToResponsesUsingDeploymentName() async throws {
+        let payload = #"""
+        data: {"type":"response.completed","response":{"id":"resp-custom","model":"gpt-6.1-sol","output":[{"type":"function_call","id":"fc-1","call_id":"call-custom","name":"get_goals","arguments":"{}"}],"usage":{"input_tokens":42,"output_tokens":12}}}
+
+        """#.data(using: .utf8)!
+        StubChatURLProtocol.handler = { request in
+            #expect(request.url?.absoluteString == "https://sample.openai.azure.com/openai/v1/responses")
+            #expect(request.value(forHTTPHeaderField: "api-key") == "fixture-key")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+            let data = try #require(StubChatURLProtocol.bodyData(for: request))
+            let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(body["model"] as? String == "nutrition-production")
+            #expect(body["store"] as? Bool == false)
+            #expect(body["stream"] as? Bool == true)
+            #expect(body["parallel_tool_calls"] as? Bool == true)
+            #expect((body["tools"] as? [[String: Any]])?.isEmpty == false)
+            #expect(body["include"] as? [String] == ["reasoning.encrypted_content"])
+            #expect(body["reasoning_effort"] == nil)
+            #expect(!String(decoding: data, as: UTF8.self).contains("fixture-key"))
+            return (
+                HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                headerFields: ["Content-Type": "text/event-stream"])!,
+                payload
+            )
+        }
+        defer { StubChatURLProtocol.handler = nil }
+        let proxy = AzureOpenAIChatModelProxy(configuration: ChatProxyConfiguration(
+            descriptor: ChatModelCatalog.azureDescriptor(baseModelID: "gpt-6.1-sol", deployment: "nutrition-production"),
+            apiKey: "fixture-key",
+            endpoint: try AzureOpenAIEndpoint.normalizedBaseURL(from: "https://sample.openai.azure.com")
+        ), session: StubChatURLProtocol.session())
+        let turn = try await proxy.streamTurn(request: request, onTextUpdate: { _ in })
+        #expect(turn.resolvedModelID == "gpt-6.1-sol")
+        #expect(turn.calls.first?.callID == "call-custom")
+        #expect(turn.calls.first?.name == "get_goals")
     }
 
     @MainActor
