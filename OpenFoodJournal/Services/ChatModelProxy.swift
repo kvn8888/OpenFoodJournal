@@ -958,6 +958,9 @@ final class GeminiChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                   let chunk = try? decoder.decode(GeminiStreamChunk.self, from: data)
             else { continue }
             onEvent(.providerEvent(kind: "gemini.chunk"))
+            if chunk.candidates?.contains(where: { $0.finishReason == "MAX_TOKENS" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let modelVersion = chunk.modelVersion, !modelVersion.isEmpty {
                 turn.resolvedModelID = modelVersion
             }
@@ -1192,6 +1195,9 @@ final class OpenRouterChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                   let chunk = try? decoder.decode(ORStreamChunk.self, from: data)
             else { continue }
             onEvent(.providerEvent(kind: "openrouter.chunk"))
+            if chunk.choices?.contains(where: { $0.finishReason == "length" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let model = chunk.model, !model.isEmpty {
                 turn.resolvedModelID = model
             }
@@ -1556,6 +1562,9 @@ final class AnthropicChatModelProxy: ChatModelProxy {
                     ))
                 }
             case "message_delta":
+                if event["delta"]?["stop_reason"]?.stringValue == "max_tokens" {
+                    throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+                }
                 output = Int(event["usage"]?["output_tokens"]?.doubleValue ?? Double(output))
             case "error":
                 throw ChatError.serverError(
@@ -1736,6 +1745,9 @@ final class MuseSparkChatModelProxy: ChatModelProxy {
             guard let data = payload.data(using: .utf8),
                   let chunk = try? decoder.decode(ORStreamChunk.self, from: data) else { continue }
             onEvent(.providerEvent(kind: "muse.chunk"))
+            if chunk.choices?.contains(where: { $0.finishReason == "length" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let model = chunk.model, !model.isEmpty { turn.resolvedModelID = model }
             if let usage = chunk.usage {
                 let normalized = ChatTokenUsage(
@@ -1892,6 +1904,8 @@ final class OpenAIResponsesChatModelProxy: ChatModelProxy, ChatNativeWebSearchin
                 }
             case "response.completed":
                 completedResponse = event["response"]
+            case "response.incomplete":
+                throw ChatError.serverError(0, "The provider stopped before finishing the response (for example, at its output limit). Try a shorter request or a larger context budget.")
             case "response.failed", "error":
                 let message = event["error"]?["message"]?.stringValue
                     ?? event["message"]?.stringValue
@@ -2309,6 +2323,7 @@ private struct GeminiStreamChunk: Decodable {
         }
 
         let content: Content?
+        let finishReason: String?
     }
 
     struct FunctionCallPayload: Decodable {
@@ -2507,6 +2522,12 @@ private struct ORStreamChunk: Decodable {
         }
 
         let delta: Delta?
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
     }
 
     struct ToolCallDelta: Decodable {
