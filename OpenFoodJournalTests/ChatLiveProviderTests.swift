@@ -137,6 +137,44 @@ final class ChatLiveProviderTests: XCTestCase {
         try await assertAzureContract(model: .terra, deploymentKey: "OFJ_AZURE_TERRA_DEPLOYMENT")
     }
 
+    /// Opt-in regression for newer Azure deployments: a text-only connection
+    /// test cannot catch the tools + reasoning / Chat Completions HTTP 400.
+    func testCustomAzureResponsesToolRoundTrip() async throws {
+        try requireLiveRun()
+        let slug = try requireEnvironment("OFJ_AZURE_MODEL_SLUG")
+        let deployment = try requireEnvironment("OFJ_AZURE_DEPLOYMENT")
+        let endpoint = try AzureOpenAIEndpoint.normalizedBaseURL(
+            from: try requireEnvironment("OFJ_AZURE_OPENAI_ENDPOINT")
+        )
+        let proxy = AzureOpenAIChatModelProxy(configuration: ChatProxyConfiguration(
+            descriptor: ChatModelCatalog.azureDescriptor(baseModelID: slug, deployment: deployment),
+            apiKey: try requireEnvironment("OFJ_AZURE_OPENAI_API_KEY"),
+            endpoint: endpoint
+        ), session: liveSession())
+        let tool = ChatModelTool(name: "get_fixture_number", description: "Read the test fixture number.",
+                                 parameters: .object(["type": .string("object"), "properties": .object([:])]))
+        let user = ChatModelMessage(role: .user, parts: [.text("Call get_fixture_number exactly once, then return its number. Do not guess.")])
+        let first = try await proxy.streamTurn(request: ChatModelRequest(
+            systemPrompt: "Follow the user instruction. This is a tool API contract test.",
+            messages: [user], tools: [tool]
+        ), onTextUpdate: { _ in })
+        let call = try XCTUnwrap(first.calls.first)
+        XCTAssertEqual(first.calls.count, 1)
+        XCTAssertEqual(call.name, "get_fixture_number")
+        // Preserve opaque reasoning and the provider's exact call ID on replay.
+        let second = try await proxy.streamTurn(request: ChatModelRequest(
+            systemPrompt: "Return only the fixture number from the tool result.",
+            messages: [user,
+                ChatModelMessage(role: .model, parts:
+                    first.continuations.map(ChatModelPart.providerContinuation) + [.functionCall(call)]),
+                ChatModelMessage(role: .user, parts: [.functionResponse(ChatModelResponse(
+                    callID: call.callID, name: call.name, response: .object(["number": .number(731)])
+                ))])], tools: [tool]
+        ), onTextUpdate: { _ in })
+        XCTAssertTrue(second.calls.isEmpty)
+        XCTAssertTrue(second.text.contains("731"))
+    }
+
     private func assertAzureContract(
         model: AzureAssistantModel,
         deploymentKey: String
