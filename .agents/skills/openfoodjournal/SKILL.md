@@ -89,7 +89,7 @@ See [references/services.md](references/services.md) for full API contracts.
   hosts; public-address/HTTPS/credential/path validation still applies.
   Source: https://learn.microsoft.com/en-us/azure/foundry/foundry-models/concepts/endpoints
 - New slugs are included in JSON backup/import with legacy decoding defaults.
-  Four offline regressions and an opt-in custom Azure tool round-trip test cover
+  Five offline regressions and an opt-in custom Azure tool round-trip test cover
   routing, migration, and endpoint validation. Full execution is a hosted CI gate.
 - `docs/assistant-context-background-research.md` records the compression and
   background completion investigation. Those recommendations are not implemented:

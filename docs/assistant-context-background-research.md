@@ -182,8 +182,8 @@ decision, not a Live Activity feature.
 
 ## Verification of this branch
 
-Added four offline regression tests (custom slugs/legacy slots, backup migration,
-request wire contract, and Foundry URL validation) and one opt-in live Azure
+Added five offline regression tests (custom slugs/legacy slots, backup migration,
+request wire contract, Foundry URL validation, and runtime metadata) and one opt-in live Azure
 tools-and-result round trip. Existing signature and continuation suites remain.
 The live test needs `OFJ_RUN_LIVE_CHAT_TESTS=1`, `OFJ_AZURE_MODEL_SLUG`,
 `OFJ_AZURE_DEPLOYMENT`, `OFJ_AZURE_OPENAI_ENDPOINT`, and
