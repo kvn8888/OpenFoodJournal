@@ -258,6 +258,9 @@ final class ChatService {
     @ObservationIgnored private var activeRunStartedTick: TimeInterval?
     @ObservationIgnored private var approvalStartedTick: TimeInterval?
     @ObservationIgnored private var accumulatedApprovalSeconds: TimeInterval = 0
+    @ObservationIgnored var backgroundExecution: ChatBackgroundExecution?
+    @ObservationIgnored private var applicationIsBackgrounded = false
+    @ObservationIgnored private var backgroundEventCount = 0
     /// Exact provider-neutral input admitted for the latest model request.
     /// The transcript boundary lets the context meter add newly persisted
     /// output without re-admitting any older turns that were intentionally
@@ -867,6 +870,26 @@ final class ChatService {
         if permissionContinuation != nil { resolvePermission(.denied) }
     }
 
+    func applicationDidBecomeActive() { applicationIsBackgrounded = false }
+
+    func applicationDidEnterBackground() {
+        applicationIsBackgrounded = true
+        guard backgroundExecution?.canContinue == true, pendingPermission == nil else {
+            suspendForBackgrounding()
+            return
+        }
+        activeRun?.partialVisibleAnswer = streamingText
+        do { try modelContext.save() }
+        catch { suspendForBackgrounding() }
+    }
+
+    private func beginBackgroundExecution(for run: ChatAgentRun) {
+        guard !applicationIsBackgrounded else { return }
+        backgroundExecution?.begin(runID: run.id) { [weak self] in
+            self?.suspendForBackgrounding()
+        }
+    }
+
     /// Continues a thread whose prior run was interrupted by app termination
     /// or background eviction. SwiftData history remains the source of truth.
     func resumeInterruptedRun(in thread: ChatThread) async {
@@ -948,10 +971,13 @@ final class ChatService {
         run.setPhase(.preparing)
         run.requestStartedAt = run.requestStartedAt ?? Date()
         try? modelContext.save()
+        backgroundEventCount = 0
+        beginBackgroundExecution(for: run)
         let executionStartedAt = Date()
         let executionStartedTick = monotonicClock.now
         defer {
             let liveApproval = approvalStartedTick.map { max(0, monotonicClock.now - $0) } ?? 0
+            backgroundExecution?.finish(success: run.state == .completed)
             let activeDuration = max(
                 0,
                 monotonicClock.now - executionStartedTick - accumulatedApprovalSeconds - liveApproval
@@ -1367,6 +1393,7 @@ final class ChatService {
         if activeRunID == run.id {
             activePhase = phase
             activePhaseStartedAt = now
+            backgroundExecution?.update(phase: phase, completedEvents: backgroundEventCount)
         }
     }
 
@@ -1670,7 +1697,8 @@ final class ChatService {
         let request = ChatModelRequest(
             systemPrompt: systemPrompt,
             messages: preparedMessages,
-            tools: tools
+            tools: tools,
+            maximumOutputTokens: contextUsage?.reservedOutputTokens
         )
         guard let run = activeRun else { throw ChatError.cancelled }
         transition(to: .waitingForProvider, run: run)
@@ -1786,6 +1814,7 @@ final class ChatService {
         thread: ChatThread,
         run: ChatAgentRun
     ) {
+        let previousCount = lastRoundProviderEventCount
         switch event {
         case .responseHeaders(_, let requestID, let retryAfter):
             run.providerRequestID = requestID ?? run.providerRequestID
@@ -1814,6 +1843,10 @@ final class ChatService {
             break
         case .encodingStarted, .requestEncoded, .completed:
             break
+        }
+        if lastRoundProviderEventCount > previousCount {
+            backgroundEventCount += 1
+            backgroundExecution?.update(phase: run.phase, completedEvents: backgroundEventCount)
         }
     }
 
@@ -2505,7 +2538,8 @@ final class ChatService {
             request: ChatModelRequest(
                 systemPrompt: Self.checkpointSystemPrompt,
                 messages: [ChatModelMessage(role: .user, parts: [.text(prompt)])],
-                tools: []
+                tools: [],
+                maximumOutputTokens: budget.outputTokens
             ),
             onTextUpdate: { _ in }
         )
@@ -2917,6 +2951,14 @@ final class ChatService {
             ledger.status = .awaitingApproval
             ledger.approvalState = nil
             try? modelContext.save()
+            // Human approval can take arbitrarily long. Release OS execution
+            // while waiting; backgrounding preserves a pending action for Continue.
+            backgroundExecution?.update(phase: .awaitingApproval, completedEvents: backgroundEventCount)
+            backgroundExecution?.finish(success: true)
+            if applicationIsBackgrounded {
+                suspendForBackgrounding()
+                try Task.checkCancellation()
+            }
             let decision: ChatPermissionDecision
             let approvalStartedAt = Date()
             approvalStartedTick = monotonicClock.now
@@ -2981,6 +3023,7 @@ final class ChatService {
                 try? modelContext.save()
                 return record(outcome)
             case .approved:
+                beginBackgroundExecution(for: agentRun)
                 ledger.approvalState = "approved"
                 ledger.status = .executing
                 agentRun.state = .running

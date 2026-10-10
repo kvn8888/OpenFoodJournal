@@ -187,6 +187,9 @@ struct MacrosApp: App {
 
         // Ensure the Preferences singleton exists in SwiftData
         _ = Preferences.current(in: container.mainContext)
+        if !isTest {
+            _chatService.wrappedValue.backgroundExecution = ChatBackgroundExecution()
+        }
         _ = GeminiCostAccumulator.current(in: container.mainContext)
         let expiredAILogCount = GeminiScanLog.pruneExpired(in: container.mainContext)
         let expiredAssistantSpanCount = ChatDiagnosticSpan.pruneExpired(in: container.mainContext)
@@ -249,6 +252,7 @@ struct MacrosApp: App {
                     }
                     .onChange(of: scenePhase) { _, phase in
                         if phase == .active {
+                            chatService.applicationDidBecomeActive()
                             tursoMirrorService.scheduleMirror(reason: "app_foreground")
                             Task {
                                 await reconcilePendingHealthKitEntries()
@@ -259,7 +263,7 @@ struct MacrosApp: App {
                                 }
                             }
                         } else if phase == .background {
-                            chatService.suspendForBackgrounding()
+                            chatService.applicationDidEnterBackground()
                         }
                     }
             } else {
