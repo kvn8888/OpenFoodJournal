@@ -1055,6 +1055,15 @@ final class ChatService {
         var producedText = false
 
         do {
+            // Calls decoded from a partial stream are progress chips, not a
+            // safe provider boundary. Reopening must not execute them without
+            // the completed turn (including signatures/continuations).
+            if run.pendingCallsPayload != nil, run.modelTurnID == nil {
+                run.pendingCallsPayload = nil
+                run.pendingContinuationsPayload = nil
+                markUnfinishedTools(in: thread, runID: run.id, status: .interrupted)
+                try modelContext.save()
+            }
             if let pendingData = run.pendingCallsPayload,
                let calls = try? JSONDecoder().decode([ChatModelCall].self, from: pendingData),
                !calls.isEmpty {
@@ -1102,6 +1111,8 @@ final class ChatService {
                 run.updatedAt = Date()
                 streamingText = ""
                 run.partialVisibleAnswer = ""
+                run.modelTurnID = nil
+                try modelContext.save()
                 let turn = try await runTurn(config: config, systemPrompt: system, thread: thread)
                 try Task.checkCancellation()
                 run.modelTurnID = turn.calls.first?.modelTurnID
