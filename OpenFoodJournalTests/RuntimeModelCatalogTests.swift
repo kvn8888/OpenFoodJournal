@@ -21,6 +21,41 @@ private final class StubModelCatalogFetcher: ModelCatalogFetching {
 
 @MainActor
 struct RuntimeModelCatalogTests {
+    @Test func reportedUnknownModelNeverInheritsConfiguredModelPricesOrLimits() async throws {
+        let fixture = Self.catalogFixture
+        let catalog = RuntimeModelCatalog(fetcher: StubModelCatalogFetcher { request, _ in
+            (fixture, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, cacheURL: temporaryCacheURL())
+        #expect(await catalog.refreshIfNeeded())
+        let selection = AssistantModelSelection(
+            descriptor: ChatModelCatalog.azureDescriptor(model: .terra, deployment: "CaseSensitive-Production"),
+            endpoint: nil, routingMode: .automatic
+        )
+        let result = catalog.resolution(for: selection, resolvedModelID: "gpt-future-unknown")
+        #expect(result.selection.descriptor.baseModelID == "gpt-future-unknown")
+        #expect(result.selection.descriptor.deploymentIdentifier == "CaseSensitive-Production")
+        #expect(result.selection.descriptor.capabilities.maximumInputTokens == 50_000)
+        #expect(result.pricing == nil)
+        catalog.observeResolvedModel(provider: .azureOpenAI, requestedModelID: "CaseSensitive-Production", resolvedModelID: "gpt-future-unknown")
+        #expect(catalog.resolution(for: selection, resolvedModelID: nil).pricing == nil)
+    }
+
+    @Test func catalogLookupIsCaseInsensitiveButPreservesWireDeployment() async throws {
+        let fixture = Self.catalogFixture
+        let catalog = RuntimeModelCatalog(fetcher: StubModelCatalogFetcher { request, _ in
+            (fixture, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, cacheURL: temporaryCacheURL())
+        #expect(await catalog.refreshIfNeeded())
+        let selection = AssistantModelSelection(
+            descriptor: ChatModelCatalog.azureDescriptor(baseModelID: "GPT-5.6-Terra", deployment: "CaseSensitive-Production"),
+            endpoint: nil, routingMode: .automatic
+        )
+        let result = catalog.resolution(for: selection, resolvedModelID: nil)
+        #expect(result.selection.descriptor.baseModelID == "gpt-5.6-terra")
+        #expect(result.selection.descriptor.deploymentIdentifier == "CaseSensitive-Production")
+        #expect(result.pricing?.inputPerMillionUSD == 2.5)
+    }
+
     @Test func customAzureSlugUsesRuntimeLimitsAndPricingWithoutChangingDeployment() async throws {
         // Deliberately fictional model/rates: this tests catalog selection, not
         // an assertion about a vendor's current price or token limit.
