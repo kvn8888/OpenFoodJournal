@@ -2568,15 +2568,26 @@ final class ChatService {
         prompt += "Keep the whole JSON response under about \(budget.outputTokens) tokens.\n\n"
             + "Conversation exchanges to fold into the checkpoint:\n"
             + chunk.text
-        let turn = try await proxy.streamTurn(
-            request: ChatModelRequest(
-                systemPrompt: Self.checkpointSystemPrompt,
-                messages: [ChatModelMessage(role: .user, parts: [.text(prompt)])],
-                tools: [],
-                maximumOutputTokens: budget.outputTokens
-            ),
-            onTextUpdate: { _ in }
+        try enforceActiveRunDeadline()
+        let summaryRequest = ChatModelRequest(
+            systemPrompt: Self.checkpointSystemPrompt,
+            messages: [ChatModelMessage(role: .user, parts: [.text(prompt)])],
+            tools: [],
+            maximumOutputTokens: budget.outputTokens
         )
+        let seconds = min(deadlinePolicy.modelTurn, remainingActiveRunTime())
+        let turn = try await withThrowingTaskGroup(of: ChatModelTurn.self) { group in
+            group.addTask { @MainActor in
+                try await proxy.streamTurn(request: summaryRequest, onTextUpdate: { _ in })
+            }
+            group.addTask { @MainActor [monotonicClock] in
+                try await monotonicClock.sleep(for: seconds)
+                throw ChatError.timeout(step: "context_compaction", seconds: seconds)
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw ChatError.emptyResponse }
+            return first
+        }
         let decoded = turn.calls.isEmpty ? Self.decodeCheckpointSemantic(turn.text) : nil
         recordUsage(
             selection: selection,
