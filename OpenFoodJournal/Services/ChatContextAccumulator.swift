@@ -107,7 +107,8 @@ nonisolated enum ChatContextAccumulator {
         blocks: [ChatContextBlock],
         descriptor: ChatModelDescriptor,
         budget: ChatContextBudget,
-        maximumInputTokens: Int? = nil
+        maximumInputTokens: Int? = nil,
+        inputTokenEstimate: Int? = nil
     ) -> ChatContextPlan {
         // A provider-overflow recovery can lower the limit for one attempt.
         let selectedLimit = min(
@@ -128,7 +129,7 @@ nonisolated enum ChatContextAccumulator {
             + (checkpointText.map { estimate(text: $0) } ?? 0)
         let blockCosts = blocks.map(estimate(block:))
         let history = blockCosts.reduce(0, +)
-        let total = base + history
+        let total = inputTokenEstimate ?? (base + history)
         let trigger = Int(Double(selectedLimit) * 0.8)
 
         var compactThrough: Int?

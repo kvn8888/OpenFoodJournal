@@ -456,6 +456,8 @@ nonisolated struct ChatModelRoundRecord: Codable, Equatable, Sendable {
     var firstVisibleTextMs: Int?
     var durationMs: Int
     var outcome: String
+    /// Optional additive JSON metadata; no CloudKit schema change is needed.
+    var contextUsageAnchor: ChatUsageAnchor? = nil
 }
 
 @Model

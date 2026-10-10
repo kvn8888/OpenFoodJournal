@@ -220,7 +220,6 @@ nonisolated enum ChatCompactionSupport {
         let tiers: [[WritableKeyPath<ChatCheckpointPayload, [String]>]] = [
             [\.journalFacts, \.toolOutcomes, \.conversationDecisions],
             [\.goals, \.unresolvedTasks],
-            [\.userConstraints],
         ]
         for tier in tiers {
             var chosen: WritableKeyPath<ChatCheckpointPayload, [String]>?

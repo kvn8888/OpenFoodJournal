@@ -261,6 +261,8 @@ final class ChatService {
     @ObservationIgnored var backgroundExecution: ChatBackgroundExecution?
     @ObservationIgnored private var applicationIsBackgrounded = false
     @ObservationIgnored private var backgroundEventCount = 0
+    @ObservationIgnored private var currentUsageAnchor: ChatUsageAnchor?
+    @ObservationIgnored private var currentContextSelection: AssistantModelSelection?
     /// Exact provider-neutral input admitted for the latest model request.
     /// The transcript boundary lets the context meter add newly persisted
     /// output without re-admitting any older turns that were intentionally
@@ -1431,7 +1433,8 @@ final class ChatService {
             firstProviderEventMs: monitor.firstProviderEventMs,
             firstVisibleTextMs: monitor.firstVisibleTextMs,
             durationMs: durationMs,
-            outcome: "completed"
+            outcome: "completed",
+            contextUsageAnchor: currentUsageAnchor
         ))
         run.roundRecords = records
 
@@ -1576,6 +1579,8 @@ final class ChatService {
     ) async throws -> AgentTurn {
         var automaticRetries = 0
         var attemptedOverflowRecovery = false
+        overflowRecoveryInputLimit = nil
+        defer { overflowRecoveryInputLimit = nil }
         currentModelRoundRetryCount = 0
         while true {
             do {
@@ -1781,6 +1786,8 @@ final class ChatService {
         activeRun?.selectedContextLimit = contextUsage?.selectedLimit ?? 0
         activeRun?.providerRequestID = turn.providerRequestID
         if let usage = turn.usage {
+            currentContextSelection = catalogResolution.selection
+            currentUsageAnchor = ChatUsageAnchor(request: request, selection: catalogResolution.selection, usage: usage)
             pendingReportedInputTokens = usage.input
             pendingReportedCachedInputTokens = usage.cachedInput
             activeRun?.reportedInputTokens += usage.input
@@ -2040,6 +2047,11 @@ final class ChatService {
         }
         contextWarning = nil
         let budget = contextBudgetProvider()
+        currentContextSelection = selection
+        currentUsageAnchor = (thread.agentRuns ?? [])
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .flatMap { $0.roundRecords.reversed() }
+            .compactMap(\.contextUsageAnchor).first
         var checkpoint = latestValidCheckpoint(in: thread)
         var checkpointPayload = checkpoint?.decodedPayload
         var blocks = contextBlocks(
@@ -2055,7 +2067,9 @@ final class ChatService {
             blocks: blocks,
             descriptor: selection.descriptor,
             budget: budget,
-            maximumInputTokens: recoveryLimit
+            maximumInputTokens: recoveryLimit,
+            inputTokenEstimate: anchoredEstimate(systemPrompt: systemPrompt,
+                messages: effectiveMessages(checkpoint: checkpointPayload, blocks: blocks), tools: tools)
         )
         var compacted = false
         var usedDeterministicFallback = false
@@ -2222,11 +2236,7 @@ final class ChatService {
         let tools = ChatToolRegistry.all.map {
             ChatModelTool(name: $0.name, description: $0.description, parameters: $0.parameters)
         }
-        let estimate = ChatContextAccumulator.estimate(request: ChatModelRequest(
-            systemPrompt: systemPrompt,
-            messages: currentMessages,
-            tools: tools
-        ))
+        let estimate = estimatedInput(systemPrompt: systemPrompt, messages: currentMessages, tools: tools)
         contextUsage = ChatContextUsage(
             estimatedInputTokens: estimate,
             reportedInputTokens: existing.reportedInputTokens,
@@ -2276,11 +2286,19 @@ final class ChatService {
         messages: [ChatModelMessage],
         tools: [ChatModelTool]
     ) -> Int {
-        ChatContextAccumulator.estimate(request: ChatModelRequest(
+        anchoredEstimate(systemPrompt: systemPrompt, messages: messages, tools: tools)
+            ?? ChatContextAccumulator.estimate(request: ChatModelRequest(
             systemPrompt: systemPrompt,
             messages: messages,
             tools: tools
         ))
+    }
+
+    private func anchoredEstimate(systemPrompt: String, messages: [ChatModelMessage], tools: [ChatModelTool]) -> Int? {
+        guard let selection = currentContextSelection else { return nil }
+        return currentUsageAnchor?.estimate(request: ChatModelRequest(
+            systemPrompt: systemPrompt, messages: messages, tools: tools
+        ), selection: selection)
     }
 
     private func effectiveMessages(
@@ -2465,7 +2483,7 @@ final class ChatService {
 
         var payload = ChatCheckpointPayload(
             conversationDecisions: Self.cleaned(semantic.conversationDecisions),
-            userConstraints: Self.cleaned(semantic.userConstraints),
+            userConstraints: Self.protectedConstraints((previous?.userConstraints ?? []) + semantic.userConstraints),
             goals: Self.cleaned(semantic.goals),
             unresolvedTasks: Self.cleaned(semantic.unresolvedTasks),
             toolOutcomes: Self.cleaned(semantic.toolOutcomes),
@@ -2486,6 +2504,10 @@ final class ChatService {
             maximumTokens: ChatCompactionSupport.checkpointTokenLimit(selectedLimit: selectedLimit)
         )
         guard payload.isStructurallyValid else { throw ChatError.invalidResponse }
+        guard ChatContextAccumulator.estimate(text: payload.promptText)
+                <= ChatCompactionSupport.checkpointTokenLimit(selectedLimit: selectedLimit) else {
+            throw ChatError.contextLimit("Important saved constraints do not fit this context budget. Select a larger budget or start a new conversation; existing history and constraints were preserved.")
+        }
         let checkpoint = ChatContextCheckpoint(
             payload: payload,
             estimatedTokens: ChatContextAccumulator.estimate(text: payload.promptText),
@@ -2670,6 +2692,12 @@ final class ChatService {
             .map { clipped($0) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .suffix(60))
+    }
+
+    private static func protectedConstraints(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        return values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
     }
 
     // MARK: - Tool Execution
