@@ -111,6 +111,19 @@ encrypted items; malformed/oversized summaries; failed saves; interrupted
 summarization; provider/model switch; changed prompts; approval denial retention;
 source retrieval after compaction; no duplicate writes after overflow recovery.
 
+### Native Responses compaction is an optional optimization
+
+OpenAI also documents `context_management` with `compact_threshold`, and the
+standalone `/responses/compact` endpoint. These return opaque compaction items;
+the standalone endpoint's returned window must be replayed intact. Server-side
+compaction can use `store: false`. [OpenAI compaction](https://developers.openai.com/api/docs/guides/compaction).
+
+OFJ should retain its portable checkpoint and original transcript as canonical
+state. A provider-specific compacted window could accelerate same-provider
+continuation, but cannot be the only saved representation if a user switches to
+Gemini, Anthropic, or a local model. The current capability flag is not an
+implementation of this API; adapters do not yet request native compaction.
+
 ## Completing work after leaving the app
 
 Today `OpenFoodJournalApp` invokes `suspendForBackgrounding`, which saves a draft
@@ -144,8 +157,11 @@ supports status retrieval and stream resumption. Persist response ID and stream
 cursor before disconnecting. Current OpenAI documentation describes temporary
 response storage for asynchronous retrieval, including account-specific retention
 rules. Azure documents background mode too and flags a streaming performance
-issue. Verify each deployment's behavior and retention separately; don't infer
-Azure policy from OpenAI's. [OpenAI background mode](https://developers.openai.com/api/docs/guides/background),
+issue and explicitly requires `store: true`. That conflicts with OFJ's current
+stateless Azure contract, so Azure background mode needs a deliberate opt-in
+storage-policy change rather than silently changing the payload. Verify each
+deployment's behavior and retention separately; don't infer Azure policy from
+OpenAI's. [OpenAI background mode](https://developers.openai.com/api/docs/guides/background),
 [Azure Responses](https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/responses).
 
 Provider-side generation does not execute OFJ's local journal/HealthKit tools
