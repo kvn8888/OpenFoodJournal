@@ -42,6 +42,11 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>$(PRODUCT_BUNDLE_IDENTIFIER).assistantCompletion.*</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

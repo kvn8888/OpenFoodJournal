@@ -135,6 +135,7 @@ struct ChatReliabilitySecurityTests {
             ])
         )
         run.pendingCallsPayload = try JSONEncoder().encode([pendingCall])
+        run.modelTurnID = pendingCall.modelTurnID // completed provider boundary
         run.thread = thread
         harness.context.insert(run)
         thread.agentRuns?.append(run)
@@ -214,6 +215,7 @@ struct ChatReliabilitySecurityTests {
             ])
         )
         run.pendingCallsPayload = try JSONEncoder().encode([pendingCall])
+        run.modelTurnID = pendingCall.modelTurnID // completed provider boundary
         run.thread = thread
         harness.context.insert(run)
         thread.agentRuns?.append(run)

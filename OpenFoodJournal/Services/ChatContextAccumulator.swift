@@ -106,21 +106,30 @@ nonisolated enum ChatContextAccumulator {
         checkpointText: String?,
         blocks: [ChatContextBlock],
         descriptor: ChatModelDescriptor,
-        budget: ChatContextBudget
+        budget: ChatContextBudget,
+        maximumInputTokens: Int? = nil,
+        inputTokenEstimate: Int? = nil
     ) -> ChatContextPlan {
-        let selectedLimit = budget.inputLimit(for: descriptor)
+        // A provider-overflow recovery can lower the limit for one attempt.
+        let selectedLimit = min(
+            budget.inputLimit(for: descriptor),
+            maximumInputTokens ?? Int.max
+        )
+        // Fixed floors apply only when they fit: a 4K model must not reserve
+        // more output/tool headroom than its entire window. Large windows
+        // (32K and above) keep the previous reserves exactly.
         let outputReserve = min(
             descriptor.capabilities.maximumOutputTokens,
-            max(2_048, selectedLimit / 10)
+            max(min(2_048, selectedLimit / 4), selectedLimit / 10)
         )
-        let toolLoopReserve = min(20_000, max(4_000, selectedLimit / 10))
-        let historyAdmissionLimit = max(4_096, selectedLimit - outputReserve - toolLoopReserve)
+        let toolLoopReserve = min(20_000, max(min(4_000, selectedLimit / 8), selectedLimit / 10))
+        let historyAdmissionLimit = max(0, selectedLimit - outputReserve - toolLoopReserve)
         let base = estimate(text: systemPrompt)
             + tools.reduce(0, { $0 + estimate(tool: $1) })
             + (checkpointText.map { estimate(text: $0) } ?? 0)
         let blockCosts = blocks.map(estimate(block:))
         let history = blockCosts.reduce(0, +)
-        let total = base + history
+        let total = inputTokenEstimate ?? (base + history)
         let trigger = Int(Double(selectedLimit) * 0.8)
 
         var compactThrough: Int?
@@ -173,6 +182,31 @@ nonisolated enum ChatContextAccumulator {
         }
     }
 
+    /// Encrypted reasoning and signatures are replayed verbatim, but their
+    /// ciphertext length says nothing about the provider's token count. Count
+    /// visible fields as text and each opaque blob as a fixed overhead; a real
+    /// provider overflow is handled by the one-shot recovery in ChatService.
+    static let opaqueValueTokens = 32
+    private static let opaqueKeys: Set<String> = [
+        "encrypted_content", "signature", "thought_signature", "thoughtSignature", "data",
+    ]
+
+    static func estimate(opaque value: JSONValue, key: String?) -> Int {
+        switch value {
+        case .string(let text):
+            if let key, opaqueKeys.contains(key) { return opaqueValueTokens }
+            return estimate(text: text)
+        case .number, .bool, .null:
+            return 1
+        case .array(let values):
+            return values.reduce(0) { $0 + estimate(opaque: $1, key: key) }
+        case .object(let object):
+            return object.reduce(0) { partial, entry in
+                partial + estimate(text: entry.key) + estimate(opaque: entry.value, key: entry.key)
+            }
+        }
+    }
+
     private static func estimate(tool: ChatModelTool) -> Int {
         12
             + estimate(text: tool.name)
@@ -194,7 +228,7 @@ nonisolated enum ChatContextAccumulator {
             }
             return 500 + attachment.data.count / charactersPerToken
         case .providerContinuation(let continuation):
-            return 8 + estimate(text: continuation.payload.jsonString)
+            return 8 + estimate(opaque: continuation.payload, key: nil)
         case .functionCall(let call):
             return 12 + estimate(text: call.name) + estimate(text: call.args.jsonString)
         case .functionResponse(let response):

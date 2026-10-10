@@ -21,6 +21,71 @@ private final class StubModelCatalogFetcher: ModelCatalogFetching {
 
 @MainActor
 struct RuntimeModelCatalogTests {
+    @Test func reportedUnknownModelNeverInheritsConfiguredModelPricesOrLimits() async throws {
+        let fixture = Self.catalogFixture
+        let catalog = RuntimeModelCatalog(fetcher: StubModelCatalogFetcher { request, _ in
+            (fixture, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, cacheURL: temporaryCacheURL())
+        #expect(await catalog.refreshIfNeeded())
+        let selection = AssistantModelSelection(
+            descriptor: ChatModelCatalog.azureDescriptor(model: .terra, deployment: "CaseSensitive-Production"),
+            endpoint: nil, routingMode: .automatic
+        )
+        let result = catalog.resolution(for: selection, resolvedModelID: "gpt-future-unknown")
+        #expect(result.selection.descriptor.baseModelID == "gpt-future-unknown")
+        #expect(result.selection.descriptor.deploymentIdentifier == "CaseSensitive-Production")
+        #expect(result.selection.descriptor.capabilities.maximumInputTokens == 50_000)
+        #expect(result.pricing == nil)
+        catalog.observeResolvedModel(provider: .azureOpenAI, requestedModelID: "CaseSensitive-Production", resolvedModelID: "gpt-future-unknown")
+        #expect(catalog.resolution(for: selection, resolvedModelID: nil).pricing == nil)
+    }
+
+    @Test func catalogLookupIsCaseInsensitiveButPreservesWireDeployment() async throws {
+        let fixture = Self.catalogFixture
+        let catalog = RuntimeModelCatalog(fetcher: StubModelCatalogFetcher { request, _ in
+            (fixture, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, cacheURL: temporaryCacheURL())
+        #expect(await catalog.refreshIfNeeded())
+        let selection = AssistantModelSelection(
+            descriptor: ChatModelCatalog.azureDescriptor(baseModelID: "GPT-5.6-Terra", deployment: "CaseSensitive-Production"),
+            endpoint: nil, routingMode: .automatic
+        )
+        let result = catalog.resolution(for: selection, resolvedModelID: nil)
+        #expect(result.selection.descriptor.baseModelID == "gpt-5.6-terra")
+        #expect(result.selection.descriptor.deploymentIdentifier == "CaseSensitive-Production")
+        #expect(result.pricing?.inputPerMillionUSD == 2.5)
+    }
+
+    @Test func customAzureSlugUsesRuntimeLimitsAndPricingWithoutChangingDeployment() async throws {
+        // Deliberately fictional model/rates: this tests catalog selection, not
+        // an assertion about a vendor's current price or token limit.
+        let fixture = #"""
+        {"azure":{"id":"azure","name":"Azure","models":{
+          "future-azure-fixture":{"id":"future-azure-fixture","name":"Fixture",
+            "attachment":true,"reasoning":true,"tool_call":true,
+            "modalities":{"input":["text","image","pdf"],"output":["text"]},
+            "limit":{"context":300000,"input":250000,"output":50000},
+            "cost":{"input":0.7,"output":1.4,"cache_read":0.07}}
+        }}}
+        """#.data(using: .utf8)!
+        let catalog = RuntimeModelCatalog(fetcher: StubModelCatalogFetcher { request, _ in
+            (fixture, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }, cacheURL: temporaryCacheURL())
+        #expect(await catalog.refreshIfNeeded())
+        let requested = AssistantModelSelection(
+            descriptor: ChatModelCatalog.azureDescriptor(baseModelID: "future-azure-fixture", deployment: "my-deployment"),
+            endpoint: URL(string: "https://sample.openai.azure.com/openai/v1"),
+            routingMode: .automatic
+        )
+        let result = catalog.resolution(for: requested, resolvedModelID: nil)
+        #expect(result.selection.descriptor.baseModelID == "future-azure-fixture")
+        #expect(result.selection.descriptor.deploymentIdentifier == "my-deployment")
+        #expect(result.selection.descriptor.capabilities.maximumInputTokens == 250_000)
+        #expect(result.selection.descriptor.capabilities.maximumOutputTokens == 50_000)
+        #expect(result.pricing?.inputPerMillionUSD == 0.7)
+        #expect(result.pricing?.outputPerMillionUSD == 1.4)
+    }
+
     @Test func refreshAppliesConcreteCapabilitiesPricingAndPersistsCache() async throws {
         let cacheURL = temporaryCacheURL()
         let endpoint = URL(string: "https://models.dev/api.json")!

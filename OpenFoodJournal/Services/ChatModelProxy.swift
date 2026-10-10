@@ -74,6 +74,7 @@ nonisolated struct ChatModelRequest: Equatable, Sendable {
     let systemPrompt: String
     let messages: [ChatModelMessage]
     let tools: [ChatModelTool]
+    var maximumOutputTokens: Int? = nil
 }
 
 nonisolated struct ChatTokenUsage: Equatable, Sendable {
@@ -957,6 +958,9 @@ final class GeminiChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                   let chunk = try? decoder.decode(GeminiStreamChunk.self, from: data)
             else { continue }
             onEvent(.providerEvent(kind: "gemini.chunk"))
+            if chunk.candidates?.contains(where: { $0.finishReason == "MAX_TOKENS" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let modelVersion = chunk.modelVersion, !modelVersion.isEmpty {
                 turn.resolvedModelID = modelVersion
             }
@@ -1062,7 +1066,10 @@ final class GeminiChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
         let body = GeminiChatRequest(
             systemInstruction: .init(parts: [GeminiPart(text: request.systemPrompt)]),
             contents: request.messages.map(Self.content),
-            tools: [GeminiToolDecl(functionDeclarations: declarations)]
+            tools: declarations.isEmpty ? nil : [GeminiToolDecl(functionDeclarations: declarations)],
+            generationConfig: request.maximumOutputTokens.map {
+                .init(maxOutputTokens: max(1, $0))
+            }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -1188,6 +1195,9 @@ final class OpenRouterChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                   let chunk = try? decoder.decode(ORStreamChunk.self, from: data)
             else { continue }
             onEvent(.providerEvent(kind: "openrouter.chunk"))
+            if chunk.choices?.contains(where: { $0.finishReason == "length" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let model = chunk.model, !model.isEmpty {
                 turn.resolvedModelID = model
             }
@@ -1302,7 +1312,8 @@ final class OpenRouterChatModelProxy: ChatModelProxy, ChatNativeWebSearching {
                 ))
             },
             provider: .from(routingMode),
-            streamOptions: .init(includeUsage: true)
+            streamOptions: .init(includeUsage: true),
+            maxCompletionTokens: request.maximumOutputTokens.map { max(1, $0) }
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
@@ -1551,6 +1562,9 @@ final class AnthropicChatModelProxy: ChatModelProxy {
                     ))
                 }
             case "message_delta":
+                if event["delta"]?["stop_reason"]?.stringValue == "max_tokens" {
+                    throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+                }
                 output = Int(event["usage"]?["output_tokens"]?.doubleValue ?? Double(output))
             case "error":
                 throw ChatError.serverError(
@@ -1580,7 +1594,7 @@ final class AnthropicChatModelProxy: ChatModelProxy {
             "model": .string(configuration.descriptor.deploymentIdentifier),
             "max_tokens": .number(Double(min(
                 max(1, configuration.descriptor.capabilities.maximumOutputTokens),
-                16_384
+                max(1, request.maximumOutputTokens ?? 16_384)
             ))),
             "system": .string(request.systemPrompt),
             "messages": .array(messages(for: request)),
@@ -1731,6 +1745,9 @@ final class MuseSparkChatModelProxy: ChatModelProxy {
             guard let data = payload.data(using: .utf8),
                   let chunk = try? decoder.decode(ORStreamChunk.self, from: data) else { continue }
             onEvent(.providerEvent(kind: "muse.chunk"))
+            if chunk.choices?.contains(where: { $0.finishReason == "length" }) == true {
+                throw ChatError.serverError(0, "The provider reached its output limit before finishing. Try a shorter request or a larger context budget.")
+            }
             if let model = chunk.model, !model.isEmpty { turn.resolvedModelID = model }
             if let usage = chunk.usage {
                 let normalized = ChatTokenUsage(
@@ -1887,6 +1904,8 @@ final class OpenAIResponsesChatModelProxy: ChatModelProxy, ChatNativeWebSearchin
                 }
             case "response.completed":
                 completedResponse = event["response"]
+            case "response.incomplete":
+                throw ChatError.serverError(0, "The provider stopped before finishing the response (for example, at its output limit). Try a shorter request or a larger context budget.")
             case "response.failed", "error":
                 let message = event["error"]?["message"]?.stringValue
                     ?? event["message"]?.stringValue
@@ -2024,6 +2043,9 @@ final class OpenAIResponsesChatModelProxy: ChatModelProxy, ChatNativeWebSearchin
         if request.tools.isEmpty {
             object.removeValue(forKey: "tools")
             object.removeValue(forKey: "parallel_tool_calls")
+        }
+        if let maximum = request.maximumOutputTokens {
+            object["max_output_tokens"] = .number(Double(max(1, min(maximum, descriptor.capabilities.maximumOutputTokens))))
         }
         return .object(object)
     }
@@ -2276,6 +2298,7 @@ private struct GeminiToolDecl: Encodable {
 }
 
 private struct GeminiChatRequest: Encodable {
+    struct GenerationConfig: Encodable { let maxOutputTokens: Int }
     struct SystemInstruction: Encodable {
         let parts: [GeminiPart]
     }
@@ -2283,6 +2306,7 @@ private struct GeminiChatRequest: Encodable {
     let systemInstruction: SystemInstruction
     let contents: [GeminiContent]
     var tools: [GeminiToolDecl]? = nil
+    var generationConfig: GenerationConfig? = nil
 }
 
 private struct GeminiStreamChunk: Decodable {
@@ -2299,6 +2323,7 @@ private struct GeminiStreamChunk: Decodable {
         }
 
         let content: Content?
+        let finishReason: String?
     }
 
     struct FunctionCallPayload: Decodable {
@@ -2467,6 +2492,7 @@ private struct ORChatRequest: Encodable {
     var provider: ORProviderPreferences? = nil
     var plugins: [ORPlugin]? = nil
     var streamOptions: StreamOptions? = nil
+    var maxCompletionTokens: Int? = nil
 
     struct StreamOptions: Encodable {
         let includeUsage: Bool
@@ -2479,6 +2505,7 @@ private struct ORChatRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case model, messages, stream, tools, provider, plugins
         case streamOptions = "stream_options"
+        case maxCompletionTokens = "max_completion_tokens"
     }
 }
 
@@ -2495,6 +2522,12 @@ private struct ORStreamChunk: Decodable {
         }
 
         let delta: Delta?
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
     }
 
     struct ToolCallDelta: Decodable {

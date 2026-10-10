@@ -148,22 +148,24 @@ final class RuntimeModelCatalog {
         resolvedModelID: String?
     ) -> ChatModelCatalogResolution {
         let requestedID = selection.descriptor.deploymentIdentifier
-        let normalizedResolved = normalizedModelID(
-            resolvedModelID ?? cachedResolution(
+        let observedModelID = resolvedModelID ?? cachedResolution(
                 provider: selection.provider,
                 requestedModelID: requestedID
-            ) ?? selection.descriptor.baseModelID
-        )
+            )
+        let normalizedResolved = normalizedModelID(observedModelID ?? selection.descriptor.baseModelID)
+        let modelChanged = normalizedResolved != normalizedModelID(selection.descriptor.baseModelID)
+        // A provider-reported model is authoritative. Never label one model
+        // with another model's limits or prices merely because the slug differs.
         let record = modelRecord(
             provider: selection.provider,
             modelID: normalizedResolved
-        ) ?? modelRecord(
+        ) ?? (modelChanged ? nil : modelRecord(
             provider: selection.provider,
             modelID: selection.descriptor.baseModelID
         ) ?? modelRecord(
             provider: selection.provider,
             modelID: requestedID
-        )
+        ))
         let effectiveModelID = record.map {
             normalizedModelID(
                 normalizedResolved == normalizedModelID(selection.descriptor.baseModelID)
@@ -174,7 +176,11 @@ final class RuntimeModelCatalog {
         let descriptor = descriptor(
             from: record,
             resolvedModelID: effectiveModelID,
-            fallback: selection.descriptor
+            fallback: modelChanged ? ChatModelCatalog.descriptor(
+                provider: selection.provider,
+                model: requestedID,
+                baseModelID: normalizedResolved
+            ) : selection.descriptor
         )
         let effectiveSelection = AssistantModelSelection(
             descriptor: descriptor,
@@ -301,7 +307,9 @@ final class RuntimeModelCatalog {
     }
 
     private func normalizedModelID(_ modelID: String) -> String {
-        var normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Catalog lookup normalization only; wire deployment/model values are
+        // preserved verbatim in AssistantModelSelection.
+        var normalized = modelID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalized.hasPrefix("models/") {
             normalized.removeFirst("models/".count)
         }

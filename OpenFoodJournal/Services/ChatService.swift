@@ -258,6 +258,11 @@ final class ChatService {
     @ObservationIgnored private var activeRunStartedTick: TimeInterval?
     @ObservationIgnored private var approvalStartedTick: TimeInterval?
     @ObservationIgnored private var accumulatedApprovalSeconds: TimeInterval = 0
+    @ObservationIgnored var backgroundExecution: ChatBackgroundExecution?
+    @ObservationIgnored private var applicationIsBackgrounded = false
+    @ObservationIgnored private var backgroundEventCount = 0
+    @ObservationIgnored private var currentUsageAnchor: ChatUsageAnchor?
+    @ObservationIgnored private var currentContextSelection: AssistantModelSelection?
     /// Exact provider-neutral input admitted for the latest model request.
     /// The transcript boundary lets the context meter add newly persisted
     /// output without re-admitting any older turns that were intentionally
@@ -266,6 +271,22 @@ final class ChatService {
     @ObservationIgnored private var latestPreparedTranscriptBoundaryID: UUID?
     @ObservationIgnored private var pendingReportedInputTokens: Int?
     @ObservationIgnored private var pendingReportedCachedInputTokens: Int?
+    /// Estimated input of the latest prepared request; a provider-overflow
+    /// recovery is retried only if preparation measurably shrinks it.
+    @ObservationIgnored private var lastPreparedInputEstimate: Int?
+    @ObservationIgnored private var overflowRecoveryInputLimit: Int?
+    /// Paid checkpoint summaries that failed recently, keyed by thread, model,
+    /// and starting boundary, so unchanged context is not billed repeatedly.
+    @ObservationIgnored private var failedSummaryAttempts: [String: Date] = [:]
+    /// Test seam for deterministic checkpoint persistence failures.
+    @ObservationIgnored var checkpointSaveHandler: ((ModelContext) throws -> Void)?
+    @ObservationIgnored var writeLedgerSaveHandler: ((ModelContext) throws -> Void)?
+    private(set) var queuedCompactionThreadIDs: Set<UUID> = []
+
+    func requestCompaction(in thread: ChatThread) {
+        guard !hasActiveRun else { return }
+        queuedCompactionThreadIDs.insert(thread.id)
+    }
 
     private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.default
@@ -858,6 +879,26 @@ final class ChatService {
         if permissionContinuation != nil { resolvePermission(.denied) }
     }
 
+    func applicationDidBecomeActive() { applicationIsBackgrounded = false }
+
+    func applicationDidEnterBackground() {
+        applicationIsBackgrounded = true
+        guard backgroundExecution?.canContinue == true, pendingPermission == nil else {
+            suspendForBackgrounding()
+            return
+        }
+        activeRun?.partialVisibleAnswer = streamingText
+        do { try modelContext.save() }
+        catch { suspendForBackgrounding() }
+    }
+
+    private func beginBackgroundExecution(for run: ChatAgentRun) {
+        guard !applicationIsBackgrounded else { return }
+        backgroundExecution?.begin(runID: run.id) { [weak self] in
+            self?.suspendForBackgrounding()
+        }
+    }
+
     /// Continues a thread whose prior run was interrupted by app termination
     /// or background eviction. SwiftData history remains the source of truth.
     func resumeInterruptedRun(in thread: ChatThread) async {
@@ -939,10 +980,13 @@ final class ChatService {
         run.setPhase(.preparing)
         run.requestStartedAt = run.requestStartedAt ?? Date()
         try? modelContext.save()
+        backgroundEventCount = 0
+        beginBackgroundExecution(for: run)
         let executionStartedAt = Date()
         let executionStartedTick = monotonicClock.now
         defer {
             let liveApproval = approvalStartedTick.map { max(0, monotonicClock.now - $0) } ?? 0
+            backgroundExecution?.finish(success: run.state == .completed)
             let activeDuration = max(
                 0,
                 monotonicClock.now - executionStartedTick - accumulatedApprovalSeconds - liveApproval
@@ -1011,6 +1055,15 @@ final class ChatService {
         var producedText = false
 
         do {
+            // Calls decoded from a partial stream are progress chips, not a
+            // safe provider boundary. Reopening must not execute them without
+            // the completed turn (including signatures/continuations).
+            if run.pendingCallsPayload != nil, run.modelTurnID == nil {
+                run.pendingCallsPayload = nil
+                run.pendingContinuationsPayload = nil
+                markUnfinishedTools(in: thread, runID: run.id, status: .interrupted)
+                try modelContext.save()
+            }
             if let pendingData = run.pendingCallsPayload,
                let calls = try? JSONDecoder().decode([ChatModelCall].self, from: pendingData),
                !calls.isEmpty {
@@ -1058,6 +1111,8 @@ final class ChatService {
                 run.updatedAt = Date()
                 streamingText = ""
                 run.partialVisibleAnswer = ""
+                run.modelTurnID = nil
+                try modelContext.save()
                 let turn = try await runTurn(config: config, systemPrompt: system, thread: thread)
                 try Task.checkCancellation()
                 run.modelTurnID = turn.calls.first?.modelTurnID
@@ -1358,6 +1413,7 @@ final class ChatService {
         if activeRunID == run.id {
             activePhase = phase
             activePhaseStartedAt = now
+            backgroundExecution?.update(phase: phase, completedEvents: backgroundEventCount)
         }
     }
 
@@ -1395,7 +1451,8 @@ final class ChatService {
             firstProviderEventMs: monitor.firstProviderEventMs,
             firstVisibleTextMs: monitor.firstVisibleTextMs,
             durationMs: durationMs,
-            outcome: "completed"
+            outcome: "completed",
+            contextUsageAnchor: currentUsageAnchor
         ))
         run.roundRecords = records
 
@@ -1539,6 +1596,9 @@ final class ChatService {
         thread: ChatThread
     ) async throws -> AgentTurn {
         var automaticRetries = 0
+        var attemptedOverflowRecovery = false
+        overflowRecoveryInputLimit = nil
+        defer { overflowRecoveryInputLimit = nil }
         currentModelRoundRetryCount = 0
         while true {
             do {
@@ -1549,6 +1609,17 @@ final class ChatService {
                 )
             } catch let error as ChatError {
                 let emittedOutput = lastRoundProviderEventCount > 0 || !streamingText.isEmpty
+                if !attemptedOverflowRecovery,
+                   !emittedOutput,
+                   isContextOverflow(error),
+                   let previousEstimate = lastPreparedInputEstimate {
+                    // One reduction attempt before any visible output or tool
+                    // call. Preparation rejects the retry unless it shrinks.
+                    attemptedOverflowRecovery = true
+                    overflowRecoveryInputLimit = max(1, previousEstimate * 7 / 10)
+                    activeRun?.retryReason = "context_overflow_recovery"
+                    continue
+                }
                 if case .serverError(let code, _) = error,
                    code == 429,
                    !emittedOutput,
@@ -1609,11 +1680,30 @@ final class ChatService {
         }
     }
 
+    /// Provider-reported context overflow. Matching is deliberately narrow:
+    /// other 400s (bad tools, auth, schema) must never trigger a reduction.
+    private func isContextOverflow(_ error: ChatError) -> Bool {
+        guard case .serverError(let code, let message) = error, code == 400 || code == 413 else {
+            return false
+        }
+        let lowered = message.lowercased()
+        return [
+            "context_length_exceeded",
+            "maximum context length",
+            "context window",
+            "prompt is too long",
+            "input is too long",
+            "exceeds the context",
+        ].contains { lowered.contains($0) }
+            || (lowered.contains("input token count") && lowered.contains("exceed"))
+    }
+
     private func streamTurn(
         selection: AssistantModelSelection,
-        systemPrompt: String,
+        systemPrompt baseSystemPrompt: String,
         thread: ChatThread
     ) async throws -> AgentTurn {
+        let systemPrompt = baseSystemPrompt + protectedAuthorizationContext(in: thread)
         modelCatalog?.refreshInBackgroundIfNeeded()
         let effectiveSelection = modelCatalog?
             .selectionResolvingRuntimeMetadata(selection) ?? selection
@@ -1632,7 +1722,11 @@ final class ChatService {
         let request = ChatModelRequest(
             systemPrompt: systemPrompt,
             messages: preparedMessages,
-            tools: tools
+            tools: tools,
+            maximumOutputTokens: min(effectiveSelection.descriptor.capabilities.maximumOutputTokens,
+                max(1, (contextUsage?.selectedLimit ?? 50_000)
+                    - (contextUsage?.estimatedInputTokens ?? 0)
+                    - (contextUsage?.reservedToolTokens ?? 0)))
         )
         guard let run = activeRun else { throw ChatError.cancelled }
         transition(to: .waitingForProvider, run: run)
@@ -1715,6 +1809,8 @@ final class ChatService {
         activeRun?.selectedContextLimit = contextUsage?.selectedLimit ?? 0
         activeRun?.providerRequestID = turn.providerRequestID
         if let usage = turn.usage {
+            currentContextSelection = catalogResolution.selection
+            currentUsageAnchor = ChatUsageAnchor(request: request, selection: catalogResolution.selection, usage: usage)
             pendingReportedInputTokens = usage.input
             pendingReportedCachedInputTokens = usage.cachedInput
             activeRun?.reportedInputTokens += usage.input
@@ -1748,6 +1844,7 @@ final class ChatService {
         thread: ChatThread,
         run: ChatAgentRun
     ) {
+        let previousCount = lastRoundProviderEventCount
         switch event {
         case .responseHeaders(_, let requestID, let retryAfter):
             run.providerRequestID = requestID ?? run.providerRequestID
@@ -1776,6 +1873,10 @@ final class ChatService {
             break
         case .encodingStarted, .requestEncoded, .completed:
             break
+        }
+        if lastRoundProviderEventCount > previousCount {
+            backgroundEventCount += 1
+            backgroundExecution?.update(phase: run.phase, completedEvents: backgroundEventCount)
         }
     }
 
@@ -1969,24 +2070,36 @@ final class ChatService {
         }
         contextWarning = nil
         let budget = contextBudgetProvider()
+        currentContextSelection = selection
+        currentUsageAnchor = (thread.agentRuns ?? [])
+            .sorted { $0.updatedAt > $1.updatedAt }
+            .flatMap { $0.roundRecords.reversed() }
+            .compactMap(\.contextUsageAnchor).first
         var checkpoint = latestValidCheckpoint(in: thread)
         var checkpointPayload = checkpoint?.decodedPayload
         var blocks = contextBlocks(
             for: thread,
             afterMessageID: checkpointPayload?.transcriptBoundaryMessageID
         )
+        let recoveryLimit = overflowRecoveryInputLimit
+        overflowRecoveryInputLimit = nil
         var plan = ChatContextAccumulator.plan(
             systemPrompt: systemPrompt,
             tools: tools,
             checkpointText: checkpointPayload?.promptText,
             blocks: blocks,
             descriptor: selection.descriptor,
-            budget: budget
+            budget: budget,
+            maximumInputTokens: recoveryLimit,
+            inputTokenEstimate: anchoredEstimate(systemPrompt: systemPrompt,
+                messages: effectiveMessages(checkpoint: checkpointPayload, blocks: blocks), tools: tools)
         )
         var compacted = false
         var usedDeterministicFallback = false
+        let requestedCompaction = queuedCompactionThreadIDs.remove(thread.id) != nil
+        let requestedBoundary: Int? = requestedCompaction && blocks.count > 1 ? blocks.count - 2 : nil
 
-        if let compactThrough = plan.compactThroughBlockIndex,
+        if let compactThrough = requestedBoundary ?? plan.compactThroughBlockIndex,
            compactThrough < blocks.count {
             let prefix = Array(blocks[...compactThrough])
             let created = try await createCheckpoint(
@@ -1994,6 +2107,7 @@ final class ChatService {
                 blocks: prefix,
                 selection: selection,
                 proxy: proxy,
+                selectedLimit: plan.selectedLimit,
                 in: thread
             )
             checkpoint = created.model
@@ -2011,30 +2125,69 @@ final class ChatService {
                 checkpointText: created.payload.promptText,
                 blocks: blocks,
                 descriptor: selection.descriptor,
-                budget: budget
+                budget: budget,
+                maximumInputTokens: recoveryLimit
             )
         }
 
-        var admittedBlocks = blocks
-        var effective = effectiveMessages(checkpoint: checkpointPayload, blocks: admittedBlocks)
-        var estimated = ChatContextAccumulator.estimate(request: ChatModelRequest(
-            systemPrompt: systemPrompt,
-            messages: effective,
-            tools: tools
-        ))
+        var effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+        var estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
         var contextLimited = false
 
-        // A malformed or unexpectedly large attachment can still leave a
-        // request above the admission budget. Drop only whole, closed turns.
-        while estimated > plan.historyAdmissionLimit, admittedBlocks.count > 1 {
-            admittedBlocks.removeFirst()
-            contextLimited = true
-            effective = effectiveMessages(checkpoint: checkpointPayload, blocks: admittedBlocks)
-            estimated = ChatContextAccumulator.estimate(request: ChatModelRequest(
-                systemPrompt: systemPrompt,
-                messages: effective,
-                tools: tools
-            ))
+        // Older closed turns that still do not fit are folded into the
+        // checkpoint instead of being dropped, so the model keeps a marked
+        // summary and their durable source IDs. The current exchange stays whole.
+        if estimated > plan.historyAdmissionLimit, blocks.count > 1 {
+            let baseTokens = estimatedInput(systemPrompt: systemPrompt, messages: [], tools: tools)
+            let checkpointAllowance = ChatCompactionSupport.checkpointTokenLimit(
+                selectedLimit: plan.selectedLimit
+            )
+            let costs = blocks.map(ChatContextAccumulator.estimate(block:))
+            var remaining = costs.reduce(0, +)
+            var foldCount = 0
+            while foldCount < blocks.count - 1,
+                  baseTokens + checkpointAllowance + remaining > plan.historyAdmissionLimit {
+                remaining -= costs[foldCount]
+                foldCount += 1
+            }
+            let created = try await createCheckpoint(
+                previous: checkpointPayload,
+                blocks: Array(blocks.prefix(max(1, foldCount))),
+                selection: selection,
+                proxy: proxy,
+                selectedLimit: plan.selectedLimit,
+                in: thread
+            )
+            checkpoint = created.model
+            checkpointPayload = created.payload
+            compacted = true
+            activeRun?.compactionCount += 1
+            usedDeterministicFallback = usedDeterministicFallback || created.wasDeterministicFallback
+            blocks = contextBlocks(
+                for: thread,
+                afterMessageID: created.payload.transcriptBoundaryMessageID
+            )
+            effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+            estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
+        }
+
+        // An enormous tool result in a retained exchange becomes a bounded
+        // projection that keeps its call ID; the transcript keeps the full
+        // result. User text and attachments are never silently truncated.
+        if estimated > plan.historyAdmissionLimit {
+            let perResultLimit = max(256, plan.historyAdmissionLimit / 8)
+            let projected = blocks.map {
+                ChatCompactionSupport.projectingOversizedToolResults(
+                    in: $0,
+                    maximumTokens: perResultLimit
+                )
+            }
+            if projected != blocks {
+                blocks = projected
+                contextLimited = true
+                effective = effectiveMessages(checkpoint: checkpointPayload, blocks: blocks)
+                estimated = estimatedInput(systemPrompt: systemPrompt, messages: effective, tools: tools)
+            }
         }
 
         guard estimated <= plan.selectedLimit,
@@ -2055,10 +2208,20 @@ final class ChatService {
             )
         }
 
+        if recoveryLimit != nil {
+            guard let previousEstimate = lastPreparedInputEstimate,
+                  estimated < previousEstimate else {
+                throw ChatError.contextLimit(
+                    "The provider reported that this conversation exceeds its context window, and it could not be reduced further. Start a new conversation or choose a model with a larger context."
+                )
+            }
+        }
+        lastPreparedInputEstimate = estimated
+
         if usedDeterministicFallback {
             contextWarning = "Context was compacted with a local fallback because the summary response could not be validated."
         } else if contextLimited {
-            contextWarning = "Some older closed turns were omitted to stay within the selected context limit."
+            contextWarning = "A very large tool result was shortened to fit the selected context limit; the complete result remains in this conversation."
         } else if checkpoint != nil {
             contextWarning = "Older turns are represented by a portable context checkpoint."
         }
@@ -2098,11 +2261,7 @@ final class ChatService {
         let tools = ChatToolRegistry.all.map {
             ChatModelTool(name: $0.name, description: $0.description, parameters: $0.parameters)
         }
-        let estimate = ChatContextAccumulator.estimate(request: ChatModelRequest(
-            systemPrompt: systemPrompt,
-            messages: currentMessages,
-            tools: tools
-        ))
+        let estimate = estimatedInput(systemPrompt: systemPrompt + protectedAuthorizationContext(in: thread), messages: currentMessages, tools: tools)
         contextUsage = ChatContextUsage(
             estimatedInputTokens: estimate,
             reportedInputTokens: existing.reportedInputTokens,
@@ -2145,6 +2304,26 @@ final class ChatService {
         )
         pendingReportedInputTokens = nil
         pendingReportedCachedInputTokens = nil
+    }
+
+    private func estimatedInput(
+        systemPrompt: String,
+        messages: [ChatModelMessage],
+        tools: [ChatModelTool]
+    ) -> Int {
+        anchoredEstimate(systemPrompt: systemPrompt, messages: messages, tools: tools)
+            ?? ChatContextAccumulator.estimate(request: ChatModelRequest(
+            systemPrompt: systemPrompt,
+            messages: messages,
+            tools: tools
+        ))
+    }
+
+    private func anchoredEstimate(systemPrompt: String, messages: [ChatModelMessage], tools: [ChatModelTool]) -> Int? {
+        guard let selection = currentContextSelection else { return nil }
+        return currentUsageAnchor?.estimate(request: ChatModelRequest(
+            systemPrompt: systemPrompt, messages: messages, tools: tools
+        ), selection: selection)
     }
 
     private func effectiveMessages(
@@ -2251,6 +2430,7 @@ final class ChatService {
         blocks: [ChatContextBlock],
         selection: AssistantModelSelection,
         proxy: any ChatModelProxy,
+        selectedLimit: Int,
         in thread: ChatThread
     ) async throws -> (
         model: ChatContextCheckpoint,
@@ -2262,44 +2442,73 @@ final class ChatService {
         }
         let sourceIDs = uniqueUUIDs((previous?.sourceIDs ?? []) + blocks.flatMap(\.sourceIDs))
         let attachmentIDs = uniqueUUIDs((previous?.attachmentIDs ?? []) + blocks.flatMap(\.attachmentIDs))
+        let failureKey = [
+            thread.id.uuidString,
+            selection.provider.rawValue,
+            selection.descriptor.deploymentIdentifier,
+            previous?.transcriptBoundaryMessageID.uuidString ?? "start",
+        ].joined(separator: "|")
+        var running = previous.map(Self.semantic(from:))
+        var unsummarized = blocks
         var fallback = false
-        let semantic: ChatCheckpointSemantic
 
-        do {
-            var summaryMessages: [ChatModelMessage] = []
-            if let previous {
-                summaryMessages.append(ChatModelMessage(role: .user, parts: [.text(previous.promptText)]))
-            }
-            summaryMessages.append(contentsOf: blocks.flatMap(\.messages))
-            let turn = try await proxy.streamTurn(
-                request: ChatModelRequest(
-                    systemPrompt: Self.checkpointSystemPrompt,
-                    messages: summaryMessages,
-                    tools: []
-                ),
-                onTextUpdate: { _ in }
-            )
-            guard turn.calls.isEmpty,
-                  let decoded = Self.decodeCheckpointSemantic(turn.text)
-            else { throw ChatError.invalidResponse }
-            semantic = decoded
-            recordUsage(
-                selection: selection,
-                usage: turn.usage,
-                grounded: false,
-                succeeded: true,
-                requestKind: "assistant_compaction"
-            )
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch {
+        if let failedAt = failedSummaryAttempts[failureKey],
+           Date().timeIntervalSince(failedAt) < ChatCompactionSupport.failedSummaryCooldown {
+            // The same starting point already failed recently: do not pay
+            // again for an unchanged prefix; condense it locally instead.
             fallback = true
-            semantic = deterministicCheckpoint(previous: previous, blocks: blocks)
+        } else if let summaryBudget = ChatCompactionSupport.summaryBudget(
+            selectedLimit: selectedLimit,
+            maximumOutputTokens: selection.descriptor.capabilities.maximumOutputTokens,
+            instructions: Self.checkpointSystemPrompt
+        ) {
+            var chunks = ChatCompactionSupport.chunks(blocks, inputTokens: summaryBudget.inputTokens)
+            let overflowCount = chunks.count - ChatCompactionSupport.maximumSummaryRequests
+            if overflowCount > 0 {
+                // Bound paid requests: the oldest chunks are condensed locally
+                // and the checkpoint is marked as incomplete evidence.
+                let overflowBlocks = chunks.prefix(overflowCount).flatMap(\.blocks)
+                running = deterministicCheckpoint(previous: running, blocks: overflowBlocks)
+                unsummarized.removeFirst(overflowBlocks.count)
+                chunks.removeFirst(overflowCount)
+                fallback = true
+            }
+            do {
+                for chunk in chunks {
+                    running = try await summarizeCheckpointChunk(
+                        chunk,
+                        previous: running,
+                        budget: summaryBudget,
+                        selection: selection,
+                        proxy: proxy
+                    )
+                    unsummarized.removeFirst(chunk.blocks.count)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                failedSummaryAttempts[failureKey] = Date()
+                fallback = true
+            }
+        } else {
+            fallback = true
+        }
+        if !unsummarized.isEmpty {
+            running = deterministicCheckpoint(previous: running, blocks: unsummarized)
+            fallback = true
+        }
+        guard var semantic = running else { throw ChatError.invalidResponse }
+        if fallback {
+            semantic = Self.markingIncompleteEvidence(
+                semantic,
+                startMessageID: blocks.first?.startMessageID ?? boundary.startMessageID,
+                boundaryMessageID: boundary.boundaryMessageID
+            )
         }
 
-        let payload = ChatCheckpointPayload(
+        var payload = ChatCheckpointPayload(
             conversationDecisions: Self.cleaned(semantic.conversationDecisions),
-            userConstraints: Self.cleaned(semantic.userConstraints),
+            userConstraints: Self.protectedConstraints((previous?.userConstraints ?? []) + semantic.userConstraints),
             goals: Self.cleaned(semantic.goals),
             unresolvedTasks: Self.cleaned(semantic.unresolvedTasks),
             toolOutcomes: Self.cleaned(semantic.toolOutcomes),
@@ -2315,7 +2524,15 @@ final class ChatService {
                 ?? thread.safeMessages.first?.timestamp
                 ?? blocks.first?.startTimestamp
         )
+        payload = ChatCompactionSupport.fitted(
+            payload,
+            maximumTokens: ChatCompactionSupport.checkpointTokenLimit(selectedLimit: selectedLimit)
+        )
         guard payload.isStructurallyValid else { throw ChatError.invalidResponse }
+        guard ChatContextAccumulator.estimate(text: payload.promptText)
+                <= ChatCompactionSupport.checkpointTokenLimit(selectedLimit: selectedLimit) else {
+            throw ChatError.contextLimit("Important saved constraints do not fit this context budget. Select a larger budget or start a new conversation; existing history and constraints were preserved.")
+        }
         let checkpoint = ChatContextCheckpoint(
             payload: payload,
             estimatedTokens: ChatContextAccumulator.estimate(text: payload.promptText),
@@ -2326,12 +2543,120 @@ final class ChatService {
         checkpoint.thread = thread
         modelContext.insert(checkpoint)
         thread.contextCheckpoints?.append(checkpoint)
-        try? modelContext.save()
+        do {
+            if let checkpointSaveHandler {
+                try checkpointSaveHandler(modelContext)
+            } else {
+                try modelContext.save()
+            }
+        } catch {
+            // Withdraw only this attempt's checkpoint. Unrelated pending edits
+            // stay in the shared context and the previous boundary stays active.
+            failedSummaryAttempts[failureKey] = Date()
+            thread.contextCheckpoints?.removeAll { $0.id == checkpoint.id }
+            modelContext.delete(checkpoint)
+            throw ChatError.contextLimit(
+                "Older conversation context could not be saved as a checkpoint, so nothing was compacted. Try again."
+            )
+        }
         return (checkpoint, payload, fallback)
     }
 
+    /// Summarizes one bounded chunk of portable text, folding it into the
+    /// running checkpoint. No tools, provider continuations, or raw bytes.
+    private func summarizeCheckpointChunk(
+        _ chunk: ChatSummaryChunk,
+        previous: ChatCheckpointSemantic?,
+        budget: ChatSummaryBudget,
+        selection: AssistantModelSelection,
+        proxy: any ChatModelProxy
+    ) async throws -> ChatCheckpointSemantic {
+        var prompt = ""
+        if let previous,
+           let data = try? JSONEncoder().encode(previous),
+           let json = String(data: data, encoding: .utf8) {
+            prompt += "Existing checkpoint JSON. Update it with the exchanges below and keep items that still matter:\n"
+                + ChatCompactionSupport.fitted(json, tokens: budget.checkpointTokens)
+                + "\n\n"
+        }
+        prompt += "Keep the whole JSON response under about \(budget.outputTokens) tokens.\n\n"
+            + "Conversation exchanges to fold into the checkpoint:\n"
+            + chunk.text
+        try enforceActiveRunDeadline()
+        let summaryRequest = ChatModelRequest(
+            systemPrompt: Self.checkpointSystemPrompt,
+            messages: [ChatModelMessage(role: .user, parts: [.text(prompt)])],
+            tools: [],
+            maximumOutputTokens: budget.outputTokens
+        )
+        let seconds = min(deadlinePolicy.modelTurn, remainingActiveRunTime())
+        let turn = try await withThrowingTaskGroup(of: ChatModelTurn.self) { group in
+            group.addTask { @MainActor in
+                try await proxy.streamTurn(request: summaryRequest, onTextUpdate: { _ in })
+            }
+            group.addTask { @MainActor [monotonicClock] in
+                try await monotonicClock.sleep(for: seconds)
+                throw ChatError.timeout(step: "context_compaction", seconds: seconds)
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw ChatError.emptyResponse }
+            return first
+        }
+        let decoded = turn.calls.isEmpty ? Self.decodeCheckpointSemantic(turn.text) : nil
+        recordUsage(
+            selection: selection,
+            usage: turn.usage,
+            grounded: false,
+            succeeded: decoded != nil,
+            requestKind: "assistant_compaction"
+        )
+        // No-progress guard: a summary at least as large as its input cannot
+        // reduce context and would only trigger another paid attempt.
+        guard let decoded,
+              ChatContextAccumulator.estimate(text: turn.text)
+                < ChatContextAccumulator.estimate(text: prompt)
+        else { throw ChatError.invalidResponse }
+        return ChatCheckpointSemantic(
+            conversationDecisions: decoded.conversationDecisions,
+            userConstraints: Self.protectedConstraints((previous?.userConstraints ?? []) + decoded.userConstraints),
+            goals: decoded.goals,
+            unresolvedTasks: decoded.unresolvedTasks,
+            toolOutcomes: decoded.toolOutcomes,
+            journalFacts: decoded.journalFacts
+        )
+    }
+
+    private static func semantic(from payload: ChatCheckpointPayload) -> ChatCheckpointSemantic {
+        ChatCheckpointSemantic(
+            conversationDecisions: payload.conversationDecisions,
+            userConstraints: payload.userConstraints,
+            goals: payload.goals,
+            unresolvedTasks: payload.unresolvedTasks,
+            toolOutcomes: payload.toolOutcomes,
+            journalFacts: payload.journalFacts
+        )
+    }
+
+    /// A local fallback is lossy. Say so in the checkpoint itself and point
+    /// the model at evidence it can actually reread (source IDs).
+    private static func markingIncompleteEvidence(
+        _ semantic: ChatCheckpointSemantic,
+        startMessageID: UUID,
+        boundaryMessageID: UUID
+    ) -> ChatCheckpointSemantic {
+        let note = "Evidence incomplete: messages \(startMessageID.uuidString) through \(boundaryMessageID.uuidString) were condensed locally without a validated model summary. Original text is stored in the app but is not directly retrievable by you. Only listed source IDs can be reopened with read_conversation_source; use read tools again for current journal facts and ask the user to restate missing instructions."
+        return ChatCheckpointSemantic(
+            conversationDecisions: semantic.conversationDecisions,
+            userConstraints: semantic.userConstraints,
+            goals: semantic.goals,
+            unresolvedTasks: semantic.unresolvedTasks + [note],
+            toolOutcomes: semantic.toolOutcomes,
+            journalFacts: semantic.journalFacts
+        )
+    }
+
     private func deterministicCheckpoint(
-        previous: ChatCheckpointPayload?,
+        previous: ChatCheckpointSemantic?,
         blocks: [ChatContextBlock]
     ) -> ChatCheckpointSemantic {
         var decisions = previous?.conversationDecisions ?? []
@@ -2348,7 +2673,9 @@ final class ChatService {
                     let value = Self.clipped(text)
                     guard !value.isEmpty else { continue }
                     if message.role == .user {
-                        constraints.append("User said: \(value)")
+                        // Ordinary conversation isn't automatically a permanent
+                        // rule. Preserve prior constraints separately.
+                        decisions.append("User said: \(value)")
                         unresolved = ["Continue from the latest user request: \(value)"]
                     } else {
                         decisions.append("Assistant said: \(value)")
@@ -2370,7 +2697,7 @@ final class ChatService {
         }
         return ChatCheckpointSemantic(
             conversationDecisions: Self.cleaned(decisions),
-            userConstraints: Self.cleaned(constraints),
+            userConstraints: Self.protectedConstraints(constraints),
             goals: Self.cleaned(goals),
             unresolvedTasks: Self.cleaned(unresolved),
             toolOutcomes: Self.cleaned(outcomes),
@@ -2411,6 +2738,25 @@ final class ChatService {
             .map { clipped($0) }
             .filter { !$0.isEmpty && seen.insert($0).inserted }
             .suffix(60))
+    }
+
+    private static func protectedConstraints(_ values: [String]) -> [String] {
+        var seen: Set<String> = []
+        return values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// Durable approval outcomes are facts about past calls, not permission to
+    /// repeat them. Rebuild this from the ledger, outside any lossy summary.
+    private func protectedAuthorizationContext(in thread: ChatThread) -> String {
+        let records = (thread.writeExecutions ?? []).sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        guard !records.isEmpty else { return "" }
+        return "\n\nRecorded action outcomes (historical; every new write still requires approval):\n"
+            + records.map { "\($0.toolName) call \($0.providerCallID): \($0.status.rawValue), approval \($0.approvalState ?? "not recorded")." }
+                .joined(separator: "\n")
     }
 
     // MARK: - Tool Execution
@@ -2666,6 +3012,8 @@ final class ChatService {
                 return item
             }()
 
+            // A write cannot start unless its recovery record is durable.
+            try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
             if let cached = cachedWriteOutcome(from: ledger) {
                 return record(cached)
             }
@@ -2691,7 +3039,15 @@ final class ChatService {
             agentRun.approvalState = "pending:\(call.callID)"
             ledger.status = .awaitingApproval
             ledger.approvalState = nil
-            try? modelContext.save()
+            try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
+            // Human approval can take arbitrarily long. Release OS execution
+            // while waiting; backgrounding preserves a pending action for Continue.
+            backgroundExecution?.update(phase: .awaitingApproval, completedEvents: backgroundEventCount)
+            backgroundExecution?.finish(success: false)
+            if applicationIsBackgrounded {
+                suspendForBackgrounding()
+                try Task.checkCancellation()
+            }
             let decision: ChatPermissionDecision
             let approvalStartedAt = Date()
             approvalStartedTick = monotonicClock.now
@@ -2718,7 +3074,7 @@ final class ChatService {
                     startedAt: approvalStartedAt,
                     endedAt: Date(),
                     durationMs: Int(approvalDuration * 1_000),
-                    outcome: Self.approvalOutcome(decision),
+                    outcome: Task.isCancelled ? "interrupted" : Self.approvalOutcome(decision),
                     providerRequestID: providerRequestID
                 ))
                 self.approvalStartedTick = nil
@@ -2739,7 +3095,7 @@ final class ChatService {
                 ledger.resultJSON = outcome.result.jsonString
                 agentRun.state = .running
                 agentRun.approvalState = "denied:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
                 return record(outcome)
             case .calculatorSaved(let id, let name, let count):
                 let outcome = ToolOutcome(result: .object([
@@ -2753,16 +3109,17 @@ final class ChatService {
                 ledger.resultJSON = outcome.result.jsonString
                 agentRun.state = .running
                 agentRun.approvalState = "approved:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
                 return record(outcome)
             case .approved:
+                beginBackgroundExecution(for: agentRun)
                 ledger.approvalState = "approved"
                 ledger.status = .executing
                 agentRun.state = .running
                 transition(to: .executingTools, run: agentRun)
                 updateToolActivity(call, status: .running, run: agentRun, in: thread)
                 agentRun.approvalState = "approved:\(call.callID)"
-                try? modelContext.save()
+                try (writeLedgerSaveHandler ?? { try $0.save() })(modelContext)
             }
 
             do {
@@ -3108,6 +3465,9 @@ final class ChatService {
     }
 
     private func getActiveEnergy(_ args: JSONValue) async -> ToolOutcome {
+        guard !applicationIsBackgrounded || UIApplication.shared.isProtectedDataAvailable else {
+            return ToolOutcome(result: .object(["error": .string("Apple Health is unavailable while the device is locked. Ask the user to unlock and continue; this is not zero activity.")]), status: .failed)
+        }
         let date = Self.parseDay(args["date"]?.stringValue) ?? Date()
         let energy = await healthKitService.fetchActiveEnergy(for: date)
         return ToolOutcome(result: .object([
@@ -3142,11 +3502,16 @@ final class ChatService {
             }
         ))
         if args["include_active_energy"]?.boolValue == true {
-            let energy = await healthKitService.fetchActiveEnergy(for: date)
-            result["active_energy"] = .object([
-                "kcal": .number(energy.rounded()),
-                "source": .string("Apple Health"),
-            ])
+            if applicationIsBackgrounded && !UIApplication.shared.isProtectedDataAvailable {
+                result["active_energy"] = .null
+                result["active_energy_error"] = .string("Unlock the device to read Apple Health. Energy is unavailable, not zero.")
+            } else {
+                let energy = await healthKitService.fetchActiveEnergy(for: date)
+                result["active_energy"] = .object([
+                    "kcal": .number(energy.rounded()),
+                    "source": .string("Apple Health"),
+                ])
+            }
         }
         return ToolOutcome(result: .object(result))
     }
@@ -4139,27 +4504,19 @@ final class ChatService {
             } else {
                 selectedModel = AIProviderSettings.azureDefaultModel(in: defaults)
             }
-            let primaryDeployment = AIProviderSettings.azureDeployment(for: selectedModel, in: defaults)
             let terraDeployment = AIProviderSettings.azureDeployment(for: .terra, in: defaults)
             let fallbackModel: AzureAssistantModel = terraDeployment.isEmpty ? selectedModel : .terra
-            let fallbackDeployment = terraDeployment.isEmpty ? primaryDeployment : terraDeployment
             let endpoint = try? AzureOpenAIEndpoint.normalizedBaseURL(
                 from: AIProviderSettings.azureEndpoint(in: defaults)
             )
             return ChatRequestConfig(
                 primary: AssistantModelSelection(
-                    descriptor: ChatModelCatalog.azureDescriptor(
-                        model: selectedModel,
-                        deployment: primaryDeployment
-                    ),
+                    descriptor: AIProviderSettings.azureDescriptor(for: selectedModel, in: defaults),
                     endpoint: endpoint,
                     routingMode: .automatic
                 ),
                 fallback: AssistantModelSelection(
-                    descriptor: ChatModelCatalog.azureDescriptor(
-                        model: fallbackModel,
-                        deployment: fallbackDeployment
-                    ),
+                    descriptor: AIProviderSettings.azureDescriptor(for: fallbackModel, in: defaults),
                     endpoint: endpoint,
                     routingMode: .automatic
                 )

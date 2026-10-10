@@ -914,6 +914,7 @@ private struct ScopedChatTranscript: View {
 
 private struct ChatResponseInfoView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(ChatService.self) private var chatService
     let message: ChatMessage
     let run: ChatAgentRun?
     let contextUsage: ChatContextUsage?
@@ -926,7 +927,17 @@ private struct ChatResponseInfoView: View {
                 infoRow("Provider", message.providerID ?? run?.providerID ?? "Unknown")
                 infoRow("Model", message.modelID ?? run?.modelID ?? "Unknown")
                 if let baseModel = run?.baseModelID, baseModel != run?.modelID {
-                    infoRow("Resolved model", baseModel)
+                    infoRow("Configured model", baseModel)
+                }
+                if let reported = run?.roundRecords.last?.baseModelID {
+                    infoRow("Reported model", reported)
+                    if run?.providerID == AssistantProvider.azureOpenAI.rawValue,
+                       let configured = run?.baseModelID,
+                       configured.lowercased() != reported.lowercased() {
+                        Text("Azure reported a different model from the configured slug. Limits and pricing use the reported model when known; otherwise the app uses a conservative limit and shows usage only.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if let requestID = message.providerRequestID ?? run?.providerRequestID {
                     infoRow("Request ID", requestID)
@@ -965,6 +976,13 @@ private struct ChatResponseInfoView: View {
             }
 
             Section("Context Window") {
+                if let thread = message.thread {
+                    Button(chatService.queuedCompactionThreadIDs.contains(thread.id)
+                           ? "Compaction queued for next message" : "Compact on next message") {
+                        chatService.requestCompaction(in: thread)
+                    }
+                    .disabled(chatService.hasActiveRun || chatService.queuedCompactionThreadIDs.contains(thread.id))
+                }
                 if let usage = contextUsage {
                     infoRow("Next request estimate", "~\(compactTokens(usage.displayedTokens))")
                     infoRow("Selected limit", compactTokens(usage.selectedLimit))

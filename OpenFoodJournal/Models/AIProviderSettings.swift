@@ -240,6 +240,8 @@ enum TavilySearchDepth: String, CaseIterable, Identifiable, Codable, Sendable {
 }
 
 enum AzureAssistantModel: String, CaseIterable, Identifiable, Codable, Sendable {
+    // These raw values identify legacy settings slots, not a model allowlist.
+    // Keep them stable so existing default selections and deployments survive.
     case sol = "gpt-5.6-sol"
     case terra = "gpt-5.6-terra"
 
@@ -247,8 +249,8 @@ enum AzureAssistantModel: String, CaseIterable, Identifiable, Codable, Sendable 
 
     var displayName: String {
         switch self {
-        case .sol: "GPT-5.6 Sol"
-        case .terra: "GPT-5.6 Terra"
+        case .sol: "Smart"
+        case .terra: "Fast"
         }
     }
 }
@@ -341,8 +343,8 @@ enum ChatModelCatalog {
             return azureDescriptor(model: azureModel, deployment: model)
         }
         if provider == .openAI,
-           let model = OpenAIAssistantModel(rawValue: base) {
-            return openAIDescriptor(model: model, deployment: model.rawValue)
+           let knownModel = OpenAIAssistantModel(rawValue: base) {
+            return openAIDescriptor(model: knownModel, deployment: model)
         }
         let capabilities: ChatModelCapabilities
         if provider == .anthropic || provider == .museSpark || provider == .openAICompatible {
@@ -364,7 +366,7 @@ enum ChatModelCatalog {
             provider: provider,
             baseModelID: base,
             deploymentIdentifier: model,
-            displayName: model,
+            displayName: base,
             capabilities: capabilities,
             lastVerifiedAt: "2026-07-20"
         )
@@ -395,6 +397,15 @@ enum ChatModelCatalog {
     }
 
     static func azureDescriptor(
+        baseModelID: String,
+        deployment: String
+    ) -> ChatModelDescriptor {
+        // The slug identifies capabilities/pricing; only the deployment goes
+        // into the Azure request. Never infer a base model from its deployment.
+        descriptor(provider: .azureOpenAI, model: deployment, baseModelID: baseModelID)
+    }
+
+    static func azureDescriptor(
         model: AzureAssistantModel,
         deployment: String
     ) -> ChatModelDescriptor {
@@ -402,7 +413,7 @@ enum ChatModelCatalog {
             provider: .azureOpenAI,
             baseModelID: model.rawValue,
             deploymentIdentifier: deployment,
-            displayName: model.displayName,
+            displayName: model.rawValue,
             capabilities: ChatModelCapabilities(
                 maximumInputTokens: 922_000,
                 maximumOutputTokens: 128_000,
@@ -534,6 +545,9 @@ enum AzureOpenAIEndpoint {
         ".openai.azure.com",
         ".openai.azure.us",
         ".openai.azure.cn",
+        // Foundry's documented OpenAI v1 resource endpoint also supports Responses.
+        // https://learn.microsoft.com/en-us/azure/ai-studio/ai-services/concepts/endpoints
+        ".services.ai.azure.com",
     ]
 
     static func normalizedBaseURL(from rawValue: String) throws -> URL {
@@ -687,6 +701,8 @@ enum AIProviderSettings {
     static let azureSolDeploymentKey = "assistant.azure.solDeployment"
     static let azureTerraDeploymentKey = "assistant.azure.terraDeployment"
     static let azureDefaultModelKey = "assistant.azure.defaultModel"
+    static let azureSmartModelKey = "assistant.azure.smartModel"
+    static let azureFastModelKey = "assistant.azure.fastModel"
     static let openAIFastModelKey = "assistant.openai.fastModel"
     static let openAISmartModelKey = "assistant.openai.smartModel"
     static let anthropicFastModelKey = "assistant.anthropic.fastModel"
@@ -749,6 +765,24 @@ enum AIProviderSettings {
               let model = AzureAssistantModel(rawValue: raw)
         else { return defaultAzureModel }
         return model
+    }
+
+    static func azureBaseModelID(
+        for slot: AzureAssistantModel,
+        in defaults: UserDefaults = .standard
+    ) -> String {
+        let key = slot == .sol ? azureSmartModelKey : azureFastModelKey
+        return trimmed(defaults.string(forKey: key), fallback: slot.rawValue)
+    }
+
+    static func azureDescriptor(
+        for slot: AzureAssistantModel,
+        in defaults: UserDefaults = .standard
+    ) -> ChatModelDescriptor {
+        ChatModelCatalog.azureDescriptor(
+            baseModelID: azureBaseModelID(for: slot, in: defaults),
+            deployment: azureDeployment(for: slot, in: defaults)
+        )
     }
 
     static func openAIFastModel(in defaults: UserDefaults = .standard) -> String {
