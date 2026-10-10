@@ -30,8 +30,8 @@ final class ChatBackgroundExecution {
     @ObservationIgnored private var handle: (any ChatBackgroundTaskHandling)?
     @ObservationIgnored private var completedEvents = 0
 
-    init(scheduler: any ChatBackgroundScheduling = AppleChatBackgroundScheduler()) {
-        self.scheduler = scheduler
+    init(scheduler: (any ChatBackgroundScheduling)? = nil) {
+        self.scheduler = scheduler ?? AppleChatBackgroundScheduler()
     }
 
     var canContinue: Bool { state == .active && handle != nil }
