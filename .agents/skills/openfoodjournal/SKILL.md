@@ -91,10 +91,30 @@ See [references/services.md](references/services.md) for full API contracts.
 - New slugs are included in JSON backup/import with legacy decoding defaults.
   Five offline regressions and an opt-in custom Azure tool round-trip test cover
   routing, migration, and endpoint validation. Full execution is a hosted CI gate.
-- `docs/assistant-context-background-research.md` records the compression and
-  background completion investigation. Those recommendations are not implemented:
-  the app still suspends/cancels on backgrounding. A plain ActivityKit view is
-  not an execution grant; evaluate `BGContinuedProcessingTask` separately.
+- The 2026-10-10 Assistant hardening branch implements portable bounded summary
+  chunks, checkpoint-save failure handling, same-boundary failure cooldowns,
+  output caps, and one pre-output overflow recovery. Full transcript/attachments
+  remain stored. Fallback text is explicitly incomplete evidence, not a claim
+  that arbitrary transcript text can be retrieved through the source tool.
+- Usage anchors store hashes/counts inside existing per-round JSON, not raw
+  content or new CloudKit fields. Prefix/provider/model/system/tool changes
+  invalidate them. The estimate uses reported input plus estimated appended
+  content and conservative output headroom; it is not an exact tokenizer count.
+- Known checkpoint constraints are not silently discarded; unfit constraints
+  fail clearly. Ordinary user messages are not promoted to permanent constraints
+  by the deterministic fallback. Approval outcomes remain ledger-backed and
+  write execution requires a successful ledger save.
+- `ChatBackgroundExecution` uses iOS 26 continued-processing admission and system
+  Live Activity UI with indeterminate progress and factual phases. No fake
+  percentage, app-owned Widget extension, server, or provider-retention change.
+  If admission fails or expires, snapshot and suspend. Release execution while
+  awaiting approval; continue only after an explicit user decision. Force-quit
+  is not a completion guarantee. Device behavior still needs manual beta smoke.
+- Only a completed provider turn is a resumable tool-execution boundary. A
+  streamed partial call is a chip, never authority to execute after relaunch.
+- A manual Info action queues compaction for the next message, without issuing
+  an immediate billable request. Apple Intelligence remains research-only.
+  See `docs/assistant-hardening-release.md` and PR #98 for release verification.
 
 - **`NutritionStore`** — SwiftData CRUD and the canonical journal-mutation boundary. `log()`, `saveEntry()`, `moveEntry()`, and entry/log deletion persist SwiftData first, then automatically schedule the matching idempotent HealthKit sync/delete through an injected `NutritionEntryHealthSyncing` adapter when Apple Health export is enabled. Views, Assistant tools, and future entry-writing surfaces must not call HealthKit separately. `entriesNeedingHealthSync()` drives launch/foreground reconciliation and Settings backfill so interrupted or older-build writes heal from SwiftData. Also provides `fetchLog()`, `fetchLogs()`, `repairDailyLogEntryRelationships()`, `exportCSV()`, `exportBackup()`, and `importBackup()`. CSV is spreadsheet/analytics only. Restore-grade backup uses versioned JSON DTOs in `OpenFoodJournalBackup.swift` and imports idempotently by UUID. Local/iCloud remain source of truth; successful saves schedule the optional Turso mirror when enabled.
 - **`ScanService`** — Accepts 1-4 photos for label and food-photo scans. Resizes each image to max 1200px (UIGraphicsImageRenderer), encodes label JPEGs at 0.50 and food-photo JPEGs at 0.80, then sends each photo to the selected AI provider and returns a reviewable `NutritionEntry` (not yet inserted). Direct Gemini uses streamed Interactions SSE (`generativelanguage.googleapis.com/v1beta/interactions`) with `generation_config.thinking_summaries = "auto"` so `step.delta` events with `delta.type == "thought_summary"` update `thinkingTrace`; `delta.type == "text"` is accumulated as final nutrition JSON. OpenRouter uses streamed OpenAI-compatible chat completions (`openrouter.ai/api/v1/chat/completions`) with base64 image content parts, JSON response format, app attribution headers, optional `plugins: [{"id":"web"}]` for AI Search, and optional provider routing to prefer/require `google-vertex`. OpenRouter does not currently drive the Gemini thought-summary UI; it shows a neutral provider wait state and logs stream timing. Gemini may emit only one late thought-summary event for a request; do not fake streaming by delaying the final nutrition sheet just to display that late summary. Also supports Food Bank AI Search, nutrition-calculator OCR import via `extractCalculatorIngredient(named:from:useProModel:)`, sequential Food Bank emoji backfill via `backfillMissingFoodEmojis()`, and direct Gemini Flash Lite image icon generation via `backfillMissingFoodIconImages()` / `generateFoodIconImage(for:force:)`. Direct Gemini uses `gemini-flash-latest` for label/lite/emoji work and `gemini-pro-latest` for Pro food photo scans/search; do not replace these with concrete preview/versioned model slugs unless Google removes the latest endpoints. The icon image endpoint is the concrete `models/gemini-3.1-flash-lite-image` Interactions image model. Its thinking level is a model-specific typed enum (`minimal`/`high`) and production uses `high`; `low` is invalid for this model and must never be copied from text-model configuration. Image output uses top-level polymorphic `response_format`, not legacy `generation_config.image_config` or `response_modalities`. OpenRouter model slugs are runtime-editable in Settings and default to the analogous Google latest aliases. User reviews in `ScanResultCard`, `ManualEntryView`, or `NutritionCalculatorEditorView` before committing. Logs scan/search/OCR/emoji/icon duration via `ContinuousClock`, stores standard scan durations on `NutritionEntry.scanDurationMs`, emits redacted `AIDiagnosticEvent` telemetry to the configured Turso sink, and keeps `GeminiCostAccumulator` usage/cost totals in SwiftData. Stores `lastSubmittedScan` for scan-page/result-sheet redo without recapturing photos.
