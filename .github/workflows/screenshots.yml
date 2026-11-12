@@ -26,6 +26,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
       - name: Time a clean device build
+        shell: bash
         run: |
           /usr/bin/time -p xcodebuild \
             -project OpenFoodJournal.xcodeproj \
@@ -33,6 +34,8 @@ jobs:
             -configuration Debug \
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/HostedBuildTiming" \
+            -resultBundlePath "$RUNNER_TEMP/HostedBuildTiming.xcresult" \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/hosted-build-timing.log"
           /usr/libexec/PlistBuddy -c 'Print :DTSDKName' "$RUNNER_TEMP/HostedBuildTiming/Build/Products/Debug-iphoneos/OpenFoodJournal.app/Info.plist"
-          rg '^real ' "$RUNNER_TEMP/hosted-build-timing.log" >> "$GITHUB_STEP_SUMMARY"
+          grep '^real ' "$RUNNER_TEMP/hosted-build-timing.log" >> "$GITHUB_STEP_SUMMARY"
+          xcrun xcresulttool get build-results --path "$RUNNER_TEMP/HostedBuildTiming.xcresult" | jq -c '{status,startTime,endTime,buildSeconds:(.endTime - .startTime)}' | tee -a "$GITHUB_STEP_SUMMARY"
