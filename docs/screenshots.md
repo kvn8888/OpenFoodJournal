@@ -1,6 +1,6 @@
 # Optional screenshot gallery
 
-`Generate Screenshots` builds the real app for an iPhone simulator, visits selected
+`Generate Screenshots` builds the real app for an iPhone or iPad simulator, visits selected
 screens, and exports PNGs, an offline HTML gallery, and a source/size/hash manifest.
 It has no deployment secrets and never archives, uploads to TestFlight, or changes
 release state. It is not a required release check.
@@ -26,11 +26,15 @@ Inputs are:
 | --- | --- | --- |
 | Screens | `all` or a comma-separated subset of `journal,scan,food-bank,log-food,history,assistant,settings` | `all` |
 | Appearance | `both`, `light`, `dark` | `both` |
-| Device | `iPhone 17 Pro`, `iPhone 17 Pro Max` | `iPhone 17 Pro` |
+| Device | `iPhone 17 Pro`, `iPhone 17 Pro Max`, `iPad Pro 13-inch (M5)` | `iPhone 17 Pro` |
+
+The iPad destination uses Xcode 27.2 on the `xcode-27` runner and captures
+2064 × 2752 portrait PNGs. The iPhone destinations use the existing 26.x runner.
+The iPad job checks the built app declares iPad support before launching.
 
 ```bash
 gh workflow run screenshots.yml --repo kvn8888/OpenFoodJournal --ref YOUR_BRANCH \
-  -f screens=journal,food-bank,log-food -f appearance=dark -f 'device=iPhone 17 Pro'
+  -f screens=journal,food-bank,log-food -f appearance=dark -f 'device=iPad Pro 13-inch (M5)'
 ```
 
 The source branch must contain the screenshot scheme, fixture support, and scripts.

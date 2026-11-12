@@ -37,7 +37,8 @@ final class ScreenshotTests: XCTestCase {
         }
 
         func tab(_ title: String) {
-            let button = app.tabBars.buttons[title]
+            let tabBarButton = app.tabBars.buttons[title].firstMatch
+            let button = tabBarButton.exists ? tabBarButton : app.buttons[title].firstMatch
             XCTAssertTrue(button.waitForExistence(timeout: 10), "Missing \(title) tab")
             button.tap()
         }

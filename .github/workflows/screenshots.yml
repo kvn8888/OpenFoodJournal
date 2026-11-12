@@ -16,7 +16,7 @@ on:
       device:
         description: Hosted simulator device
         type: choice
-        options: [iPhone 17 Pro, iPhone 17 Pro Max]
+        options: [iPhone 17 Pro, iPhone 17 Pro Max, iPad Pro 13-inch (M5)]
         default: iPhone 17 Pro
   pull_request:
     branches: [testflight, app-store]
@@ -37,10 +37,10 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (contains(github.event.pull_request.labels.*.name, 'ci:screenshots') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ci:screenshots'))
-    runs-on: macos-26
+    runs-on: ${{ inputs.device == 'iPad Pro 13-inch (M5)' && 'xcode-27' || 'macos-26' }}
     timeout-minutes: 35
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: ${{ inputs.device == 'iPad Pro 13-inch (M5)' && '/Applications/Xcode_27.2.app/Contents/Developer' || '/Applications/Xcode_26.6.app/Contents/Developer' }}
       SCREENSHOT_SCREENS: ${{ inputs.screens || 'all' }}
       SCREENSHOT_APPEARANCE: ${{ inputs.appearance || 'both' }}
       SCREENSHOT_DEVICE: ${{ inputs.device || 'iPhone 17 Pro' }}
@@ -48,7 +48,14 @@ jobs:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify pinned Xcode toolchain
-        run: bash .github/scripts/verify-xcode.sh
+        run: |
+          if [[ "$SCREENSHOT_DEVICE" == 'iPad Pro 13-inch (M5)' ]]; then
+            version="$(xcodebuild -version)"
+            printf '%s\n' "$version"
+            [[ "$version" == $'Xcode 27.2\nBuild version 27B52' ]]
+          else
+            bash .github/scripts/verify-xcode.sh
+          fi
       - name: Verify screenshot export contracts
         run: python3 .github/scripts/test-screenshot-export.py
       - name: Build and capture selected screens
