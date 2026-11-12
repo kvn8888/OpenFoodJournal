@@ -109,6 +109,9 @@ struct DailyLogView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
+                // Wide iPad windows: calendar, rings, and meal rows share one
+                // centered column; compact widths are unchanged.
+                .ofjReadableScrollContent()
 
                 // Radial floating action menu — plus button with drag-to-action options
                 RadialMenuButton(items: [
