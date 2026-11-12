@@ -171,6 +171,9 @@ struct ChatView: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
+                // One reading column on wide windows; user/model alignment
+                // (Spacers inside each row) now resolves within this column.
+                .ofjReadableColumn()
             }
             .scrollDismissesKeyboard(.interactively)
             .onAppear {
@@ -586,6 +589,9 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 4)
+        // Same column and inset as the transcript so the composer's edges
+        // line up with the bubbles above it.
+        .ofjReadableColumn()
     }
 
     private var pendingAttachmentsRow: some View {

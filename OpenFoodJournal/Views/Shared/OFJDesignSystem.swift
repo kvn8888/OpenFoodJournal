@@ -340,6 +340,16 @@ enum OFJLayout {
     static let cameraShutterSize: CGFloat = 78
     static let journalBottomClearance: CGFloat = 100
     static let emptyStateTopPadding = OFJSpace.s40
+    /// Widest single reading column for primary list/transcript content.
+    /// Wide iPad windows center content at this width; compact and narrow
+    /// windows are narrower than this, so their layout is unchanged.
+    static let readableContentMaxWidth: CGFloat = 760
+
+    /// Extra horizontal margin that centers a `readableContentMaxWidth`
+    /// column inside a container of the given width. Zero when narrower.
+    static func readableHorizontalMargin(for containerWidth: CGFloat) -> CGFloat {
+        max(0, ((containerWidth - readableContentMaxWidth) / 2).rounded(.down))
+    }
 
     static var standardListRowInsets: EdgeInsets {
         EdgeInsets(
@@ -357,6 +367,50 @@ enum OFJLayout {
             bottom: 0,
             trailing: listHorizontalInset
         )
+    }
+}
+
+/// Centers a List/ScrollView's content in one readable column by measuring
+/// the width the container is actually given (window, Split View, Stage
+/// Manager) and converting the excess into scroll-content margins. The
+/// scroll view itself stays full width, so backgrounds, scroll indicators,
+/// swipe actions, and scroll position are unaffected, and view identity
+/// never changes as the window resizes.
+private struct OFJReadableScrollContentModifier: ViewModifier {
+    @State private var containerWidth: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .contentMargins(
+                .horizontal,
+                OFJLayout.readableHorizontalMargin(for: containerWidth),
+                for: .scrollContent
+            )
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                containerWidth = width
+            }
+    }
+}
+
+/// Constrains non-scrolling content (bubbles, composers) to the same
+/// readable column, centered in whatever width is proposed.
+private struct OFJReadableColumnModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: OFJLayout.readableContentMaxWidth)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+extension View {
+    func ofjReadableScrollContent() -> some View {
+        modifier(OFJReadableScrollContentModifier())
+    }
+
+    func ofjReadableColumn() -> some View {
+        modifier(OFJReadableColumnModifier())
     }
 }
 

@@ -7,13 +7,33 @@ import html
 import json
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
 import sys
 
 SCREENS = ("journal", "scan", "food-bank", "log-food", "history", "assistant", "settings")
-DEVICES = ("iPhone 17 Pro", "iPhone 17 Pro Max")
+IPAD_PRO = "iPad Pro 13-inch (M5)"
+DEVICES = {
+    "iPhone 17 Pro": "com.apple.CoreSimulator.SimRuntime.iOS-26-",
+    "iPhone 17 Pro Max": "com.apple.CoreSimulator.SimRuntime.iOS-26-",
+    IPAD_PRO: "com.apple.CoreSimulator.SimRuntime.iOS-27-2",
+}
+
+
+def select_simulator(available, device_name):
+    runtime_prefix = DEVICES[device_name]
+    candidates = [
+        (runtime, device)
+        for runtime, devices in available.items()
+        if runtime == runtime_prefix or runtime.startswith(runtime_prefix.rstrip("-") + "-")
+        for device in devices
+        if device["name"] == device_name
+    ]
+    if not candidates:
+        raise RuntimeError(f"No available simulator named {device_name} for {runtime_prefix.rstrip('-')}")
+    return max(candidates, key=lambda item: tuple(int(number) for number in re.findall(r"\d+", item[0])))
 
 
 def selections(value, allowed):
@@ -86,7 +106,7 @@ def main():
     if appearance not in ("both", "light", "dark"):
         raise ValueError("Appearance must be both, light, or dark")
     appearances = ["light", "dark"] if appearance == "both" else [appearance]
-    device_name = os.environ.get("SCREENSHOT_DEVICE", DEVICES[0])
+    device_name = os.environ.get("SCREENSHOT_DEVICE", "iPhone 17 Pro")
     if device_name not in DEVICES:
         raise ValueError("Unsupported screenshot device")
     temporary = Path(os.environ["RUNNER_TEMP"])
@@ -117,12 +137,7 @@ def main():
     boot_stream = None
     try:
         _, devices_json = run("list-devices", ["xcrun", "simctl", "list", "devices", "available", "--json"])
-        available = json.loads(devices_json)["devices"]
-        candidates = [(runtime, device) for runtime, devices in available.items()
-                      if ".iOS-26-" in runtime for device in devices if device["name"] == device_name]
-        if not candidates:
-            raise RuntimeError(f"No available iOS 26 simulator named {device_name}")
-        runtime, device = max(candidates, key=lambda item: tuple(int(n) for n in re.findall(r"\d+", item[0])))
+        runtime, device = select_simulator(json.loads(devices_json)["devices"], device_name)
         identifier = device["udid"]
         manifest["runtime"] = runtime
         if device["state"] != "Booted":
@@ -135,6 +150,11 @@ def main():
                  "-derivedDataPath", str(temporary / "ScreenshotDerivedData"),
                  "-parallel-testing-enabled", "NO", "CODE_SIGNING_ALLOWED=NO"]
         run("build", build + ["build-for-testing"])
+        if device_name == IPAD_PRO:
+            plist = temporary / "ScreenshotDerivedData/Build/Products/Debug-iphonesimulator/OpenFoodJournal.app/Info.plist"
+            with plist.open("rb") as stream:
+                if 2 not in plistlib.load(stream).get("UIDeviceFamily", []):
+                    raise RuntimeError("The screenshot app must declare native iPad support")
         if boot.wait(timeout=300):
             raise RuntimeError("Simulator boot failed")
         run("status-bar", ["xcrun", "simctl", "status_bar", identifier, "override", "--time", "9:41",
@@ -158,7 +178,10 @@ def main():
                                                      "--path", str(bundle)])
                 results = json.loads(summary)
                 manifest["tests"][theme] = {key: results.get(key) for key in ["passedTests", "failedTests", "skippedTests"]}
-                manifest["images"].extend(export_images(exported, output, selected, theme))
+                images = export_images(exported, output, selected, theme)
+                if device_name == IPAD_PRO and any((image["width"], image["height"]) != (2064, 2752) for image in images):
+                    raise RuntimeError("Expected 2064 × 2752 portrait iPad screenshots")
+                manifest["images"].extend(images)
                 if results.get("passedTests") != 1 or results.get("failedTests") != 0 or results.get("skippedTests") != 0:
                     raise RuntimeError(f"{theme} screenshot test did not pass without skips")
             if code:
