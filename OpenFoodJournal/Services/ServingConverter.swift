@@ -93,6 +93,11 @@ struct ServingConverter {
     /// 3. Chain: servingMapping (baseUnit → bridge) then standard table (bridge → target)
     /// 4. Canonical SI bridge from serving.grams or serving.ml
     func factorFor(_ unit: String) -> Double {
+        conversionFactor(for: unit) ?? 1.0
+    }
+
+    /// A listed unit can lack a conversion path on legacy or incomplete foods.
+    func conversionFactor(for unit: String) -> Double? {
         if unit == baseUnit { return 1.0 }
 
         // 1. Try the structured ServingSize enum (same-dimension or cross-dimension)
@@ -132,7 +137,7 @@ struct ServingConverter {
             }
         }
 
-        return 1.0
+        return nil
     }
 
     // MARK: - Scaled macros

@@ -17,6 +17,7 @@ struct ContentView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(UserGoals.self) private var userGoals
     @Environment(ChatService.self) private var chatService
+    @Environment(AppNavigationRouter.self) private var navigation
 
     // Tracks the last version the user saw What's New for.
     // When the app version changes, the sheet is shown again.
@@ -41,9 +42,15 @@ struct ContentView: View {
                 HistoryView()
             }
             Tab("Assistant", systemImage: chatService.isStreaming ? "sparkles.square.filled.on.square" : "sparkles", value: .assistant) {
-                ChatView()
+                ChatView(isSelected: selectedTab == .assistant)
             }
             .badge(chatService.isStreaming ? Text("Active") : nil)
+        }
+        .onChange(of: navigation.pendingAssistantHandoff, initial: true) { _, handoff in
+            if handoff != nil {
+                showWhatsNew = false
+                selectedTab = .assistant
+            }
         }
         .tabBarMinimizeBehavior(.never)
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -55,7 +62,7 @@ struct ContentView: View {
         }
         .onAppear {
             // Show What's New sheet if the user hasn't seen this version yet
-            if lastSeenVersion != currentVersion {
+            if lastSeenVersion != currentVersion && selectedTab != .assistant && navigation.pendingAssistantHandoff == nil {
                 showWhatsNew = true
             }
         }
@@ -124,6 +131,7 @@ struct ContentView: View {
     let goals = UserGoals()
     let health = HealthKitService()
     ContentView()
+        .environment(AppNavigationRouter())
         .modelContainer(container)
         .environment(store)
         .environment(ScanService())

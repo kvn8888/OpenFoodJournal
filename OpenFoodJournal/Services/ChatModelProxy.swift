@@ -180,6 +180,52 @@ extension ChatWebSearchProviding {
     }
 }
 
+enum ConfiguredChatWebSearchProviderFactory {
+    static func make(
+        selection: AssistantModelSelection,
+        session: URLSession,
+        modelProxy: () throws -> any ChatModelProxy
+    ) throws -> any ChatWebSearchProviding {
+        switch AssistantResearchProvider.stored() {
+        case .modelProvider:
+            let proxy = try modelProxy()
+            guard let searcher = proxy as? any ChatNativeWebSearching else {
+                throw ChatError.serverError(
+                    400,
+                    "\(selection.provider.displayName) does not expose native web search through this adapter. Select Exa, Tavily, or Parallel in Settings."
+                )
+            }
+            return ModelProviderChatWebSearchProvider(
+                searcher: searcher,
+                descriptor: selection.descriptor
+            )
+        case .tavily:
+            guard let apiKey = KeychainService.tavilyAPIKey, !apiKey.isEmpty else {
+                throw ChatError.noAPIKey(AssistantResearchProvider.tavily.displayName)
+            }
+            return TavilyChatWebSearchProvider(
+                apiKey: apiKey,
+                depth: TavilySearchDepth.stored(),
+                session: session
+            )
+        case .parallel:
+            guard let apiKey = KeychainService.parallelAPIKey, !apiKey.isEmpty else {
+                throw ChatError.noAPIKey(AssistantResearchProvider.parallel.displayName)
+            }
+            return ParallelChatWebSearchProvider(
+                apiKey: apiKey,
+                mode: ParallelSearchMode.stored(),
+                session: session
+            )
+        case .exa:
+            guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
+                throw ChatError.noAPIKey(AssistantResearchProvider.exa.displayName)
+            }
+            return ExaChatWebSearchProvider(apiKey: apiKey, session: session)
+        }
+    }
+}
+
 /// Adapts the existing provider-native Gemini/OpenRouter/Azure search methods
 /// to the independent research contract for backward compatibility.
 @MainActor

@@ -344,42 +344,8 @@ final class ChatService {
         }
         self.modelProxyFactory = resolvedModelProxyFactory
         self.webSearchProviderFactory = webSearchProviderFactory ?? { selection in
-            switch AssistantResearchProvider.stored() {
-            case .modelProvider:
-                let proxy = try resolvedModelProxyFactory(selection)
-                guard let searcher = proxy as? any ChatNativeWebSearching else {
-                    throw ChatError.serverError(
-                        400,
-                        "\(selection.provider.displayName) does not expose native web search through this adapter. Select Exa, Tavily, or Parallel in Settings."
-                    )
-                }
-                return ModelProviderChatWebSearchProvider(
-                    searcher: searcher,
-                    descriptor: selection.descriptor
-                )
-            case .tavily:
-                guard let apiKey = KeychainService.tavilyAPIKey, !apiKey.isEmpty else {
-                    throw ChatError.noAPIKey(AssistantResearchProvider.tavily.displayName)
-                }
-                return TavilyChatWebSearchProvider(
-                    apiKey: apiKey,
-                    depth: TavilySearchDepth.stored(),
-                    session: liveSession
-                )
-            case .parallel:
-                guard let apiKey = KeychainService.parallelAPIKey, !apiKey.isEmpty else {
-                    throw ChatError.noAPIKey(AssistantResearchProvider.parallel.displayName)
-                }
-                return ParallelChatWebSearchProvider(
-                    apiKey: apiKey,
-                    mode: ParallelSearchMode.stored(),
-                    session: liveSession
-                )
-            case .exa:
-                guard let apiKey = KeychainService.exaAPIKey, !apiKey.isEmpty else {
-                    throw ChatError.noAPIKey(AssistantResearchProvider.exa.displayName)
-                }
-                return ExaChatWebSearchProvider(apiKey: apiKey, session: liveSession)
+            try ConfiguredChatWebSearchProviderFactory.make(selection: selection, session: liveSession) {
+                try resolvedModelProxyFactory(selection)
             }
         }
         self.apiKeyProvider = resolvedAPIKeyProvider
@@ -4465,7 +4431,7 @@ final class ChatService {
 
     // MARK: - Configuration
 
-    private static func storedChatRequestConfig(override: ChatModelPreference?) -> ChatRequestConfig {
+    static func storedChatRequestConfig(override: ChatModelPreference?) -> ChatRequestConfig {
         let provider = AssistantProvider.stored()
         let preference = override ?? ChatModelPreference.stored()
 
