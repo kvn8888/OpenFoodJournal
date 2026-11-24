@@ -7,9 +7,9 @@
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
   "externalTestFlightGroupID": "",
   "primaryLocale": "en-US",
-  "xcodeRunner": "macos-26",
-  "requiredXcodeVersion": "Xcode 26.6",
-  "requiredXcodeBuild": "17F113",
+  "xcodeRunner": "xcode-27",
+  "requiredXcodeVersion": "Xcode 27.2",
+  "requiredXcodeBuild": "27B52",
   "ascVersion": "3.1.1",
   "releaseNotesModel": "gpt-5.6-sol",
   "releaseNotesFallbackModels": [

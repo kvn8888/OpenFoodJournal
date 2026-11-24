@@ -19,7 +19,7 @@ This is the single source of truth for any LLM agent working on this project. Re
 | Build System | Xcode (xcodebuild), no SPM dependencies |
 | Build Verify Command | `xcodebuild -project OpenFoodJournal.xcodeproj -scheme OpenFoodJournal -destination generic/platform=iOS build` |
 | Build Notes | No iOS simulators installed. Use `generic/platform=iOS` for compile-only verification. Physical device (iPhone 18,3) available when connected. Device support symbols at `/Volumes/DevDisk/Developer/Xcode/iOS DeviceSupport/`. |
-| Release Automation | GitHub `macos-26` cloud CI pinned to stable Xcode 26.6; `testflight` builds once and uploads internally; `app-store` promotes the exact tested build |
+| Release Automation | GitHub `xcode-27` cloud CI pinned to stable Xcode 27.2; `testflight` builds once and uploads internally; `app-store` promotes the exact tested build |
 | AI Backend | BYOK direct AI calls: Gemini, OpenRouter, Azure OpenAI, OpenAI, Anthropic, Muse Spark, or any OpenAI-compatible endpoint (custom base URL + key, e.g. Meta Model API / LiteLLM / self-hosted vLLM) for Assistant; Gemini/OpenRouter/OpenAI-compatible for Scan; food icon images via Gemini or an OpenAI-compatible `/images/generations` endpoint (e.g. Muse Image, selected by `foodBank.iconImageProvider`); native, Tavily, Parallel, or Exa research |
 | App Entry | `MacrosApp` in `OpenFoodJournalApp.swift` |
 
@@ -486,7 +486,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 ## Branches
 
 - **`main`** — Original Turso sync architecture. `SyncService.swift` present, all views have fire-and-forget sync Tasks. Treat this as legacy branch history, not the current app-store architecture.
-- **`testflight`** — Protected integration/beta branch. Pull requests run cloud compile and non-UI unit/provider-contract tests. Trusted pushes allocate a remote-safe build number, archive once on the GitHub `macos-26` runner pinned to stable Xcode 26.6 (17F113), upload to internal TestFlight, and create an immutable `testflight/<version>-<build>` prerelease manifest.
+- **`testflight`** — Protected integration/beta branch. Pull requests run cloud compile and non-UI unit/provider-contract tests. Trusted pushes allocate a remote-safe build number, archive once on the GitHub `xcode-27` runner pinned to stable Xcode 27.2 (27B52), upload to internal TestFlight, and create an immutable `testflight/<version>-<build>` prerelease manifest.
 - **`app-store`** — Protected production-promotion branch for the CloudKit architecture. It must promote a reachable, manifest-backed TestFlight build without rebuilding the binary. App-affecting changes after the selected TestFlight tag block promotion. Normal pushes stage metadata, attach the exact build, and validate; App Review submission requires an explicit manual input plus protected-environment approval.
 
 ## Cloud CI and release workflow
