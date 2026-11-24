@@ -4,6 +4,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 struct CompleteContainerSheet: View {
@@ -23,7 +24,7 @@ struct CompleteContainerSheet: View {
     @State private var mealTypeWasEdited = false
     @State private var didApplyDefaultMealType = false
     @State private var showResults = false
-    @FocusState private var isWeightFocused: Bool
+    @State private var isWeightFocused = false
 
     var body: some View {
         NavigationStack {
@@ -38,7 +39,7 @@ struct CompleteContainerSheet: View {
                     weightInput
 
                     // ── Results (shown after entering weight) ──────
-                    if showResults, let finalWeight = Double(finalWeightText) {
+                    if showResults, let finalWeight = OFJNumericInput.parse(finalWeightText) {
                         Divider()
                         resultsSection(finalWeight: finalWeight)
                     }
@@ -117,11 +118,13 @@ struct CompleteContainerSheet: View {
             }
 
             HStack {
-                TextField("Weight", text: $finalWeightText)
-                    .keyboardType(.decimalPad)
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .multilineTextAlignment(.center)
-                    .focused($isWeightFocused)
+                OFJNumericTextField(
+                    placeholder: "Weight",
+                    text: $finalWeightText,
+                    isFocused: $isWeightFocused,
+                    font: .ofjRoundedSystemFont(ofSize: 32, weight: .bold),
+                    textAlignment: .center
+                )
 
                 Text("g")
                     .font(.title2)
@@ -263,13 +266,13 @@ struct CompleteContainerSheet: View {
     }
 
     private var candidateCalculation: ContainerWeightCalculation? {
-        guard let endingWeight = Double(finalWeightText) else { return nil }
+        guard let endingWeight = OFJNumericInput.parse(finalWeightText) else { return nil }
         return container.weightCalculation(endingAt: endingWeight)
     }
 
     private var completionValidationMessage: String? {
         guard !finalWeightText.isEmpty else { return nil }
-        guard let endingWeight = Double(finalWeightText),
+        guard let endingWeight = OFJNumericInput.parse(finalWeightText),
               endingWeight.isFinite,
               endingWeight >= 0 else {
             return "Enter a valid current weight."

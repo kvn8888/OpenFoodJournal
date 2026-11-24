@@ -2,6 +2,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 
 struct GoalsEditorView: View {
     @Environment(UserGoals.self) private var goals
@@ -71,19 +72,21 @@ private struct GoalRow: View {
     @Binding var value: Double
 
     @State private var text: String = ""
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
 
     var body: some View {
         HStack {
             Text(label)
             Spacer()
-            TextField("0", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($isFocused)
+            OFJNumericTextField(
+                placeholder: "0",
+                text: $text,
+                isFocused: $isFocused,
+                textAlignment: .right
+            )
                 .frame(width: 80)
                 .onChange(of: text) { _, newVal in
-                    if let d = Double(newVal) { value = d }
+                    if let d = OFJNumericInput.parse(newVal) { value = d }
                 }
                 .onChange(of: isFocused) { _, focused in
                     if !focused { text = String(format: "%.0f", value) }

@@ -5,6 +5,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 struct EditFoodSheet: View {
@@ -169,13 +170,13 @@ struct EditFoodSheet: View {
         food.name = name.trimmingCharacters(in: .whitespaces)
         food.brand = brand.trimmingCharacters(in: .whitespaces).isEmpty
             ? nil : brand.trimmingCharacters(in: .whitespaces)
-        food.calories = Double(calories) ?? food.calories
-        food.protein = Double(protein) ?? food.protein
-        food.carbs = Double(carbs) ?? food.carbs
-        food.fat = Double(fat) ?? food.fat
+        food.calories = OFJNumericInput.parse(calories) ?? food.calories
+        food.protein = OFJNumericInput.parse(protein) ?? food.protein
+        food.carbs = OFJNumericInput.parse(carbs) ?? food.carbs
+        food.fat = OFJNumericInput.parse(fat) ?? food.fat
         food.micronutrients = Dictionary(uniqueKeysWithValues:
             sortedMicronutrientKeys.compactMap { key in
-                guard let value = Double(micronutrientValues[key] ?? ""),
+                guard let value = OFJNumericInput.parse(micronutrientValues[key] ?? ""),
                       value.isFinite,
                       value >= 0
                 else { return nil }
@@ -203,9 +204,11 @@ private struct MicronutrientEditRow: View {
         HStack {
             Text(label)
             Spacer()
-            TextField("0", text: $value)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
+            OFJNumericTextField(
+                placeholder: "0",
+                text: $value,
+                textAlignment: .right
+            )
                 .frame(width: 68)
                 .accessibilityLabel("\(label) amount")
             TextField("unit", text: $unit)
@@ -234,9 +237,11 @@ private struct MacroField: View {
         HStack {
             Text(label)
             Spacer()
-            TextField("0", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
+            OFJNumericTextField(
+                placeholder: "0",
+                text: $text,
+                textAlignment: .right
+            )
                 .frame(width: 80)
             Text(unit)
                 .foregroundStyle(.secondary)

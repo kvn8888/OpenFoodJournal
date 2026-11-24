@@ -6,6 +6,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 private enum ContainerStartWeightMethod: String, CaseIterable, Identifiable {
@@ -55,7 +56,7 @@ struct NewContainerSheet: View {
     @State private var mealTypeWasEdited = false
     @State private var didApplyDefaultMealType = false
     @State private var searchText = ""
-    @FocusState private var focusedField: NewContainerField?
+    @State private var focusedField: NewContainerField?
     private let recentlyUsedLimit = 8
     let logDate: Date
 
@@ -236,10 +237,12 @@ struct NewContainerSheet: View {
                         .foregroundStyle(.secondary)
 
                     HStack {
-                        TextField("e.g. 39", text: $gramsPerServingText)
-                            .keyboardType(.decimalPad)
-                            .font(.system(size: 24, weight: .bold, design: .rounded))
-                            .focused($focusedField, equals: .gramsPerServing)
+                        OFJNumericTextField(
+                            placeholder: "e.g. 39",
+                            text: $gramsPerServingText,
+                            isFocused: $focusedField.numericFocus(equals: .gramsPerServing),
+                            font: .ofjRoundedSystemFont(ofSize: 24, weight: .bold)
+                        )
                         Text("g")
                             .font(.title3)
                             .foregroundStyle(.secondary)
@@ -388,10 +391,12 @@ struct NewContainerSheet: View {
                 .foregroundStyle(.secondary)
 
             HStack {
-                TextField(placeholder, text: text)
-                    .keyboardType(.decimalPad)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .focused($focusedField, equals: field)
+                OFJNumericTextField(
+                    placeholder: placeholder,
+                    text: text,
+                    isFocused: $focusedField.numericFocus(equals: field),
+                    font: .ofjRoundedSystemFont(ofSize: 24, weight: .bold)
+                )
                     .accessibilityLabel(title)
                 Text("g")
                     .font(.title3)
@@ -441,8 +446,8 @@ struct NewContainerSheet: View {
     }
 
     private var tareCalculation: ContainerWeightCalculation? {
-        guard let tareWeight = Double(tareWeightText),
-              let loadedWeight = Double(loadedWeightText) else {
+        guard let tareWeight = OFJNumericInput.parse(tareWeightText),
+              let loadedWeight = OFJNumericInput.parse(loadedWeightText) else {
             return nil
         }
         return ContainerWeightCalculation(
@@ -453,17 +458,17 @@ struct NewContainerSheet: View {
     }
 
     private var selectedWeightAction: ContainerWeightAction? {
-        guard let gramsPerServing = Double(gramsPerServingText) else { return nil }
+        guard let gramsPerServing = OFJNumericInput.parse(gramsPerServingText) else { return nil }
         switch weightMethod {
         case .total:
-            guard let initialGrossWeight = Double(startWeightText) else { return nil }
+            guard let initialGrossWeight = OFJNumericInput.parse(startWeightText) else { return nil }
             return ContainerWeightAction.enterWeight(
                 initialGrossWeight: initialGrossWeight,
                 gramsPerServing: gramsPerServing
             )
         case .tare:
-            guard let emptyContainerWeight = Double(tareWeightText),
-                  let loadedGrossWeight = Double(loadedWeightText) else {
+            guard let emptyContainerWeight = OFJNumericInput.parse(tareWeightText),
+                  let loadedGrossWeight = OFJNumericInput.parse(loadedWeightText) else {
                 return nil
             }
             return ContainerWeightAction.useTare(
@@ -476,12 +481,12 @@ struct NewContainerSheet: View {
 
     private var tareValidationMessage: String? {
         guard !tareWeightText.isEmpty || !loadedWeightText.isEmpty else { return nil }
-        guard let tareWeight = Double(tareWeightText),
+        guard let tareWeight = OFJNumericInput.parse(tareWeightText),
               tareWeight.isFinite,
               tareWeight > 0 else {
             return "Enter a positive empty-container weight."
         }
-        guard let loadedWeight = Double(loadedWeightText),
+        guard let loadedWeight = OFJNumericInput.parse(loadedWeightText),
               loadedWeight.isFinite,
               loadedWeight > 0 else {
             return "Enter the container-and-food weight."
