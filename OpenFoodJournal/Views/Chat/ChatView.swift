@@ -14,7 +14,10 @@ import UniformTypeIdentifiers
 struct ChatView: View {
     private static let maximumImageAttachments = 4
 
+    let isSelected: Bool
+
     @Environment(ChatService.self) private var chatService
+    @Environment(AppNavigationRouter.self) private var navigation
     @Environment(\.modelContext) private var modelContext
 
     // Most recently active thread first — the tab always resumes the latest.
@@ -122,6 +125,12 @@ struct ChatView: View {
             ) { result in
                 importPDF(result)
             }
+        }
+        .onChange(of: isSelected, initial: true) {
+            acceptAssistantHandoff()
+        }
+        .onChange(of: navigation.pendingAssistantHandoff) {
+            acceptAssistantHandoff()
         }
     }
 
@@ -687,6 +696,22 @@ struct ChatView: View {
     }
 
     // MARK: - Actions
+
+    private func acceptAssistantHandoff() {
+        guard isSelected, let prompt = navigation.takeAssistantPrompt() else { return }
+        if chatService.isStreaming {
+            cancelEditing()
+            draft = prompt
+            return
+        }
+
+        if currentThread == nil || !messages.isEmpty {
+            startNewThread()
+        }
+        guard let thread = currentThread else { return }
+        if case .accepted = chatService.submit(prompt, in: thread) { return }
+        draft = prompt
+    }
 
     private func sendMessage(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)

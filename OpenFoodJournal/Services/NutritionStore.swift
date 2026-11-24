@@ -160,14 +160,28 @@ final class NutritionStore {
     // MARK: - Log Entry
 
     @discardableResult
-    func log(_ entry: NutritionEntry, to date: Date) -> Bool {
-        let log = fetchOrCreateLog(for: date)
-        entry.timestamp = Self.timestamp(on: date, preservingTimeFrom: entry.timestamp)
+    func log(_ entry: NutritionEntry, to date: Date, calendar: Calendar = .current) -> Bool {
+        let existingLog = fetchLog(for: date, calendar: calendar)
+        let log = existingLog ?? DailyLog(date: date, calendar: calendar)
+        if existingLog == nil { modelContext.insert(log) }
+        entry.timestamp = Self.timestamp(on: date, preservingTimeFrom: entry.timestamp, calendar: calendar)
         modelContext.insert(entry)
         link(entry, to: log)
         markHealthKitSyncStaleIfNeeded(entry)
-        refreshSavedFoodUsageIfLinked(to: entry)
-        guard save() else { return false }
+        let food = savedFoodLinked(to: entry)
+        let previousLastUsedAt = food?.lastUsedAt
+        let previousArchivedAt = food?.archivedAt
+        food?.markLoggedForFoodBank()
+        guard save() else {
+            unlinkFromDailyLog(entry)
+            modelContext.delete(entry)
+            if existingLog == nil { modelContext.delete(log) }
+            if let food, let previousLastUsedAt {
+                food.lastUsedAt = previousLastUsedAt
+                food.archivedAt = previousArchivedAt
+            }
+            return false
+        }
         scheduleHealthSync(for: entry)
         return true
     }
@@ -187,23 +201,21 @@ final class NutritionStore {
         return entry
     }
 
-    private func refreshSavedFoodUsageIfLinked(to entry: NutritionEntry) {
-        guard let foodID = entry.savedFoodID else { return }
+    private func savedFoodLinked(to entry: NutritionEntry) -> SavedFood? {
+        guard let foodID = entry.savedFoodID else { return nil }
 
         var descriptor = FetchDescriptor<SavedFood>(
             predicate: #Predicate { $0.id == foodID }
         )
         descriptor.fetchLimit = 1
 
-        if let food = try? modelContext.fetch(descriptor).first {
-            food.markLoggedForFoodBank()
-        }
+        return try? modelContext.fetch(descriptor).first
     }
 
     // MARK: - Fetch
 
-    func fetchLog(for date: Date) -> DailyLog? {
-        let startOfDay = Calendar.current.startOfDay(for: date)
+    func fetchLog(for date: Date, calendar: Calendar = .current) -> DailyLog? {
+        let startOfDay = calendar.startOfDay(for: date)
         let descriptor = FetchDescriptor<DailyLog>(
             predicate: #Predicate { $0.date == startOfDay }
         )
@@ -938,8 +950,9 @@ final class NutritionStore {
         }
     }
 
-    private static func timestamp(on date: Date, preservingTimeFrom timestamp: Date) -> Date {
-        let calendar = Calendar.current
+    private static func timestamp(
+        on date: Date, preservingTimeFrom timestamp: Date, calendar: Calendar = .current
+    ) -> Date {
         let time = calendar.dateComponents([.hour, .minute, .second], from: timestamp)
         return calendar.date(
             bySettingHour: time.hour ?? 0,

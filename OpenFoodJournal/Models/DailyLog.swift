@@ -17,8 +17,8 @@ final class DailyLog {
     @Relationship(deleteRule: .cascade, inverse: \NutritionEntry.dailyLog)
     var entries: [NutritionEntry]? = []
 
-    init(date: Date, id: UUID = UUID(), notes: String? = nil) {
-        self.date = Calendar.current.startOfDay(for: date)
+    init(date: Date, id: UUID = UUID(), notes: String? = nil, calendar: Calendar = .current) {
+        self.date = calendar.startOfDay(for: date)
         self.id = id
         self.notes = notes
         self.entries = []

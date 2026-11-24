@@ -1,21 +1,26 @@
 // Macros — Food Journaling App
 // AGPL-3.0 License
 
-import SwiftUI
+import AppIntents
+import Combine
+import Foundation
 import SwiftData
+import SwiftUI
+import UIKit
 
 @main
 struct MacrosApp: App {
     private let modelContainer: ModelContainer
     private let runtimeModelCatalog: RuntimeModelCatalog
-    private let shouldRefreshRuntimeModelCatalog: Bool
+    private let isTestMode: Bool
     @State private var nutritionStore: NutritionStore
     @State private var scanService: ScanService
     @State private var tursoMirrorService: TursoMirrorService
     @State private var healthKitService: HealthKitService
     @State private var chatService: ChatService
     @State private var userGoals: UserGoals
-    @State private var mealTimeSettings = MealTimeSettings()
+    @State private var mealTimeSettings: MealTimeSettings
+    @State private var navigation: AppNavigationRouter
     @State private var offService = OpenFoodFactsService()
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage(OFJAccentTheme.storageKey) private var accentThemeRawValue =
@@ -98,7 +103,7 @@ struct MacrosApp: App {
         modelContainer = container
         let modelCatalog = RuntimeModelCatalog()
         runtimeModelCatalog = modelCatalog
-        shouldRefreshRuntimeModelCatalog = !isTest
+        isTestMode = isTest
         let tursoMirror = TursoMirrorService(modelContext: container.mainContext)
         _tursoMirrorService = State(initialValue: tursoMirror)
         let health = HealthKitService(tursoMirror: tursoMirror)
@@ -112,6 +117,22 @@ struct MacrosApp: App {
             }
         )
         _nutritionStore = State(initialValue: store)
+        let mealTimeSettings = MealTimeSettings()
+        _mealTimeSettings = State(initialValue: mealTimeSettings)
+        let navigation = AppNavigationRouter()
+        _navigation = State(initialValue: navigation)
+        let foodLogging = SiriFoodLoggingService(
+            modelContext: container.mainContext,
+            nutritionStore: store,
+            mealTimeSettings: mealTimeSettings,
+            isProtectedDataAvailable: { !isTest && UIApplication.shared.isProtectedDataAvailable },
+            assistantLookup: { request, quantity, unit in
+                try await SiriAssistantNutritionLookup().lookup(request: request, quantity: quantity, unit: unit)
+            }
+        )
+        let siriRuntime = SiriAppRuntime(foodLogging: foodLogging, navigation: navigation)
+        AppDependencyManager.shared.add(dependency: siriRuntime)
+        if !isTest { SiriAppRuntime.refreshShortcutParameters() }
         let scanService = ScanService(
             modelContext: container.mainContext,
             tursoMirror: tursoMirror,
@@ -228,6 +249,7 @@ struct MacrosApp: App {
                     .environment(nutritionStore)
                     .environment(scanService)
                     .environment(chatService)
+                    .environment(navigation)
                     .environment(tursoMirrorService)
                     .environment(healthKitService)
                     .environment(userGoals)
@@ -246,8 +268,13 @@ struct MacrosApp: App {
                         }
                         tursoMirrorService.scheduleMirror(reason: "app_launch")
                         await tursoMirrorService.migrateLegacyDiagnostics()
-                        if shouldRefreshRuntimeModelCatalog {
+                        if !isTestMode {
                             _ = await runtimeModelCatalog.refreshIfNeeded()
+                        }
+                    }
+                    .onReceive(foodBankSaveNotifications) { notification in
+                        if !isTestMode && SiriAppRuntime.foodBankWasSaved(notification) {
+                            SiriAppRuntime.refreshShortcutParameters()
                         }
                     }
                     .onChange(of: scenePhase) { _, phase in
@@ -258,7 +285,7 @@ struct MacrosApp: App {
                                 await reconcilePendingHealthKitEntries()
                                 await tursoMirrorService.migrateLegacyDiagnostics()
                                 _ = await tursoMirrorService.flushDiagnosticOutbox()
-                                if shouldRefreshRuntimeModelCatalog {
+                                if !isTestMode {
                                     _ = await runtimeModelCatalog.refreshIfNeeded()
                                 }
                             }
@@ -281,6 +308,15 @@ struct MacrosApp: App {
                     .environment(offService)
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            if !isTestMode && phase == .active {
+                SiriAppRuntime.refreshShortcutParameters()
+            }
+        }
+    }
+
+    private var foodBankSaveNotifications: NotificationCenter.Publisher {
+        NotificationCenter.default.publisher(for: ModelContext.didSave, object: modelContainer.mainContext)
     }
 
     /// HealthKit is a derived export target, so any mutation interrupted by

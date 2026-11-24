@@ -377,8 +377,8 @@ final class SavedFood {
 extension SavedFood {
     static let foodBankArchiveAgeInDays = 14
 
-    static func foodBankArchiveCutoff(now: Date = .now) -> Date {
-        Calendar.current.date(
+    static func foodBankArchiveCutoff(now: Date = .now, calendar: Calendar = .current) -> Date {
+        calendar.date(
             byAdding: .day,
             value: -foodBankArchiveAgeInDays,
             to: now
