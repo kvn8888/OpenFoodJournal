@@ -8,11 +8,16 @@ import UIKit
 @MainActor
 final class SiriAppRuntime {
     let foodLogging: SiriFoodLoggingService
+    let journalData: SiriJournalData
     let navigation: AppNavigationRouter
+    let healthKit: HealthKitService
 
-    init(foodLogging: SiriFoodLoggingService, navigation: AppNavigationRouter) {
+    init(foodLogging: SiriFoodLoggingService, journalData: SiriJournalData, navigation: AppNavigationRouter,
+         healthKit: HealthKitService) {
         self.foodLogging = foodLogging
+        self.journalData = journalData
         self.navigation = navigation
+        self.healthKit = healthKit
     }
 
     static func refreshShortcutParameters() {

@@ -267,12 +267,19 @@ final class NutritionStore {
 
     // MARK: - Delete
 
-    func delete(_ entry: NutritionEntry) {
+    @discardableResult
+    func delete(_ entry: NutritionEntry) -> Bool {
         let entryID = entry.id
         modelContext.delete(entry)
-        if save() {
-            scheduleHealthDelete(forEntryID: entryID)
-        }
+        guard save() else { return false }
+        scheduleHealthDelete(forEntryID: entryID)
+        return true
+    }
+
+    @discardableResult
+    func deleteSavedFood(_ food: SavedFood) -> Bool {
+        modelContext.delete(food)
+        return save(mirrorReason: "saved_food_deleted")
     }
 
     func delete(_ log: DailyLog) {
@@ -488,7 +495,8 @@ final class NutritionStore {
 
     // MARK: - Save (public for use in edit flows)
 
-    func saveChanges(mirrorReason: String = "nutrition_store_save") {
+    @discardableResult
+    func saveChanges(mirrorReason: String = "nutrition_store_save") -> Bool {
         save(mirrorReason: mirrorReason)
     }
 
@@ -536,11 +544,18 @@ final class NutritionStore {
     }
 
     /// Save an entry's edits locally
-    func saveEntry(_ entry: NutritionEntry) {
-        markHealthKitSyncStaleIfNeeded(entry)
-        if save() {
-            scheduleHealthSync(for: entry)
+    @discardableResult
+    func saveEntry(_ entry: NutritionEntry, movingTo date: Date? = nil, calendar: Calendar = .current) -> Bool {
+        if let date {
+            let log = fetchLog(for: date, calendar: calendar) ?? DailyLog(date: date, calendar: calendar)
+            if log.modelContext == nil { modelContext.insert(log) }
+            entry.timestamp = Self.timestamp(on: date, preservingTimeFrom: entry.timestamp, calendar: calendar)
+            link(entry, to: log)
         }
+        markHealthKitSyncStaleIfNeeded(entry)
+        guard save() else { return false }
+        scheduleHealthSync(for: entry)
+        return true
     }
 
     // MARK: - Serving Mapping Propagation
@@ -745,13 +760,7 @@ final class NutritionStore {
 
     /// Move an entry to a different day's log (used when the user changes the date in EditEntryView)
     func moveEntry(_ entry: NutritionEntry, to newDate: Date) {
-        let newLog = fetchOrCreateLog(for: newDate)
-        entry.timestamp = Self.timestamp(on: newDate, preservingTimeFrom: entry.timestamp)
-        link(entry, to: newLog)
-        markHealthKitSyncStaleIfNeeded(entry)
-        if save() {
-            scheduleHealthSync(for: entry)
-        }
+        saveEntry(entry, movingTo: newDate)
     }
 
     // MARK: - Micronutrient Aggregation
@@ -950,7 +959,7 @@ final class NutritionStore {
         }
     }
 
-    private static func timestamp(
+    static func timestamp(
         on date: Date, preservingTimeFrom timestamp: Date, calendar: Calendar = .current
     ) -> Date {
         let time = calendar.dateComponents([.hour, .minute, .second], from: timestamp)
