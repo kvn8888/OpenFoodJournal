@@ -1,4 +1,4 @@
-name: Internal TestFlight
+name: Preview TestFlight (UAT)
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   models: read
 
 concurrency:
-  group: openfoodjournal-testflight-upload
+  group: openfoodjournal-preview-testflight-upload
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/cloud-ci.yml
 
   deploy:
-    name: Build and distribute
+    name: Build and distribute OFJ Preview
     needs: cloud-ci
     if: vars.ENABLE_TESTFLIGHT_AUTOMATION == 'true'
     runs-on: macos-26
@@ -38,7 +38,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
 
     steps:
-      - name: Check out trusted TestFlight source
+      - name: Check out trusted UAT source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -49,31 +49,77 @@ jobs:
       - name: Install pinned App Store Connect CLI
         run: bash .github/scripts/install-asc.sh
 
-      - name: Validate App Store Connect credentials
+      - name: Validate Preview App Store Connect configuration
+        id: preview_config
         run: |
-          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
-          asc apps view --id "${app_id}" --output json > "${RUNNER_TEMP}/app.json"
+          prod_app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          preview_app_id="$(jq -r '.preview.appStoreAppID // empty' ci/release-config.json)"
+          preview_bundle_id="$(jq -r '.preview.bundleIdentifier // empty' ci/release-config.json)"
+          preview_cloudkit="$(jq -r '.preview.cloudKitContainerIdentifier // empty' ci/release-config.json)"
+          preview_config_name="$(jq -r '.preview.xcodeConfiguration // empty' ci/release-config.json)"
+          preview_display_name="$(jq -r '.preview.displayName // empty' ci/release-config.json)"
+          preview_group_id="$(jq -r '.preview.testFlightGroupID // empty' ci/release-config.json)"
+          preview_tag_prefix="$(jq -r '.preview.tagPrefix // empty' ci/release-config.json)"
 
-      - name: Resolve marketing version and build number
+          if [[ -z "${preview_app_id}" || -z "${preview_group_id}" ]]; then
+            echo "Set preview.appStoreAppID and preview.testFlightGroupID in ci/release-config.json after creating the OFJ Preview app record in App Store Connect." >&2
+            exit 1
+          fi
+          if [[ "${preview_app_id}" == "${prod_app_id}" ]]; then
+            echo "preview.appStoreAppID must not equal production appStoreAppID (${prod_app_id})." >&2
+            exit 1
+          fi
+
+          asc apps view --id "${preview_app_id}" --output json > "${RUNNER_TEMP}/preview-app.json"
+          resolved_bundle_id="$(jq -r '.data.attributes.bundleId // empty' "${RUNNER_TEMP}/preview-app.json")"
+          if [[ "${resolved_bundle_id}" != "${preview_bundle_id}" ]]; then
+            echo "App Store Connect app ${preview_app_id} has bundle ID ${resolved_bundle_id:-<missing>}, expected ${preview_bundle_id}." >&2
+            exit 1
+          fi
+
+          printf 'app_id=%s\n' "${preview_app_id}" >> "${GITHUB_OUTPUT}"
+          printf 'bundle_id=%s\n' "${preview_bundle_id}" >> "${GITHUB_OUTPUT}"
+          printf 'cloudkit=%s\n' "${preview_cloudkit}" >> "${GITHUB_OUTPUT}"
+          printf 'xcode_config=%s\n' "${preview_config_name}" >> "${GITHUB_OUTPUT}"
+          printf 'display_name=%s\n' "${preview_display_name}" >> "${GITHUB_OUTPUT}"
+          printf 'group_id=%s\n' "${preview_group_id}" >> "${GITHUB_OUTPUT}"
+          printf 'tag_prefix=%s\n' "${preview_tag_prefix}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve marketing version and Preview build number
         id: release
         run: |
-          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          preview_app_id="${{ steps.preview_config.outputs.app_id }}"
+          xcode_config="${{ steps.preview_config.outputs.xcode_config }}"
+          tag_prefix="${{ steps.preview_config.outputs.tag_prefix }}"
           locale="$(jq -r '.primaryLocale' ci/release-config.json)"
-          version_json="$(
+
+          preview_version="$(
+            asc xcode version view \
+              --project OpenFoodJournal.xcodeproj \
+              --target OpenFoodJournal \
+              --configuration "${xcode_config}" \
+              --output json | jq -r '.version'
+          )"
+          release_version="$(
             asc xcode version view \
               --project OpenFoodJournal.xcodeproj \
               --target OpenFoodJournal \
               --configuration Release \
-              --output json
+              --output json | jq -r '.version'
           )"
-          version="$(jq -r '.version' <<< "${version_json}")"
-          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
-            echo "MARKETING_VERSION must be intentionally set in the Xcode project (for example, 1.4 or 1.5.0)." >&2
+          if [[ "${preview_version}" != "${release_version}" ]]; then
+            echo "Preview MARKETING_VERSION (${preview_version}) does not match Release (${release_version})." >&2
             exit 1
           fi
+          version="${preview_version}"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "MARKETING_VERSION must be intentionally set in the Xcode project (for example, 1.6 or 1.6.0)." >&2
+            exit 1
+          fi
+
           build_json="$(
             asc builds next-build-number \
-              --app "${app_id}" \
+              --app "${preview_app_id}" \
               --version "${version}" \
               --platform IOS \
               --output json
@@ -81,14 +127,20 @@ jobs:
           build_number="$(jq -r '.nextBuildNumber' <<< "${build_json}")"
 
           if [[ -z "${version}" || "${version}" == "null" || -z "${build_number}" || "${build_number}" == "null" ]]; then
-            echo "Could not resolve the release version or a remote-safe build number." >&2
+            echo "Could not resolve the release version or a remote-safe Preview build number." >&2
             exit 1
           fi
 
           previous_tag="$(
-            git tag --merged HEAD --list 'testflight/*' --sort=-creatordate |
+            git tag --merged HEAD --list "${tag_prefix}*" --sort=-creatordate |
               head -n 1
           )"
+          if [[ -z "${previous_tag}" ]]; then
+            previous_tag="$(
+              git tag --merged HEAD --list 'testflight/*' --sort=-creatordate |
+                head -n 1
+            )"
+          fi
           if [[ -n "${previous_tag}" ]]; then
             notes_json="$(
               asc release-notes generate \
@@ -109,13 +161,12 @@ jobs:
 
           notes="$(jq -r '.notes // empty' <<< "${notes_json}")"
           if [[ -z "${notes}" ]]; then
-            notes="Internal build ${version} (${build_number}) for commit ${GITHUB_SHA:0:12}."
+            notes="OFJ Preview UAT build ${version} (${build_number}) for commit ${GITHUB_SHA:0:12}."
           fi
 
           printf '%s\n' "${notes}" > "${RUNNER_TEMP}/what-to-test.txt"
           printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
           printf 'build_number=%s\n' "${build_number}" >> "${GITHUB_OUTPUT}"
-          printf 'app_id=%s\n' "${app_id}" >> "${GITHUB_OUTPUT}"
           printf 'locale=%s\n' "${locale}" >> "${GITHUB_OUTPUT}"
 
       - name: Draft and validate version-specific release notes
@@ -137,17 +188,17 @@ jobs:
             "${model}"
           printf 'source=%s\n' "$(jq -r '.source' "${RUNNER_TEMP}/release-notes-metadata.json")" >> "${GITHUB_OUTPUT}"
 
-      - name: Install distribution signing assets
+      - name: Install Preview distribution signing assets
         run: bash .github/scripts/install-signing-assets.sh
 
-      - name: Prepare export configuration
+      - name: Prepare Preview export configuration
         run: |
-          bundle_id="$(jq -r '.bundleIdentifier' ci/release-config.json)"
+          bundle_id="${{ steps.preview_config.outputs.bundle_id }}"
           signing_certificate="$(jq -r '.signingCertificateName' ci/release-config.json)"
           export_options="${RUNNER_TEMP}/ExportOptions.plist"
           cp ci/ExportOptions.plist "${export_options}"
           /usr/libexec/PlistBuddy \
-            -c "Set :provisioningProfiles:${bundle_id} ${OFJ_PROFILE_NAME}" \
+            -c "Add :provisioningProfiles:${bundle_id} string ${OFJ_PROFILE_NAME}" \
             "${export_options}"
           /usr/libexec/PlistBuddy \
             -c "Set :signingCertificate ${signing_certificate}" \
@@ -155,16 +206,16 @@ jobs:
           plutil -lint "${export_options}"
           printf 'OFJ_EXPORT_OPTIONS=%s\n' "${export_options}" >> "${GITHUB_ENV}"
 
-      - name: Create signed archive
+      - name: Create signed Preview archive
         run: |
           team_id="$(jq -r '.teamID' ci/release-config.json)"
           signing_certificate="$(jq -r '.signingCertificateName' ci/release-config.json)"
           asc xcode archive \
             --project OpenFoodJournal.xcodeproj \
             --scheme OpenFoodJournal \
-            --configuration Release \
+            --configuration "${{ steps.preview_config.outputs.xcode_config }}" \
             --clean \
-            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --archive-path "${RUNNER_TEMP}/OFJPreview.xcarchive" \
             --xcodebuild-flag=-destination \
             --xcodebuild-flag=generic/platform=iOS \
             --xcodebuild-flag="CODE_SIGN_STYLE=Manual" \
@@ -174,47 +225,45 @@ jobs:
             --xcodebuild-flag="CODE_SIGN_IDENTITY=${signing_certificate}" \
             --output json
 
-      - name: Export signed IPA
+      - name: Export signed Preview IPA
         run: |
           asc xcode export \
-            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --archive-path "${RUNNER_TEMP}/OFJPreview.xcarchive" \
             --export-options "${OFJ_EXPORT_OPTIONS}" \
-            --ipa-path "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+            --ipa-path "${RUNNER_TEMP}/OFJPreview.ipa" \
             --timeout 20m \
             --output json
 
-      - name: Upload and distribute to TestFlight
+      - name: Verify signed Preview bundle ID and CloudKit isolation
         run: |
-          groups="$(jq -r '.testFlightGroupID' ci/release-config.json)"
-          external="$(jq -r '.externalTestFlightGroupID // ""' ci/release-config.json)"
-          if [[ -n "${external}" && "${external}" != "null" ]]; then
-            groups="${groups},${external}"
-          fi
+          team_id="$(jq -r '.teamID' ci/release-config.json)"
+          bash .github/scripts/verify-signed-ipa.sh \
+            "${RUNNER_TEMP}/OFJPreview.ipa" \
+            "${{ steps.preview_config.outputs.bundle_id }}" \
+            "${team_id}" \
+            "${{ steps.preview_config.outputs.cloudkit }}" \
+            "${{ steps.preview_config.outputs.display_name }}"
 
-          # Apple requires Beta App Review before an external group can install,
-          # so ask for it here. asc skips the submission when no external group
-          # was added, which keeps this a no-op while externalTestFlightGroupID
-          # is empty, and it reuses an existing submission rather than creating
-          # a second one.
+      - name: Upload and distribute to OFJ Preview internal TestFlight
+        run: |
+          # Preview UAT is internal-only and never submits to external Beta App Review.
           asc publish testflight \
-            --app "${{ steps.release.outputs.app_id }}" \
-            --ipa "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
-            --group "${groups}" \
+            --app "${{ steps.preview_config.outputs.app_id }}" \
+            --ipa "${RUNNER_TEMP}/OFJPreview.ipa" \
+            --group "${{ steps.preview_config.outputs.group_id }}" \
             --test-notes "$(cat "${RUNNER_TEMP}/what-to-test.txt")" \
             --locale "${{ steps.release.outputs.locale }}" \
-            --submit \
-            --confirm \
             --wait \
             --timeout 45m \
             --output json \
             --pretty > "${RUNNER_TEMP}/testflight-publish.json"
 
-      - name: Create immutable release manifest
+      - name: Create immutable Preview UAT manifest
         id: manifest
         run: |
           build_json="$(
             asc builds list \
-              --app "${{ steps.release.outputs.app_id }}" \
+              --app "${{ steps.preview_config.outputs.app_id }}" \
               --version "${{ steps.release.outputs.version }}" \
               --build-number "${{ steps.release.outputs.build_number }}" \
               --platform IOS \
@@ -223,17 +272,20 @@ jobs:
           )"
           build_id="$(jq -r '.data[0].id // empty' <<< "${build_json}")"
           if [[ -z "${build_id}" ]]; then
-            echo "The processed build could not be resolved after upload." >&2
+            echo "The processed Preview build could not be resolved after upload." >&2
             exit 1
           fi
 
-          ipa_sha="$(shasum -a 256 "${RUNNER_TEMP}/OpenFoodJournal.ipa" | awk '{print $1}')"
+          ipa_sha="$(shasum -a 256 "${RUNNER_TEMP}/OFJPreview.ipa" | awk '{print $1}')"
           what_to_test="$(cat "${RUNNER_TEMP}/what-to-test.txt")"
           whats_new="$(cat "${RUNNER_TEMP}/whats-new.txt")"
           whats_new_sha="$(shasum -a 256 "${RUNNER_TEMP}/whats-new.txt" | awk '{print $1}')"
           manifest="${RUNNER_TEMP}/release-manifest.json"
           jq -n \
-            --arg appStoreAppID "${{ steps.release.outputs.app_id }}" \
+            --arg appStoreAppID "${{ steps.preview_config.outputs.app_id }}" \
+            --arg bundleIdentifier "${{ steps.preview_config.outputs.bundle_id }}" \
+            --arg cloudKitContainerIdentifier "${{ steps.preview_config.outputs.cloudkit }}" \
+            --arg xcodeConfiguration "${{ steps.preview_config.outputs.xcode_config }}" \
             --arg buildID "${build_id}" \
             --arg buildNumber "${{ steps.release.outputs.build_number }}" \
             --arg commitSHA "${GITHUB_SHA}" \
@@ -247,8 +299,12 @@ jobs:
             --arg xcodeBuild "$(jq -r '.requiredXcodeBuild' ci/release-config.json)" \
             --slurpfile notesMetadata "${RUNNER_TEMP}/release-notes-metadata.json" \
             '{
-              schemaVersion: 2,
+              schemaVersion: 3,
+              manifestKind: "preview-uat",
               appStoreAppID: $appStoreAppID,
+              bundleIdentifier: $bundleIdentifier,
+              cloudKitContainerIdentifier: $cloudKitContainerIdentifier,
+              xcodeConfiguration: $xcodeConfiguration,
               buildID: $buildID,
               buildNumber: $buildNumber,
               commitSHA: $commitSHA,
@@ -263,15 +319,15 @@ jobs:
               xcodeBuild: $xcodeBuild
             }' > "${manifest}"
 
-          tag="testflight/${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}"
+          tag="${{ steps.preview_config.outputs.tag_prefix }}${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}"
           printf 'manifest=%s\n' "${manifest}" >> "${GITHUB_OUTPUT}"
           printf 'tag=%s\n' "${tag}" >> "${GITHUB_OUTPUT}"
 
-      - name: Publish immutable manifest prerelease
+      - name: Publish immutable Preview UAT prerelease
         run: |
           gh release create "${{ steps.manifest.outputs.tag }}" \
             --target "${GITHUB_SHA}" \
-            --title "TestFlight ${{ steps.release.outputs.version }} (${{ steps.release.outputs.build_number }})" \
+            --title "OFJ Preview ${{ steps.release.outputs.version }} (${{ steps.release.outputs.build_number }})" \
             --notes-file "${RUNNER_TEMP}/what-to-test.txt" \
             --prerelease \
             --draft
@@ -287,7 +343,7 @@ jobs:
       - name: Retain manifest without retaining DerivedData
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: testflight-manifest-${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}
+          name: preview-uat-manifest-${{ steps.release.outputs.version }}-${{ steps.release.outputs.build_number }}
           path: |
             ${{ steps.manifest.outputs.manifest }}
             ${{ runner.temp }}/what-to-test.txt
@@ -296,17 +352,19 @@ jobs:
             ${{ runner.temp }}/testflight-publish.json
           retention-days: 14
 
-      - name: Write deployment summary
+      - name: Write Preview deployment summary
         run: |
           {
-            echo "## Internal TestFlight"
+            echo "## OFJ Preview TestFlight (Pre-prod UAT)"
             echo
+            echo "- App: \`${{ steps.preview_config.outputs.display_name }}\` (\`${{ steps.preview_config.outputs.bundle_id }}\`)"
+            echo "- CloudKit container: \`${{ steps.preview_config.outputs.cloudkit }}\`"
             echo "- Version: ${{ steps.release.outputs.version }}"
-            echo "- Build: ${{ steps.release.outputs.build_number }}"
+            echo "- Preview build: ${{ steps.release.outputs.build_number }}"
             echo "- Commit: \`${GITHUB_SHA}\`"
-            echo "- Manifest tag: \`${{ steps.manifest.outputs.tag }}\`"
+            echo "- UAT manifest tag: \`${{ steps.manifest.outputs.tag }}\`"
             echo "- What's New source: \`${{ steps.notes.outputs.source }}\`"
-            echo "- Public notes require App Store environment approval before use"
+            echo "- Production app touched: no (isolated Preview container & ASC record)"
             echo "- DerivedData and archive retention: ephemeral runner only"
             echo
             echo "### Draft What's New"

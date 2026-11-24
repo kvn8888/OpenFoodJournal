@@ -9,10 +9,7 @@
 	<key>method</key>
 	<string>app-store-connect</string>
 	<key>provisioningProfiles</key>
-	<dict>
-		<key>k3vnc.OpenFoodJournal</key>
-		<string>__PROFILE_NAME__</string>
-	</dict>
+	<dict/>
 	<key>signingCertificate</key>
 	<string>__SIGNING_CERTIFICATE__</string>
 	<key>signingStyle</key>

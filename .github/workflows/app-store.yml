@@ -7,7 +7,12 @@ on:
   workflow_dispatch:
     inputs:
       submit_for_review:
-        description: Submit the staged build to App Review after strict validation
+        description: Submit the staged production RC build to App Review after strict validation
+        required: true
+        default: false
+        type: boolean
+      distribute_prod_testflight:
+        description: Also distribute a newly built production RC to the production internal TestFlight group
         required: true
         default: false
         type: boolean
@@ -35,9 +40,12 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
     outputs:
-      build_id: ${{ steps.promotion.outputs.build_id }}
-      build_number: ${{ steps.promotion.outputs.build_number }}
-      tag: ${{ steps.promotion.outputs.tag }}
+      preview_tag: ${{ steps.promotion.outputs.preview_tag }}
+      preview_build_number: ${{ steps.promotion.outputs.preview_build_number }}
+      reuse_existing_rc: ${{ steps.promotion.outputs.reuse_existing_rc }}
+      rc_tag: ${{ steps.promotion.outputs.rc_tag }}
+      prod_build_id: ${{ steps.promotion.outputs.prod_build_id }}
+      prod_build_number: ${{ steps.promotion.outputs.prod_build_number }}
       version: ${{ steps.promotion.outputs.version }}
       store_metadata_source: ${{ steps.store_metadata.outputs.source }}
 
@@ -47,43 +55,93 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve tested TestFlight manifest
+      - name: Resolve UAT-tested Preview manifest and any existing production RC
         id: promotion
         run: |
-          tag_prefix="$(jq -r '.testFlightTagPrefix' ci/release-config.json)"
-          testflight_tag="$(
-            git tag --merged HEAD --list "${tag_prefix}*" --sort=-creatordate |
+          preview_prefix="$(jq -r '.preview.tagPrefix' ci/release-config.json)"
+          rc_prefix="$(jq -r '.releaseCandidateTagPrefix' ci/release-config.json)"
+
+          preview_tag="$(
+            git tag --merged HEAD --list "${preview_prefix}*" --sort=-creatordate |
               head -n 1
           )"
-          if [[ -z "${testflight_tag}" ]]; then
-            echo "No tested TestFlight prerelease is reachable from app-store HEAD." >&2
+          if [[ -z "${preview_tag}" ]]; then
+            echo "No UAT-tested Preview prerelease (${preview_prefix}*) is reachable from app-store HEAD." >&2
             exit 1
           fi
 
           manifest_dir="${RUNNER_TEMP}/promotion-manifest"
           mkdir -p "${manifest_dir}"
-          gh release download "${testflight_tag}" \
+          gh release download "${preview_tag}" \
             --pattern 'release-manifest.json' \
             --pattern 'whats-new.txt' \
+            --pattern 'what-to-test.txt' \
+            --pattern 'release-notes-metadata.json' \
             --dir "${manifest_dir}"
           manifest_path="${manifest_dir}/release-manifest.json"
           whats_new_path="${manifest_dir}/whats-new.txt"
           bash .github/scripts/verify-promotion.sh \
-            "${testflight_tag}" \
+            --kind preview-uat \
+            "${preview_tag}" \
             "${manifest_path}" \
             "${whats_new_path}"
 
-          printf 'build_id=%s\n' "$(jq -r '.buildID' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
-          printf 'build_number=%s\n' "$(jq -r '.buildNumber' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
-          printf 'tag=%s\n' "${testflight_tag}" >> "${GITHUB_OUTPUT}"
-          printf 'version=%s\n' "$(jq -r '.version' "${manifest_path}")" >> "${GITHUB_OUTPUT}"
+          version="$(jq -r '.version' "${manifest_path}")"
+          preview_build_number="$(jq -r '.buildNumber' "${manifest_path}")"
+
+          reuse_existing_rc="false"
+          rc_tag=""
+          prod_build_id=""
+          prod_build_number=""
+
+          candidate_rc_tag="$(
+            git tag --merged HEAD --list "${rc_prefix}*" --sort=-creatordate |
+              head -n 1
+          )"
+          if [[ -n "${candidate_rc_tag}" ]]; then
+            rc_dir="${RUNNER_TEMP}/rc-check"
+            mkdir -p "${rc_dir}"
+            if gh release download "${candidate_rc_tag}" \
+              --pattern 'release-manifest.json' \
+              --dir "${rc_dir}" 2>/dev/null
+            then
+              rc_source_preview="$(jq -r '.sourcePreviewTag // empty' "${rc_dir}/release-manifest.json")"
+              if [[ "${rc_source_preview}" == "${preview_tag}" ]] && \
+                bash .github/scripts/verify-promotion.sh \
+                  --kind production-rc \
+                  "${candidate_rc_tag}" \
+                  "${rc_dir}/release-manifest.json" \
+                  "${whats_new_path}" >/dev/null 2>&1
+              then
+                cp "${rc_dir}/release-manifest.json" "${manifest_dir}/prod-rc-manifest.json"
+                reuse_existing_rc="true"
+                rc_tag="${candidate_rc_tag}"
+                prod_build_id="$(jq -r '.buildID' "${manifest_dir}/prod-rc-manifest.json")"
+                prod_build_number="$(jq -r '.buildNumber' "${manifest_dir}/prod-rc-manifest.json")"
+              fi
+            fi
+          fi
+
+          if [[ "${{ inputs.submit_for_review }}" == "true" && "${reuse_existing_rc}" != "true" ]]; then
+            echo "Cannot submit directly to App Review before a production RC build has been staged for ${preview_tag}." >&2
+            echo "Run staging first (push to app-store or dispatch with submit_for_review=false)." >&2
+            exit 1
+          fi
+
+          printf 'preview_tag=%s\n' "${preview_tag}" >> "${GITHUB_OUTPUT}"
+          printf 'preview_build_number=%s\n' "${preview_build_number}" >> "${GITHUB_OUTPUT}"
+          printf 'reuse_existing_rc=%s\n' "${reuse_existing_rc}" >> "${GITHUB_OUTPUT}"
+          printf 'rc_tag=%s\n' "${rc_tag}" >> "${GITHUB_OUTPUT}"
+          printf 'prod_build_id=%s\n' "${prod_build_id}" >> "${GITHUB_OUTPUT}"
+          printf 'prod_build_number=%s\n' "${prod_build_number}" >> "${GITHUB_OUTPUT}"
+          printf 'version=%s\n' "${version}" >> "${GITHUB_OUTPUT}"
 
       - name: Collect product-page evidence
         run: |
           locale="$(jq -r '.primaryLocale' ci/release-config.json)"
 
           # The reviewed What's New already describes this release in
-          # user-facing terms and was validated before the TestFlight tag was
+          # user-facing terms and was validated before the Preview tag was
           # cut, so it is the evidence of record for the rest of the page.
           cp "${RUNNER_TEMP}/promotion-manifest/whats-new.txt" \
             "${RUNNER_TEMP}/store-evidence.txt"
@@ -120,7 +178,7 @@ jobs:
 
             You have the repository, so verify rather than assume: if you want to
             claim a capability, find it in the source first. Drop any claim you
-            cannot ground. Do not describe anything gated behind a Debug build.
+            cannot ground. Do not describe anything gated behind a Debug or Preview build.
 
             Write the result to ${{ runner.temp }}/store-metadata.agent.json as a
             single JSON object with exactly the keys description, keywords and
@@ -164,10 +222,14 @@ jobs:
             echo "## App Store promotion awaiting approval"
             echo
             echo "- Version: ${{ steps.promotion.outputs.version }}"
-            echo "- Build: ${{ steps.promotion.outputs.build_number }}"
-            echo "- Tested manifest: \`${{ steps.promotion.outputs.tag }}\`"
-            echo "- Exact TestFlight binary: yes; no rebuild"
-            echo "- Requested action: ${{ inputs.submit_for_review == true && 'stage, validate, and submit to App Review' || 'stage and validate only' }}"
+            echo "- Verified Preview UAT manifest: \`${{ steps.promotion.outputs.preview_tag }}\` (Preview build ${{ steps.promotion.outputs.preview_build_number }})"
+            if [[ "${{ steps.promotion.outputs.reuse_existing_rc }}" == "true" ]]; then
+              echo "- Production binary: reuse staged \`${{ steps.promotion.outputs.rc_tag }}\` (prod build ${{ steps.promotion.outputs.prod_build_number }}); no rebuild"
+            else
+              echo "- Production binary: archive \`Release\` (\`k3vnc.OpenFoodJournal\`) once from this UAT-verified commit"
+              echo "- Also distribute prod RC to internal TestFlight: ${{ inputs.distribute_prod_testflight == true && 'yes' || 'no' }}"
+            fi
+            echo "- Requested action: ${{ inputs.submit_for_review == true && 'validate and submit staged build to App Review' || 'stage and validate only' }}"
             echo "- Release-note source: \`$(jq -r '.releaseNotes.source' "${manifest}")\`"
             echo "- Product-page source: \`${{ steps.store_metadata.outputs.source }}\`"
             echo
@@ -203,24 +265,29 @@ jobs:
             cat "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
             echo
             echo
-            echo "Approve the protected \`app-store-production\` environment only if this exact build and text are ready."
+            echo "Approve the protected \`app-store-production\` environment only if this exact UAT-verified commit and text are ready for production."
           } >> "${GITHUB_STEP_SUMMARY}"
 
   promote:
-    name: Promote tested build
+    name: Build or promote production release
     needs:
       - cloud-ci
       - prepare
     if: vars.ENABLE_APP_STORE_AUTOMATION == 'true'
     runs-on: macos-26
-    timeout-minutes: 45
+    timeout-minutes: 90
     environment: app-store-production
+    permissions:
+      contents: write
 
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY_B64: ${{ secrets.ASC_PRIVATE_KEY_B64 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_B64: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_B64 }}
+      APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD }}
+      APPLE_PROVISIONING_PROFILE_B64: ${{ secrets.APPLE_PROVISIONING_PROFILE_B64 }}
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -235,11 +302,21 @@ jobs:
           name: app-store-promotion-plan
           path: ${{ runner.temp }}/promotion-manifest
 
-      - name: Reverify approved provenance and notes
+      - name: Reverify approved Preview UAT provenance and notes
         run: |
           bash .github/scripts/verify-promotion.sh \
-            "${{ needs.prepare.outputs.tag }}" \
+            --kind preview-uat \
+            "${{ needs.prepare.outputs.preview_tag }}" \
             "${RUNNER_TEMP}/promotion-manifest/release-manifest.json" \
+            "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
+
+      - name: Reverify existing production RC manifest when reusing
+        if: needs.prepare.outputs.reuse_existing_rc == 'true'
+        run: |
+          bash .github/scripts/verify-promotion.sh \
+            --kind production-rc \
+            "${{ needs.prepare.outputs.rc_tag }}" \
+            "${RUNNER_TEMP}/promotion-manifest/prod-rc-manifest.json" \
             "${RUNNER_TEMP}/promotion-manifest/whats-new.txt"
 
       - name: Reverify approved product-page copy
@@ -257,10 +334,206 @@ jobs:
       - name: Install pinned App Store Connect CLI
         run: bash .github/scripts/install-asc.sh
 
-      - name: Confirm build remains valid in App Store Connect
+      - name: Install production distribution signing assets
+        if: needs.prepare.outputs.reuse_existing_rc != 'true'
+        run: bash .github/scripts/install-signing-assets.sh
+
+      - name: Build, verify, and upload production Release binary once
+        id: build_rc
+        if: needs.prepare.outputs.reuse_existing_rc != 'true'
+        run: |
+          app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
+          bundle_id="$(jq -r '.bundleIdentifier' ci/release-config.json)"
+          cloudkit="$(jq -r '.cloudKitContainerIdentifier' ci/release-config.json)"
+          display_name="$(jq -r '.displayName' ci/release-config.json)"
+          team_id="$(jq -r '.teamID' ci/release-config.json)"
+          signing_certificate="$(jq -r '.signingCertificateName' ci/release-config.json)"
+          rc_prefix="$(jq -r '.releaseCandidateTagPrefix' ci/release-config.json)"
+          version="${{ needs.prepare.outputs.version }}"
+          locale="$(jq -r '.primaryLocale' "${RUNNER_TEMP}/promotion-manifest/release-manifest.json")"
+
+          asc apps view --id "${app_id}" --output json > "${RUNNER_TEMP}/prod-app.json"
+          resolved_bundle_id="$(jq -r '.data.attributes.bundleId // empty' "${RUNNER_TEMP}/prod-app.json")"
+          if [[ "${resolved_bundle_id}" != "${bundle_id}" ]]; then
+            echo "App Store Connect app ${app_id} has bundle ID ${resolved_bundle_id:-<missing>}, expected ${bundle_id}." >&2
+            exit 1
+          fi
+
+          release_version="$(
+            asc xcode version view \
+              --project OpenFoodJournal.xcodeproj \
+              --target OpenFoodJournal \
+              --configuration Release \
+              --output json | jq -r '.version'
+          )"
+          if [[ "${release_version}" != "${version}" ]]; then
+            echo "Release MARKETING_VERSION (${release_version}) does not match Preview UAT version (${version})." >&2
+            exit 1
+          fi
+
+          build_number="$(
+            asc builds next-build-number \
+              --app "${app_id}" \
+              --version "${version}" \
+              --platform IOS \
+              --output json | jq -r '.nextBuildNumber'
+          )"
+          if [[ -z "${build_number}" || "${build_number}" == "null" ]]; then
+            echo "Could not allocate a production build number for ${version}." >&2
+            exit 1
+          fi
+
+          export_options="${RUNNER_TEMP}/ExportOptions.plist"
+          cp ci/ExportOptions.plist "${export_options}"
+          /usr/libexec/PlistBuddy \
+            -c "Add :provisioningProfiles:${bundle_id} string ${OFJ_PROFILE_NAME}" \
+            "${export_options}"
+          /usr/libexec/PlistBuddy \
+            -c "Set :signingCertificate ${signing_certificate}" \
+            "${export_options}"
+          plutil -lint "${export_options}"
+
+          asc xcode archive \
+            --project OpenFoodJournal.xcodeproj \
+            --scheme OpenFoodJournal \
+            --configuration Release \
+            --clean \
+            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --xcodebuild-flag=-destination \
+            --xcodebuild-flag=generic/platform=iOS \
+            --xcodebuild-flag="CODE_SIGN_STYLE=Manual" \
+            --xcodebuild-flag="DEVELOPMENT_TEAM=${team_id}" \
+            --xcodebuild-flag="CURRENT_PROJECT_VERSION=${build_number}" \
+            --xcodebuild-flag="PROVISIONING_PROFILE_SPECIFIER=${OFJ_PROFILE_NAME}" \
+            --xcodebuild-flag="CODE_SIGN_IDENTITY=${signing_certificate}" \
+            --output json
+
+          asc xcode export \
+            --archive-path "${RUNNER_TEMP}/OpenFoodJournal.xcarchive" \
+            --export-options "${export_options}" \
+            --ipa-path "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+            --timeout 20m \
+            --output json
+
+          bash .github/scripts/verify-signed-ipa.sh \
+            "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+            "${bundle_id}" \
+            "${team_id}" \
+            "${cloudkit}" \
+            "${display_name}"
+
+          if [[ "${{ inputs.distribute_prod_testflight }}" == "true" ]]; then
+            prod_group="$(jq -r '.testFlightGroupID' ci/release-config.json)"
+            asc publish testflight \
+              --app "${app_id}" \
+              --ipa "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+              --group "${prod_group}" \
+              --test-notes "$(cat "${RUNNER_TEMP}/promotion-manifest/what-to-test.txt")" \
+              --locale "${locale}" \
+              --wait \
+              --timeout 45m \
+              --output json \
+              --pretty > "${RUNNER_TEMP}/prod-upload.json"
+          else
+            asc builds upload \
+              --app "${app_id}" \
+              --ipa "${RUNNER_TEMP}/OpenFoodJournal.ipa" \
+              --wait \
+              --output json \
+              --pretty > "${RUNNER_TEMP}/prod-upload.json"
+          fi
+
+          build_id="$(
+            asc builds list \
+              --app "${app_id}" \
+              --version "${version}" \
+              --build-number "${build_number}" \
+              --platform IOS \
+              --processing-state VALID \
+              --output json | jq -r '.data[0].id // empty'
+          )"
+          if [[ -z "${build_id}" ]]; then
+            echo "The processed production build could not be resolved after upload." >&2
+            exit 1
+          fi
+
+          ipa_sha="$(shasum -a 256 "${RUNNER_TEMP}/OpenFoodJournal.ipa" | awk '{print $1}')"
+          preview_manifest="${RUNNER_TEMP}/promotion-manifest/release-manifest.json"
+          rc_manifest="${RUNNER_TEMP}/promotion-manifest/prod-rc-manifest.json"
+          jq -n \
+            --arg sourcePreviewTag "${{ needs.prepare.outputs.preview_tag }}" \
+            --arg appStoreAppID "${app_id}" \
+            --arg bundleIdentifier "${bundle_id}" \
+            --arg cloudKitContainerIdentifier "${cloudkit}" \
+            --arg buildID "${build_id}" \
+            --arg buildNumber "${build_number}" \
+            --arg commitSHA "${GITHUB_SHA}" \
+            --arg createdAt "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg ipaSHA256 "${ipa_sha}" \
+            --arg xcodeBuild "$(jq -r '.requiredXcodeBuild' ci/release-config.json)" \
+            --slurpfile preview "${preview_manifest}" \
+            '{
+              schemaVersion: 3,
+              manifestKind: "production-rc",
+              sourcePreviewTag: $sourcePreviewTag,
+              appStoreAppID: $appStoreAppID,
+              bundleIdentifier: $bundleIdentifier,
+              cloudKitContainerIdentifier: $cloudKitContainerIdentifier,
+              xcodeConfiguration: "Release",
+              buildID: $buildID,
+              buildNumber: $buildNumber,
+              commitSHA: $commitSHA,
+              createdAt: $createdAt,
+              ipaSHA256: $ipaSHA256,
+              primaryLocale: $preview[0].primaryLocale,
+              whatToTest: $preview[0].whatToTest,
+              whatsNew: $preview[0].whatsNew,
+              whatsNewSHA256: $preview[0].whatsNewSHA256,
+              releaseNotes: $preview[0].releaseNotes,
+              version: $preview[0].version,
+              xcodeBuild: $xcodeBuild
+            }' > "${rc_manifest}"
+
+          rc_tag="${rc_prefix}${version}-${build_number}"
+          gh release create "${rc_tag}" \
+            --target "${GITHUB_SHA}" \
+            --title "Production RC ${version} (${build_number})" \
+            --notes-file "${RUNNER_TEMP}/promotion-manifest/what-to-test.txt" \
+            --prerelease \
+            --draft
+          gh release upload "${rc_tag}" \
+            "${rc_manifest}#release-manifest.json" \
+            "${RUNNER_TEMP}/promotion-manifest/what-to-test.txt#what-to-test.txt" \
+            "${RUNNER_TEMP}/promotion-manifest/whats-new.txt#whats-new.txt" \
+            "${RUNNER_TEMP}/promotion-manifest/release-notes-metadata.json#release-notes-metadata.json"
+          gh release edit "${rc_tag}" \
+            --draft=false \
+            --prerelease
+
+          printf 'build_id=%s\n' "${build_id}" >> "${GITHUB_OUTPUT}"
+          printf 'build_number=%s\n' "${build_number}" >> "${GITHUB_OUTPUT}"
+          printf 'rc_tag=%s\n' "${rc_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve active production build identity
+        id: active_build
+        run: |
+          if [[ "${{ needs.prepare.outputs.reuse_existing_rc }}" == "true" ]]; then
+            build_id="${{ needs.prepare.outputs.prod_build_id }}"
+            build_number="${{ needs.prepare.outputs.prod_build_number }}"
+            rc_tag="${{ needs.prepare.outputs.rc_tag }}"
+          else
+            build_id="${{ steps.build_rc.outputs.build_id }}"
+            build_number="${{ steps.build_rc.outputs.build_number }}"
+            rc_tag="${{ steps.build_rc.outputs.rc_tag }}"
+          fi
+          printf 'build_id=%s\n' "${build_id}" >> "${GITHUB_OUTPUT}"
+          printf 'build_number=%s\n' "${build_number}" >> "${GITHUB_OUTPUT}"
+          printf 'rc_tag=%s\n' "${rc_tag}" >> "${GITHUB_OUTPUT}"
+
+      - name: Confirm production build remains valid in App Store Connect
         run: |
           asc builds info \
-            --build-id "${{ needs.prepare.outputs.build_id }}" \
+            --build-id "${{ steps.active_build.outputs.build_id }}" \
             --output json \
             --pretty > "${RUNNER_TEMP}/build-info.json"
           processing_state="$(jq -r '.data.attributes.processingState // .attributes.processingState // empty' "${RUNNER_TEMP}/build-info.json")"
@@ -294,22 +567,20 @@ jobs:
           fi
           printf 'version=%s\n' "${source_version}" >> "${GITHUB_OUTPUT}"
 
-      - name: Stage exact TestFlight build for the App Store
+      - name: Stage production build for the App Store
+        if: inputs.submit_for_review != true
         run: |
           app_id="$(jq -r '.appStoreAppID' ci/release-config.json)"
 
-          # Fields the manifest replaces must not also be copied forward from
-          # the live version, or the copy would win over the reviewed text.
-          exclude_fields="whatsNew"
-          if [[ -s "${RUNNER_TEMP}/promotion-manifest/store-metadata.json" ]]; then
-            exclude_fields="whatsNew,description,keywords,promotionalText"
-          fi
+          # release stage performs its own readiness validation. Copy the
+          # complete public localization as a temporary valid baseline so a
+          # newly created version is not rejected for an empty What's New or
+          # description before the next step pushes the reviewed manifest.
           asc release stage \
             --app "${app_id}" \
             --version "${{ needs.prepare.outputs.version }}" \
-            --build "${{ needs.prepare.outputs.build_id }}" \
+            --build "${{ steps.active_build.outputs.build_id }}" \
             --copy-metadata-from "${{ steps.public_version.outputs.version }}" \
-            --exclude-fields "${exclude_fields}" \
             --checkpoint-file "${RUNNER_TEMP}/app-store-stage-checkpoint.json" \
             --confirm \
             --output json \
@@ -357,7 +628,7 @@ jobs:
           asc review submit \
             --app "${app_id}" \
             --version "${{ needs.prepare.outputs.version }}" \
-            --build "${{ needs.prepare.outputs.build_id }}" \
+            --build "${{ steps.active_build.outputs.build_id }}" \
             --confirm \
             --output json \
             --pretty > "${RUNNER_TEMP}/app-review-submission.json"
@@ -368,9 +639,9 @@ jobs:
             echo "## App Store promotion"
             echo
             echo "- Version: ${{ needs.prepare.outputs.version }}"
-            echo "- Build: ${{ needs.prepare.outputs.build_number }}"
-            echo "- Tested manifest: \`${{ needs.prepare.outputs.tag }}\`"
-            echo "- Rebuilt: no; exact TestFlight build promoted"
+            echo "- Production build: ${{ steps.active_build.outputs.build_number }} (\`${{ steps.active_build.outputs.rc_tag }}\`)"
+            echo "- Verified Preview UAT tag: \`${{ needs.prepare.outputs.preview_tag }}\`"
+            echo "- Rebuilt on this run: ${{ needs.prepare.outputs.reuse_existing_rc == 'true' && 'no; exact staged production RC reused' || 'yes; archived Release once from UAT-verified commit' }}"
             echo "- Product-page source: \`${{ needs.prepare.outputs.store_metadata_source }}\`"
             echo "- Submitted for review: ${{ inputs.submit_for_review || false }}"
           } >> "${GITHUB_STEP_SUMMARY}"
