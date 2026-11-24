@@ -176,6 +176,6 @@ private extension SiriNutritionDraft {
             }
             return "Assistant estimates \(macros) for \(portion). Add to \(meal) on \(day)?"
         }
-        return "Add \(portion) to \(meal) on \(day)? That's \(macros)."
+        return "Your Food Bank lists \(macros) for \(portion). Add to \(meal) on \(day)?"
     }
 }
