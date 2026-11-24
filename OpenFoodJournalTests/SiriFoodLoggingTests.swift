@@ -70,6 +70,94 @@ struct SiriFoodLoggingTests {
         #expect(tea.dayOffset == -1)
     }
 
+    @Test(arguments: ["I drink one cup of milk", "I had a cup of milk.", "Log 1 cup of milk"])
+    func matchesSavedMilkFromSpokenPortions(_ phrase: String) throws {
+        let fixture = try Fixture()
+        let milk = SavedFood(name: "Whole Milk", brand: "Amazon Grocery", createdAt: fixture.now,
+                             calories: 160, protein: 8, carbs: 13, fat: 9, servingQuantity: 1, servingUnit: "cup")
+        fixture.context.insert(milk)
+
+        let request = try fixture.service.resolve(phrase)
+        #expect(request.name == "milk")
+        #expect(request.quantity == 1)
+        #expect(request.unit == "cup")
+        let match = try fixture.service.search(request.name)
+        guard case .exact(let savedFood) = match else {
+            Issue.record("Expected the spoken portion to preserve the saved-food match")
+            return
+        }
+        let draft = try fixture.service.foodBankDraft(for: savedFood.id, request: request)
+        #expect(draft.savedFoodID == milk.id)
+        #expect(draft.calories == 160)
+        #expect(!draft.isAssistantEstimate)
+    }
+
+    @Test(arguments: ["One Degree Organic Oats", "A Taste of Thai"])
+    func preservesFoodNamesThatBeginWithAnAmountWord(_ name: String) {
+        let query = SiriSpokenFoodQuery(name)
+        #expect(query.name == name)
+        #expect(query.quantity == nil)
+    }
+
+    @Test
+    func matchesJoinedSpeechWordsWithoutGuessingBetweenSavedFoods() throws {
+        let fixture = try Fixture()
+        let pie = fixture.addFood("Key Lime Pie", brand: "Costco")
+        let request = try fixture.service.resolve("1 g of Keylime Pie from Costco")
+        #expect(try fixture.service.search(request.name).foods.map(\.id) == [pie.id])
+
+        let otherPie = fixture.addFood("Key Lime Pie", brand: "Bakery")
+        guard case .ambiguous(let matches) = try fixture.service.search("Keylime Pie") else {
+            Issue.record("Expected both saved pies")
+            return
+        }
+        #expect(Set(matches.map(\.id)) == [pie.id, otherPie.id])
+    }
+
+    @Test
+    func matchesAPotPieAndUsesItsStoredServing() throws {
+        let fixture = try Fixture()
+        let pie = SavedFood(name: "Marie Callender’s Chicken Pot Pie (10 oz; Costco 8-pack)", createdAt: fixture.now,
+                            calories: 610, protein: 17, carbs: 55, fat: 36, servingQuantity: 1, servingUnit: "pie")
+        fixture.context.insert(pie)
+
+        let request = try fixture.service.resolve("One serving of Marie Callender’s Chicken Pot Pie")
+        let match = try fixture.service.search(request.name)
+        guard case .exact(let savedFood) = match else {
+            Issue.record("Expected the saved pot pie")
+            return
+        }
+        let draft = try fixture.service.foodBankDraft(for: savedFood.id, request: request)
+        #expect(draft.savedFoodID == pie.id)
+        #expect(draft.quantity == 1)
+        #expect(draft.unit == "pie")
+        #expect(draft.calories == 610)
+
+        let cashews = fixture.addFood("Cashews")
+        let half = try fixture.service.resolve("Half a serving of cashews")
+        let halfDraft = try fixture.service.foodBankDraft(for: cashews.id, request: half)
+        #expect(halfDraft.quantity == 50)
+        #expect(halfDraft.unit == "g")
+        #expect(halfDraft.calories == 125)
+    }
+
+    @Test
+    func explicitFoodBankMissNeverInvokesAssistant() async throws {
+        let fixture = try Fixture { _, _, _ in
+            Issue.record("An explicit Food Bank request must stay local")
+            return try Self.estimate()
+        }
+        let request = try fixture.service.resolve("One serving of soup from my Food Bank for lunch today.")
+        #expect(request.name == "soup")
+        #expect(request.meal == .lunch)
+        #expect(request.foodBankOnly)
+        #expect(try fixture.service.search(request.name).foods.isEmpty)
+        await #expect(throws: SiriFoodLoggingError.foodBankMatchNotFound) {
+            try await fixture.service.assistantDraft(for: request)
+        }
+        #expect(try fixture.entries().isEmpty)
+    }
+
     @Test
     func disambiguatesActiveFoodBankItemsByRecency() throws {
         let fixture = try Fixture()
