@@ -28,6 +28,45 @@ private final class FakeBackgroundScheduler: ChatBackgroundScheduling {
 }
 
 @MainActor
+private final class FakeBackgroundTransitionAssertion: ChatBackgroundTransitionAssertion {
+    var endCount = 0
+    private(set) var isEnded = false
+    let onExpiration: @MainActor () -> Void
+
+    init(onExpiration: @escaping @MainActor () -> Void) {
+        self.onExpiration = onExpiration
+    }
+
+    func end() {
+        guard !isEnded else { return }
+        isEnded = true
+        endCount += 1
+    }
+}
+
+@MainActor
+private final class FakeBackgroundTransitionAsserter: ChatBackgroundTransitionAsserting {
+    var deny = false
+    var assertions: [FakeBackgroundTransitionAssertion] = []
+
+    func begin(
+        name: String,
+        onExpiration: @escaping @MainActor () -> Void
+    ) -> (any ChatBackgroundTransitionAssertion)? {
+        guard !deny else { return nil }
+        let assertion = FakeBackgroundTransitionAssertion(onExpiration: onExpiration)
+        assertions.append(assertion)
+        return assertion
+    }
+
+    func expireLatest() {
+        guard let latest = assertions.last else { return }
+        latest.onExpiration()
+        latest.end()
+    }
+}
+
+@MainActor
 struct ChatBackgroundExecutionTests {
     @Test func interruptedPartialToolStreamMustNotExecuteItsPendingCall() async throws {
         let harness = try ChatTestHarness()
@@ -144,5 +183,166 @@ struct ChatBackgroundExecutionTests {
         subject.finish(success: true)
         #expect(active.completions == [true])
         #expect(scheduler.cancellations.contains(current))
+    }
+
+    @Test func backgroundingWhileRequestingSurvivesUntilAdmissionAndSyncsLatestPhase() async throws {
+        let harness = try ChatTestHarness()
+        let scheduler = FakeBackgroundScheduler()
+        let asserter = FakeBackgroundTransitionAsserter()
+        let execution = ChatBackgroundExecution(
+            scheduler: scheduler,
+            transitionAsserter: asserter,
+            admissionGraceDuration: .seconds(5)
+        )
+        harness.service.backgroundExecution = execution
+        harness.proxy.enqueue(ChatModelTurn(text: "Big Mac: 580 kcal, 25g protein"))
+        harness.proxy.preResultEvents = [.visibleText("Looking up Big Mac")]
+        harness.proxy.nextTurnDelayNanoseconds = 150_000_000
+        let thread = harness.makeThread()
+        _ = harness.service.submit("Check Big Mac macros", in: thread)
+        for _ in 0..<1_000 where harness.service.streamingText.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let run = try #require(thread.agentRuns?.last)
+        #expect(execution.isAwaitingAdmission)
+        #expect(!execution.canContinue)
+
+        // User swipes home before iOS delivers BGTaskScheduler's async onStart callback.
+        harness.service.applicationDidEnterBackground()
+        #expect(harness.service.isStreaming)
+        #expect(run.phase != .suspended)
+        #expect(asserter.assertions.count == 1)
+        #expect(asserter.assertions[0].isEnded == false)
+
+        // iOS delivers the BGContinuedProcessingTask launch handler shortly afterward.
+        let task = FakeBackgroundTask()
+        scheduler.starts[run.id]?(task)
+        #expect(execution.canContinue)
+        #expect(asserter.assertions[0].isEnded == true)
+        #expect(task.subtitles.last == "Waiting for response")
+        #expect((task.events.last ?? 0) >= 1)
+
+        for _ in 0..<2_000 where harness.service.isStreaming {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(run.state == .completed)
+        #expect(task.completions == [true])
+    }
+
+    @Test func backgroundingWhileRequestingSuspendsIfAdmissionTimesOut() async throws {
+        let harness = try ChatTestHarness()
+        let scheduler = FakeBackgroundScheduler()
+        let asserter = FakeBackgroundTransitionAsserter()
+        harness.service.backgroundExecution = ChatBackgroundExecution(
+            scheduler: scheduler,
+            transitionAsserter: asserter,
+            admissionGraceDuration: .milliseconds(30)
+        )
+        harness.proxy.enqueue(ChatModelTurn(text: "Too late"))
+        harness.proxy.preResultEvents = [.visibleText("Partial while waiting")]
+        harness.proxy.nextTurnDelayNanoseconds = 30_000_000_000
+        let thread = harness.makeThread()
+        _ = harness.service.submit("Immediate swipe", in: thread)
+        for _ in 0..<1_000 where harness.service.streamingText.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let run = try #require(thread.agentRuns?.last)
+
+        harness.service.applicationDidEnterBackground()
+        #expect(harness.service.isStreaming)
+        #expect(asserter.assertions.count == 1)
+
+        // Never call scheduler.starts[run.id]; grace timeout must cleanly suspend.
+        for _ in 0..<1_000 where harness.service.isStreaming {
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        #expect(run.phase == .suspended)
+        #expect(run.partialVisibleAnswer == "Partial while waiting")
+        #expect(asserter.assertions[0].isEnded == true)
+        #expect(scheduler.cancellations.contains(run.id))
+    }
+
+    @Test func backgroundingWhileRequestingSuspendsOnAssertionExpirationOrDenial() async throws {
+        // Early UIKit assertion expiration suspends cleanly and idempotently.
+        let harness = try ChatTestHarness()
+        let scheduler = FakeBackgroundScheduler()
+        let asserter = FakeBackgroundTransitionAsserter()
+        harness.service.backgroundExecution = ChatBackgroundExecution(
+            scheduler: scheduler,
+            transitionAsserter: asserter,
+            admissionGraceDuration: .seconds(5)
+        )
+        harness.proxy.enqueue(ChatModelTurn(text: "Never completes"))
+        harness.proxy.preResultEvents = [.visibleText("Saved on assertion expiry")]
+        harness.proxy.nextTurnDelayNanoseconds = 30_000_000_000
+        let thread = harness.makeThread()
+        _ = harness.service.submit("Expire assertion", in: thread)
+        for _ in 0..<1_000 where harness.service.streamingText.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let run = try #require(thread.agentRuns?.last)
+
+        harness.service.applicationDidEnterBackground()
+        #expect(harness.service.isStreaming)
+        asserter.expireLatest()
+        asserter.expireLatest()
+        for _ in 0..<1_000 where harness.service.isStreaming {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(run.phase == .suspended)
+        #expect(run.partialVisibleAnswer == "Saved on assertion expiry")
+        #expect(asserter.assertions[0].endCount == 1)
+
+        // Denied UIKit assertion suspends immediately without leaving work unasserted.
+        harness.service.applicationDidBecomeActive()
+        asserter.deny = true
+        harness.proxy.enqueue(ChatModelTurn(text: "Denied assertion"))
+        harness.proxy.preResultEvents = [.visibleText("Immediate suspend")]
+        harness.proxy.nextTurnDelayNanoseconds = 30_000_000_000
+        let secondThread = harness.makeThread()
+        _ = harness.service.submit("Denied bridge", in: secondThread)
+        for _ in 0..<1_000 where harness.service.streamingText.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(harness.service.backgroundExecution?.isAwaitingAdmission == true)
+        harness.service.applicationDidEnterBackground()
+        for _ in 0..<1_000 where harness.service.isStreaming {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(secondThread.agentRuns?.last?.phase == .suspended)
+    }
+
+    @Test func returningToForegroundCancelsAdmissionGraceTimeoutWithoutSuspending() async throws {
+        let harness = try ChatTestHarness()
+        let scheduler = FakeBackgroundScheduler()
+        let asserter = FakeBackgroundTransitionAsserter()
+        harness.service.backgroundExecution = ChatBackgroundExecution(
+            scheduler: scheduler,
+            transitionAsserter: asserter,
+            admissionGraceDuration: .milliseconds(30)
+        )
+        harness.proxy.enqueue(ChatModelTurn(text: "Foreground completed"))
+        harness.proxy.preResultEvents = [.visibleText("Still running")]
+        harness.proxy.nextTurnDelayNanoseconds = 120_000_000
+        let thread = harness.makeThread()
+        _ = harness.service.submit("Quick app switch", in: thread)
+        for _ in 0..<1_000 where harness.service.streamingText.isEmpty {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        let run = try #require(thread.agentRuns?.last)
+
+        harness.service.applicationDidEnterBackground()
+        #expect(asserter.assertions.count == 1)
+        #expect(asserter.assertions[0].isEnded == false)
+
+        // User returns to foreground before the 30ms grace timeout fires.
+        harness.service.applicationDidBecomeActive()
+        #expect(asserter.assertions[0].isEnded == true)
+
+        // Wait past the grace timeout; the foreground run must complete normally.
+        for _ in 0..<2_000 where harness.service.isStreaming {
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
+        #expect(run.state == .completed)
     }
 }
