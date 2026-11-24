@@ -415,10 +415,10 @@ final class NutritionStore {
 
         var summary = BackupImportSummary()
 
-        var logsByID = keyedByID((try? modelContext.fetch(FetchDescriptor<DailyLog>())) ?? []) { $0.id }
-        var foodsByID = keyedByID((try? modelContext.fetch(FetchDescriptor<SavedFood>())) ?? []) { $0.id }
-        var entriesByID = keyedByID((try? modelContext.fetch(FetchDescriptor<NutritionEntry>())) ?? []) { $0.id }
-        var containersByID = keyedByID((try? modelContext.fetch(FetchDescriptor<TrackedContainer>())) ?? []) { $0.id }
+        var logsByID = keyedByID(try modelContext.fetch(FetchDescriptor<DailyLog>())) { $0.id }
+        var foodsByID = keyedByID(try modelContext.fetch(FetchDescriptor<SavedFood>())) { $0.id }
+        var entriesByID = keyedByID(try modelContext.fetch(FetchDescriptor<NutritionEntry>())) { $0.id }
+        var containersByID = keyedByID(try modelContext.fetch(FetchDescriptor<TrackedContainer>())) { $0.id }
 
         for record in backup.dailyLogs {
             if let log = logsByID[record.id] {
@@ -482,7 +482,9 @@ final class NutritionStore {
         }
         backup.userGoals.apply(to: goals)
 
-        save()
+        try modelContext.save()
+        tursoMirror?.scheduleMirror(reason: "backup_import")
+        changeCount += 1
         return summary
     }
 

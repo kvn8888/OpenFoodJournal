@@ -109,9 +109,49 @@ struct SettingsView: View {
     @State private var showHealthKitSyncResult = false
     @State private var healthKitSyncResultMessage = ""
     @State private var showHealthKitRepairConfirmation = false
+    @State private var showPreviewHealthKitConfirmation = false
+
+    private var healthKitToggleBinding: Binding<Bool> {
+        Binding(
+            get: { healthKitEnabled },
+            set: { wantsEnabled in
+                if wantsEnabled && OFJBuildEnvironment.current.requiresHealthKitOptInWarning {
+                    showPreviewHealthKitConfirmation = true
+                } else {
+                    healthKitEnabled = wantsEnabled
+                    if wantsEnabled {
+                        Task { await healthKit.requestAuthorization() }
+                    }
+                }
+            }
+        )
+    }
 
     var body: some View {
         Form {
+            if OFJBuildEnvironment.current.showsEnvironmentDiagnosticsInSettings {
+                Section {
+                    LabeledContent("Environment") {
+                        Text(OFJBuildEnvironment.current.displayName)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(OFJBuildEnvironment.current == .preview ? .orange : .secondary)
+                    }
+                    LabeledContent(
+                        "Bundle ID",
+                        value: Bundle.main.bundleIdentifier
+                            ?? OFJBuildEnvironment.current.expectedBundleIdentifier
+                    )
+                    LabeledContent(
+                        "iCloud Container",
+                        value: MacrosApp.cloudKitContainerIdentifier
+                    )
+                } header: {
+                    Text("Build Environment")
+                } footer: {
+                    Text("This build uses an isolated bundle identifier and private iCloud container, separate from the App Store OpenFoodJournal app.")
+                }
+            }
+
             // MARK: Appearance
             Section {
                 Picker("Accent Color", selection: $accentThemeRawValue) {
@@ -743,14 +783,18 @@ struct SettingsView: View {
 
                 // MARK: Integrations
                 Section {
-                    Toggle(isOn: $healthKitEnabled) {
+                    Toggle(isOn: healthKitToggleBinding) {
                         Label("Write to Apple Health", systemImage: "heart.fill")
                             .foregroundStyle(.red)
                     }
-                    .onChange(of: healthKitEnabled) { _, enabled in
-                        if enabled {
-                            Task { await healthKit.requestAuthorization() }
-                        }
+
+                    if OFJBuildEnvironment.current.requiresHealthKitOptInWarning && !healthKitEnabled {
+                        Label(
+                            "Off by default in OFJ Preview so UAT entries do not mix with your real Apple Health history.",
+                            systemImage: "shield.lefthalf.filled"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                     }
 
                     if healthKitEnabled && !healthKit.isAuthorized {
@@ -943,6 +987,19 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(healthKitSyncResultMessage)
+        }
+        .confirmationDialog(
+            "Enable Apple Health in Preview?",
+            isPresented: $showPreviewHealthKitConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Enable for Debugging", role: .destructive) {
+                healthKitEnabled = true
+                Task { await healthKit.requestAuthorization() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Apple Health is shared across all apps on this iPhone. Enabling this in OFJ Preview will write test meals into your real Apple Health data alongside OpenFoodJournal.\n\nOnly enable this when investigating a HealthKit issue. You can remove Preview samples afterward in Health → Sharing → Apps → OFJ Preview → Delete All Data.")
         }
         .confirmationDialog(
             "Repair Apple Health Nutrition?",

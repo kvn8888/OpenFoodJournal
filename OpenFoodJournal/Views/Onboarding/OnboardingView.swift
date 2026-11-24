@@ -42,8 +42,17 @@ struct OnboardingView: View {
     @State private var apiKeySaved = false
     @State private var openRouterAPIKeySaved = false
 
-    // Total number of onboarding pages
-    private let pageCount = 6
+    private var showsHealthKitPage: Bool {
+        OFJBuildEnvironment.current.showsHealthKitInOnboarding
+    }
+
+    private var welcomeDisplayName: String {
+        if OFJBuildEnvironment.current == .release {
+            return "OpenFoodJournal"
+        }
+        return Bundle.main.infoDictionary?["CFBundleDisplayName"] as? String
+            ?? OFJBuildEnvironment.current.displayName
+    }
 
     var body: some View {
         TabView(selection: $currentPage) {
@@ -67,9 +76,11 @@ struct OnboardingView: View {
             radialMenuTutorialPage
                 .tag(4)
 
-            // Page 5: HealthKit + finish
-            healthKitPage
-                .tag(5)
+            if showsHealthKitPage {
+                // Page 5: HealthKit + finish
+                healthKitPage
+                    .tag(5)
+            }
         }
         .tabViewStyle(.page(indexDisplayMode: .always))
         .indexViewStyle(.page(backgroundDisplayMode: .always))
@@ -101,8 +112,20 @@ struct OnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .shadow(radius: 8, y: 4)
 
-            Text("OpenFoodJournal")
-                .font(.largeTitle.bold())
+            VStack(spacing: 8) {
+                Text(welcomeDisplayName)
+                    .font(.largeTitle.bold())
+
+                if let badge = OFJBuildEnvironment.current.shortBadge {
+                    Text(badge)
+                        .font(.caption.bold())
+                        .tracking(1)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.orange.opacity(0.18), in: Capsule())
+                        .foregroundStyle(.orange)
+                }
+            }
 
             Text("Track your nutrition with AI-powered label scanning, a personal food bank, and smart macro tracking.")
                 .font(.body)
@@ -359,9 +382,29 @@ struct OnboardingView: View {
 
             Spacer()
 
-            nextButton
+            if showsHealthKitPage {
+                nextButton
+            } else {
+                getStartedButton
+            }
         }
         .padding()
+    }
+
+    private var getStartedButton: some View {
+        Button {
+            completeOnboarding()
+        } label: {
+            Text("Get Started")
+                .font(.headline.bold())
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.accentColor)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .padding(.horizontal, 32)
+        .padding(.bottom, 32)
     }
 
     // MARK: - Page 5: HealthKit + Finish
@@ -488,8 +531,8 @@ struct OnboardingView: View {
         userGoals.dailyCarbs = carbsGoal
         userGoals.dailyFat = fatGoal
 
-        // Enable HealthKit if user opted in
-        if healthKitEnabled {
+        // Enable HealthKit only when the HealthKit onboarding step is shown and opted into.
+        if showsHealthKitPage && healthKitEnabled {
             UserDefaults.standard.set(true, forKey: "healthkit.enabled")
             Task { await healthKit.requestAuthorization() }
         }

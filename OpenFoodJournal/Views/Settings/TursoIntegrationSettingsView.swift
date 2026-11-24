@@ -42,6 +42,14 @@ struct TursoIntegrationSettingsView: View {
                     )
                     .foregroundStyle(.secondary)
                 }
+            } else if OFJBuildEnvironment.current.showsTursoPreviewWarning {
+                Section {
+                    Label(
+                        "OFJ Preview can mirror to Turso for testing, but only point it at a dedicated preview database — never your production Turso URL.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .foregroundStyle(.orange)
+                }
             }
 
             Section {
