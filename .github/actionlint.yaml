@@ -1,8 +1,7 @@
 self-hosted-runner:
-  # Keep the pinned hosted macOS label explicit for actionlint versions whose
-  # runner catalog predates the current GitHub image.
+  # Allow GitHub's hosted Xcode label in older actionlint versions.
   labels:
-    - macos-26
+    - xcode-27
 
 config-variables:
   - ENABLE_APP_STORE_AUTOMATION
