@@ -2,6 +2,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 /// Edit a logged entry — adjust serving quantity, unit, and meal type.
@@ -233,12 +234,14 @@ struct EditEntryView: View {
             HStack {
                 Text("Quantity")
                 Spacer()
-                TextField("1", text: $quantityText)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
+                OFJNumericTextField(
+                    placeholder: "1",
+                    text: $quantityText,
+                    textAlignment: .right
+                )
                     .frame(width: 80)
                     .onChange(of: quantityText) { _, newVal in
-                        if let val = Double(newVal), val > 0 {
+                        if let val = OFJNumericInput.parse(newVal), val > 0 {
                             quantity = val
                         }
                     }

@@ -33,7 +33,7 @@ struct LogFoodSheet: View {
     @State private var quantity: Double
     // Text backing for the quantity field — avoids cursor-jump with direct Double binding
     @State private var quantityText: String
-    @FocusState private var quantityIsFocused: Bool
+    @State private var quantityIsFocused = false
     @State private var unitStripContentWidth: CGFloat = 0
     @State private var unitStripViewportWidth: CGFloat = 0
     // The unit the user has selected for this log (may differ from the food's stored unit)
@@ -460,15 +460,17 @@ struct LogFoodSheet: View {
                         action: decrementQuantity
                     )
 
-                    TextField("Amount", text: $quantityText)
-                        .keyboardType(.decimalPad)
-                        .font(.title2.weight(.bold).monospacedDigit())
-                        .multilineTextAlignment(.center)
+                    OFJNumericTextField(
+                        placeholder: "Amount",
+                        text: $quantityText,
+                        isFocused: $quantityIsFocused,
+                        font: .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize, weight: .bold),
+                        textAlignment: .center,
+                        textColor: quantityIsFocused ? .label : .clear,
+                        minWidth: 62
+                    )
+                        .fixedSize(horizontal: true, vertical: false)
                         .frame(minWidth: 62)
-                        .focused($quantityIsFocused)
-                        .foregroundStyle(
-                            quantityIsFocused ? Color.primary : Color.clear
-                        )
                         .overlay {
                             if !quantityIsFocused {
                                 Text(quantityText)
@@ -478,7 +480,7 @@ struct LogFoodSheet: View {
                             }
                         }
                         .onChange(of: quantityText) { _, newValue in
-                            if let value = Double(newValue), value > 0 {
+                            if let value = OFJNumericInput.parse(newValue), value > 0 {
                                 quantity = value
                             }
                         }
@@ -1206,7 +1208,7 @@ struct AddServingMappingSheet: View {
 
     /// True when both sides have a valid positive number (enables Save button)
     private var isValid: Bool {
-        guard let from = Double(fromValue), let to = Double(toValue),
+        guard let from = OFJNumericInput.parse(fromValue), let to = OFJNumericInput.parse(toValue),
               from > 0, to > 0,
               !fromUnit.trimmingCharacters(in: .whitespaces).isEmpty,
               !toUnit.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
@@ -1219,8 +1221,7 @@ struct AddServingMappingSheet: View {
                 // "From" side — user's input unit (e.g. 1 cup)
                 Section {
                     HStack {
-                        TextField("Amount", text: $fromValue)
-                            .keyboardType(.decimalPad)
+                        OFJNumericTextField(placeholder: "Amount", text: $fromValue)
                             .frame(width: 80)
                         Divider()
                         TextField("Unit (e.g. cup, slice)", text: $fromUnit)
@@ -1234,8 +1235,7 @@ struct AddServingMappingSheet: View {
                 // "To" side — equivalent in a standard unit (e.g. 244 g)
                 Section {
                     HStack {
-                        TextField("Amount", text: $toValue)
-                            .keyboardType(.decimalPad)
+                        OFJNumericTextField(placeholder: "Amount", text: $toValue)
                             .frame(width: 80)
                         Divider()
                         TextField("Unit (e.g. g, mL)", text: $toUnit)
@@ -1269,8 +1269,8 @@ struct AddServingMappingSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         let mapping = ServingMapping(
-                            from: ServingAmount(value: Double(fromValue) ?? 1, unit: fromUnit.trimmingCharacters(in: .whitespaces)),
-                            to: ServingAmount(value: Double(toValue) ?? 0, unit: toUnit.trimmingCharacters(in: .whitespaces))
+                            from: ServingAmount(value: OFJNumericInput.parse(fromValue) ?? 1, unit: fromUnit.trimmingCharacters(in: .whitespaces)),
+                            to: ServingAmount(value: OFJNumericInput.parse(toValue) ?? 0, unit: toUnit.trimmingCharacters(in: .whitespaces))
                         )
                         onSave(mapping)
                         dismiss()
@@ -1294,7 +1294,7 @@ private struct EditableMicroRow: View {
     let onValueChanged: (Double) -> Void
 
     @State private var text: String = ""
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
 
     private var progress: Double {
         guard let dv = dailyValue, dv > 0 else { return 0 }
@@ -1319,14 +1319,16 @@ private struct EditableMicroRow: View {
                 Spacer()
 
                 HStack(spacing: 2) {
-                    TextField("0", text: $text)
-                        .keyboardType(.decimalPad)
-                        .multilineTextAlignment(.trailing)
-                        .font(.subheadline.weight(.medium).monospacedDigit())
+                    OFJNumericTextField(
+                        placeholder: "0",
+                        text: $text,
+                        isFocused: $isFocused,
+                        font: .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .medium),
+                        textAlignment: .right
+                    )
                         .frame(minWidth: 48, idealWidth: 58, maxWidth: 68)
-                        .focused($isFocused)
                         .onChange(of: text) { _, newVal in
-                            if let d = Double(newVal), d >= 0 {
+                            if let d = OFJNumericInput.parse(newVal), d >= 0 {
                                 onValueChanged(d)
                             }
                         }

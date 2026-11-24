@@ -2,6 +2,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 // Shared focus field enum — fileprivate so MacroInputRow can access it.
@@ -109,6 +110,7 @@ struct ManualEntryView: View {
     @State private var newMicroUnit = "g"
 
     @FocusState private var focusedField: ManualEntryField?
+    @State private var focusedNumericField: ManualEntryField?
 
     /// Convenience initializer without pre-fill (backwards compatible)
     init(defaultDate: Date) {
@@ -136,10 +138,10 @@ struct ManualEntryView: View {
 
     private var isValid: Bool {
         !name.trimmingCharacters(in: .whitespaces).isEmpty
-        && Double(calories) != nil
-        && Double(protein) != nil
-        && Double(carbs) != nil
-        && Double(fat) != nil
+        && OFJNumericInput.parse(calories) != nil
+        && OFJNumericInput.parse(protein) != nil
+        && OFJNumericInput.parse(carbs) != nil
+        && OFJNumericInput.parse(fat) != nil
     }
 
     var body: some View {
@@ -154,7 +156,7 @@ struct ManualEntryView: View {
                     TextField("Brand (optional)", text: $brand)
                         .focused($focusedField, equals: .brand)
                         .submitLabel(.next)
-                        .onSubmit { focusedField = .calories }
+                        .onSubmit { focusedNumericField = .calories }
 
                     Picker("Meal", selection: mealTypeBinding) {
                         ForEach(MealType.allCases) { type in
@@ -165,10 +167,10 @@ struct ManualEntryView: View {
                 }
 
                 Section("Core Macros") {
-                    MacroInputRow(label: "Calories", unit: "kcal", text: $calories, field: .calories, focusedField: $focusedField, nextField: .protein)
-                    MacroInputRow(label: "Protein", unit: "g", text: $protein, field: .protein, focusedField: $focusedField, nextField: .carbs)
-                    MacroInputRow(label: "Carbs", unit: "g", text: $carbs, field: .carbs, focusedField: $focusedField, nextField: .fat)
-                    MacroInputRow(label: "Fat", unit: "g", text: $fat, field: .fat, focusedField: $focusedField, nextField: nil)
+                    MacroInputRow(label: "Calories", unit: "kcal", text: $calories, field: .calories, focusedField: $focusedNumericField, nextField: .protein)
+                    MacroInputRow(label: "Protein", unit: "g", text: $protein, field: .protein, focusedField: $focusedNumericField, nextField: .carbs)
+                    MacroInputRow(label: "Carbs", unit: "g", text: $carbs, field: .carbs, focusedField: $focusedNumericField, nextField: .fat)
+                    MacroInputRow(label: "Fat", unit: "g", text: $fat, field: .fat, focusedField: $focusedNumericField, nextField: nil)
                 }
 
                 Section {
@@ -180,7 +182,7 @@ struct ManualEntryView: View {
                                 unit: micronutrientTexts[index].unit,
                                 text: $micronutrientTexts[index].text,
                                 field: .micronutrient(micronutrientTexts[index].name),
-                                focusedField: $focusedField,
+                                focusedField: $focusedNumericField,
                                 nextField: index + 1 < micronutrientTexts.count
                                     ? .micronutrient(micronutrientTexts[index + 1].name)
                                     : .servingSize
@@ -234,7 +236,16 @@ struct ManualEntryView: View {
                 }
                 ToolbarItemGroup(placement: .keyboard) {
                     Spacer()
-                    Button("Done") { focusedField = nil }
+                    Button("Done") {
+                        focusedField = nil
+                        focusedNumericField = nil
+                    }
+                }
+            }
+            .onChange(of: focusedNumericField) { _, field in
+                if field == .servingSize {
+                    focusedNumericField = nil
+                    focusedField = .servingSize
                 }
             }
             .onAppear {
@@ -329,17 +340,17 @@ struct ManualEntryView: View {
     }
 
     private func save(saveToFoodBank: Bool) {
-        guard let caloriesVal = Double(calories),
-              let proteinVal = Double(protein),
-              let carbsVal = Double(carbs),
-              let fatVal = Double(fat)
+        guard let caloriesVal = OFJNumericInput.parse(calories),
+              let proteinVal = OFJNumericInput.parse(protein),
+              let carbsVal = OFJNumericInput.parse(carbs),
+              let fatVal = OFJNumericInput.parse(fat)
         else { return }
 
         // Build the micronutrients dictionary from the dynamic text fields.
         // Only includes nutrients the user actually filled in.
         var micronutrients: [String: MicronutrientValue] = [:]
         for micro in micronutrientTexts {
-            if let val = Double(micro.text) {
+            if let val = OFJNumericInput.parse(micro.text) {
                 micronutrients[micro.name] = MicronutrientValue(value: val, unit: micro.unit)
             }
         }
@@ -378,21 +389,21 @@ private struct MacroInputRow: View {
     let unit: String
     @Binding var text: String
     let field: ManualEntryField
-    @FocusState.Binding var focusedField: ManualEntryField?
+    @Binding var focusedField: ManualEntryField?
     let nextField: ManualEntryField?
 
     var body: some View {
         HStack {
             Text(label)
             Spacer()
-            TextField("0", text: $text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .focused($focusedField, equals: field)
-                .submitLabel(nextField == nil ? .done : .next)
-                .onSubmit {
-                    focusedField = nextField
-                }
+            OFJNumericTextField(
+                placeholder: "0",
+                text: $text,
+                isFocused: $focusedField.numericFocus(equals: field),
+                textAlignment: .right,
+                returnKeyType: nextField == nil ? .done : .next,
+                onSubmit: { focusedField = nextField }
+            )
                 .frame(width: 80)
             Text(unit)
                 .foregroundStyle(.secondary)

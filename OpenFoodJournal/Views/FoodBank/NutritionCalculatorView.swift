@@ -1023,10 +1023,10 @@ private struct CalculatorPortionEditorSheet: View {
 
     private var canSave: Bool {
         !trimmedLabel.isEmpty &&
-        Double(caloriesText) != nil &&
-        Double(proteinText) != nil &&
-        Double(carbsText) != nil &&
-        Double(fatText) != nil
+        OFJNumericInput.parse(caloriesText) != nil &&
+        OFJNumericInput.parse(proteinText) != nil &&
+        OFJNumericInput.parse(carbsText) != nil &&
+        OFJNumericInput.parse(fatText) != nil
     }
 
     var body: some View {
@@ -1044,9 +1044,11 @@ private struct CalculatorPortionEditorSheet: View {
                     ForEach($micronutrients) { $micro in
                         HStack {
                             TextField("Name", text: $micro.name)
-                            TextField("Value", text: $micro.valueText)
-                                .keyboardType(.decimalPad)
-                                .multilineTextAlignment(.trailing)
+                            OFJNumericTextField(
+                                placeholder: "Value",
+                                text: $micro.valueText,
+                                textAlignment: .right
+                            )
                                 .frame(width: 72)
                             TextField("Unit", text: $micro.unit)
                                 .multilineTextAlignment(.trailing)
@@ -1087,17 +1089,17 @@ private struct CalculatorPortionEditorSheet: View {
         for micro in micronutrients {
             let name = micro.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let unit = micro.unit.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty, !unit.isEmpty, let value = Double(micro.valueText) else { continue }
+            guard !name.isEmpty, !unit.isEmpty, let value = OFJNumericInput.parse(micro.valueText) else { continue }
             micros[name] = MicronutrientValue(value: value, unit: unit)
         }
 
         return CalculatorPortionOption(
             id: portion.id,
             label: trimmedLabel.isEmpty ? CalculatorIngredientEditorSheet.defaultPortionLabel : trimmedLabel,
-            calories: Double(caloriesText) ?? 0,
-            protein: Double(proteinText) ?? 0,
-            carbs: Double(carbsText) ?? 0,
-            fat: Double(fatText) ?? 0,
+            calories: OFJNumericInput.parse(caloriesText) ?? 0,
+            protein: OFJNumericInput.parse(proteinText) ?? 0,
+            carbs: OFJNumericInput.parse(carbsText) ?? 0,
+            fat: OFJNumericInput.parse(fatText) ?? 0,
             micronutrients: micros
         )
     }
@@ -1106,9 +1108,11 @@ private struct CalculatorPortionEditorSheet: View {
         HStack {
             Text(title)
             Spacer()
-            TextField("0", text: text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
+            OFJNumericTextField(
+                placeholder: "0",
+                text: text,
+                textAlignment: .right
+            )
                 .frame(width: 90)
             Text(unit)
                 .foregroundStyle(.secondary)
