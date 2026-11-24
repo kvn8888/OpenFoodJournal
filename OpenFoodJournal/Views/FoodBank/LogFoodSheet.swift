@@ -466,7 +466,8 @@ struct LogFoodSheet: View {
                         isFocused: $quantityIsFocused,
                         font: .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .title2).pointSize, weight: .bold),
                         textAlignment: .center,
-                        textColor: quantityIsFocused ? .label : .clear
+                        textColor: quantityIsFocused ? .label : .clear,
+                        minWidth: 62
                     )
                         .fixedSize(horizontal: true, vertical: false)
                         .frame(minWidth: 62)
