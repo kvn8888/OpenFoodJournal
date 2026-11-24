@@ -3,6 +3,7 @@
 import Foundation
 import Observation
 import BackgroundTasks
+import UIKit
 
 @MainActor
 protocol ChatBackgroundTaskHandling: AnyObject {
@@ -21,28 +22,56 @@ protocol ChatBackgroundScheduling: AnyObject {
 }
 
 @MainActor
+protocol ChatBackgroundTransitionAssertion: AnyObject {
+    func end()
+}
+
+@MainActor
+protocol ChatBackgroundTransitionAsserting: AnyObject {
+    func begin(
+        name: String,
+        onExpiration: @escaping @MainActor () -> Void
+    ) -> (any ChatBackgroundTransitionAssertion)?
+}
+
+@MainActor
 @Observable
 final class ChatBackgroundExecution {
     enum State: Equatable { case idle, requesting, active, unavailable, expired }
     private(set) var state: State = .idle
     private(set) var runID: UUID?
     @ObservationIgnored private let scheduler: any ChatBackgroundScheduling
+    @ObservationIgnored private let transitionAsserter: any ChatBackgroundTransitionAsserting
+    @ObservationIgnored private let admissionGraceDuration: Duration
     @ObservationIgnored private var handle: (any ChatBackgroundTaskHandling)?
+    @ObservationIgnored private var transitionAssertion: (any ChatBackgroundTransitionAssertion)?
+    @ObservationIgnored private var admissionTimeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var expirationHandler: (@MainActor () -> Void)?
+    @ObservationIgnored private var latestPhase: ChatRunPhase = .preparing
     @ObservationIgnored private var completedEvents = 0
     @ObservationIgnored private var attemptID: UUID?
 
-    init(scheduler: (any ChatBackgroundScheduling)? = nil) {
+    init(
+        scheduler: (any ChatBackgroundScheduling)? = nil,
+        transitionAsserter: (any ChatBackgroundTransitionAsserting)? = nil,
+        admissionGraceDuration: Duration = .seconds(3)
+    ) {
         self.scheduler = scheduler ?? AppleChatBackgroundScheduler()
+        self.transitionAsserter = transitionAsserter ?? UIApplicationBackgroundTransitionAsserter()
+        self.admissionGraceDuration = admissionGraceDuration
     }
 
     var canContinue: Bool { state == .active && handle != nil }
+    var isAwaitingAdmission: Bool { state == .requesting }
 
     func begin(runID: UUID, onExpiration: @escaping @MainActor () -> Void) {
         finish(success: false)
         self.runID = runID
         let attemptID = UUID()
         self.attemptID = attemptID
+        self.expirationHandler = onExpiration
         state = .requesting
+        latestPhase = .preparing
         completedEvents = 0
         do {
             try scheduler.submit(runID: runID, onStart: { [weak self] task in
@@ -52,23 +81,97 @@ final class ChatBackgroundExecution {
                 }
                 self.handle = task
                 self.state = .active
-                task.update(subtitle: "Preparing response", completedEvents: 0)
+                self.releaseAdmissionBridge()
+                task.update(
+                    subtitle: Self.subtitle(for: self.latestPhase),
+                    completedEvents: self.completedEvents
+                )
             }, onExpiration: { [weak self] in
                 guard let self, self.attemptID == attemptID else { return }
-                self.state = .expired
-                // Snapshot/cancel the run before relinquishing execution.
-                onExpiration()
-                self.finish(success: false)
+                self.expireCurrentAttempt()
             })
         } catch {
+            expirationHandler = nil
             state = .unavailable
         }
     }
 
+    /// Returns `true` when background execution can safely proceed: either
+    /// iOS already delivered the `BGContinuedProcessingTask`, or submission
+    /// succeeded and a bounded UIKit background assertion bridges the brief
+    /// window while iOS delivers `onStart` on the main queue.
+    func beginBackgroundTransition() -> Bool {
+        if canContinue { return true }
+        guard state == .requesting, let attemptID else { return false }
+        if transitionAssertion != nil { return true }
+
+        guard let assertion = transitionAsserter.begin(
+            name: "OpenFoodJournal.AssistantBackgroundAdmission",
+            onExpiration: { [weak self] in
+                guard let self, self.attemptID == attemptID, self.state == .requesting else { return }
+                self.expireCurrentAttempt()
+            }
+        ) else {
+            return false
+        }
+
+        transitionAssertion = assertion
+        let graceDuration = admissionGraceDuration
+        admissionTimeoutTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: graceDuration)
+            guard !Task.isCancelled,
+                  let self,
+                  self.attemptID == attemptID,
+                  self.state == .requesting else { return }
+            self.expireCurrentAttempt()
+        }
+        return true
+    }
+
+    func endBackgroundTransition() {
+        releaseAdmissionBridge()
+    }
+
     func update(phase: ChatRunPhase, completedEvents: Int) {
-        guard canContinue else { return }
+        latestPhase = phase
         self.completedEvents = max(self.completedEvents, completedEvents)
-        let subtitle: String = switch phase {
+        guard canContinue else { return }
+        handle?.update(subtitle: Self.subtitle(for: phase), completedEvents: self.completedEvents)
+    }
+
+    func finish(success: Bool) {
+        let oldRunID = runID
+        runID = nil
+        attemptID = nil
+        expirationHandler = nil
+        releaseAdmissionBridge()
+        handle?.complete(success: success)
+        handle = nil
+        latestPhase = .preparing
+        completedEvents = 0
+        state = .idle
+        if let oldRunID { scheduler.cancel(runID: oldRunID) }
+    }
+
+    private func expireCurrentAttempt() {
+        let handler = expirationHandler
+        expirationHandler = nil
+        releaseAdmissionBridge()
+        state = .expired
+        // Snapshot/cancel the run before relinquishing execution.
+        handler?()
+        finish(success: false)
+    }
+
+    private func releaseAdmissionBridge() {
+        admissionTimeoutTask?.cancel()
+        admissionTimeoutTask = nil
+        transitionAssertion?.end()
+        transitionAssertion = nil
+    }
+
+    private static func subtitle(for phase: ChatRunPhase) -> String {
+        switch phase {
         case .queued, .preparing: "Preparing response"
         case .waitingForProvider: "Waiting for response"
         case .executingTools: "Reading and processing results"
@@ -79,17 +182,47 @@ final class ChatBackgroundExecution {
         case .cancelled: "Stopped"
         case .suspended: "Open Assistant to continue"
         }
-        handle?.update(subtitle: subtitle, completedEvents: self.completedEvents)
+    }
+}
+
+@MainActor
+private final class UIApplicationBackgroundTransitionAssertion: ChatBackgroundTransitionAssertion {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+    private var expired = false
+
+    func start(
+        name: String,
+        onExpiration: @escaping @MainActor () -> Void
+    ) -> Bool {
+        let taskID = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, !self.expired, self.identifier != .invalid else { return }
+                self.expired = true
+                onExpiration()
+                self.end()
+            }
+        }
+        guard taskID != .invalid else { return false }
+        identifier = taskID
+        return true
     }
 
-    func finish(success: Bool) {
-        let oldRunID = runID
-        runID = nil
-        attemptID = nil
-        handle?.complete(success: success)
-        handle = nil
-        state = .idle
-        if let oldRunID { scheduler.cancel(runID: oldRunID) }
+    func end() {
+        guard identifier != .invalid else { return }
+        let ended = identifier
+        identifier = .invalid
+        UIApplication.shared.endBackgroundTask(ended)
+    }
+}
+
+@MainActor
+final class UIApplicationBackgroundTransitionAsserter: ChatBackgroundTransitionAsserting {
+    func begin(
+        name: String,
+        onExpiration: @escaping @MainActor () -> Void
+    ) -> (any ChatBackgroundTransitionAssertion)? {
+        let assertion = UIApplicationBackgroundTransitionAssertion()
+        return assertion.start(name: name, onExpiration: onExpiration) ? assertion : nil
     }
 }
 
