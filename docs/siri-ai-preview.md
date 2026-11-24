@@ -2,7 +2,7 @@
 
 The preview exposes authenticated App Intents for iOS 27.3 Siri AI. The standard build keeps the existing App Shortcut provider and exposes the new read actions as ordinary App Intents. The preview build enables `OFJ_SIRI_AI_PREVIEW` to register tools and enable the new confirmed write actions.
 
-Apple says enabling any tool intent changes how Siri uses the app's App Shortcuts. The preview also registers the existing saved-food logger, spoken logger, and Assistant handoff as tools. The App Shortcut definitions remain available for Shortcuts and other system surfaces. Verify all three Siri flows on the preview build before distributing it to internal testers.
+Apple says enabling any tool intent changes how Siri uses the app's App Shortcuts. The preview also registers the existing saved-food logger, spoken logger, and Assistant handoff as tools. The App Shortcut definitions remain available for Shortcuts and other system surfaces. Verify all three Siri flows on the internal TestFlight build.
 
 ## What Siri can read
 
@@ -28,9 +28,9 @@ DEVELOPER_DIR=/Applications/Xcode-27.3-beta-2.app/Contents/Developer \
     ./ci/verify-siri-ai-preview.sh
 ```
 
-The script compiles the app and test targets for a generic iOS device and then runs Apple's Siri Integration Advisor command against the built metadata. It does not sign or install the app. For a device build, use the same deployment target and preview compilation condition with an authorized signing configuration. Apple's preview supports development-signed builds and internal TestFlight.
+The script builds the shared `OpenFoodJournalSiriAIPreview` scheme for a generic iOS device without signing and checks the app's minimum iOS version and Siri tool metadata. The scheme uses the `SiriAIPreview` build configuration, which enables the tools and requires iOS 27.3. Apple's preview supports development-signed builds and internal TestFlight.
 
-The manual **Siri AI Preview Verification** Xcode Cloud workflow is pinned to Xcode 27.3 beta 2. Its post-clone step runs the same preview build and metadata check. The workflow then runs `OpenFoodJournalUnitTests` on an iOS 27.3 simulator. It has no archive or distribution action.
+Run the manual **Siri AI Preview Verification** Xcode Cloud workflow to publish an internal TestFlight preview. It uses Xcode 27.3 beta 2, runs `OpenFoodJournalUnitTests` on an iOS 27.3 simulator, and archives the preview scheme for TestFlight Internal Only. The post-build script checks the archived app for Siri tools before distribution. Confirm the processed build is available to the **Testing** internal group in App Store Connect.
 
 On an Apple Intelligence-capable device running iOS 27.3 beta 2, enable Siri AI and use a fresh conversation for each check. Include OpenFoodJournal in requests while the app is in the background.
 
