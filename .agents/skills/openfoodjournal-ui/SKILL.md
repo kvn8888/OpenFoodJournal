@@ -127,6 +127,8 @@ See the `swiftui-liquid-glass` skill for the complete Liquid Glass API reference
 
 Each tab wraps its content in `NavigationStack`.
 
+Journal and Food Bank keep their native lists and center the scroll content in a column up to `OFJLayout.readableContentMaxWidth`. Assistant uses the same width for the transcript and composer. The columns fill narrow windows. Food Bank shows shelf status beneath the food name.
+
 Settings is not a root tab. `DailyLogView` owns a top-right Settings toolbar `NavigationLink` and pushes `SettingsView` on the Journal's existing stack. `SettingsView` must not create a nested `NavigationStack`; previews or other standalone hosts wrap it when needed.
 
 ### Screenshot evidence
@@ -158,7 +160,7 @@ The optional `Generate Screenshots` workflow captures real simulator views using
 - The initial camera input is the physical wide-angle lens only. Selecting 0.5× swaps the single session input to the physical ultra-wide lens; 1× and 2× share the physical wide lens, with 2× applying a 2.0 device zoom factor. Never initialize a virtual triple/dual multi-camera input.
 - Place circular torch and photo-library controls to the left and right of the centered shutter.
 - The top-left circular control exits. Show the top-right circular retry control only when a prior submitted scan exists.
-- Camera mode, utility, exit, and retry controls use dark Liquid Glass with white labels/icons over the live preview, with no bottom legibility gradient. The discrete zoom capsules are the deliberate non-glass exception. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
+- Camera utility, exit, retry, and unselected mode controls use dark Liquid Glass with white labels and icons over the live preview. The selected mode uses dark text on light glass for contrast against bright camera content. The discrete zoom capsules are the deliberate non-glass exception. Do not add a logo, real-time ingredient callouts, or instructional caption bubbles over the preview.
 - The full-screen preview uses `.resizeAspectFill`, so it must publish its normalized visible camera rectangle through `metadataOutputRectConverted(fromLayerRect:)`. Snapshot that rectangle at shutter time and crop the still before review, barcode detection, or AI submission; never show or analyze uncropped sensor content that was outside the viewfinder.
 - `ScanCameraModeDescriptor.supported` is the executable order/label contract; `OFJLayout` owns camera control geometry.
 

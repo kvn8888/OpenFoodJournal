@@ -210,7 +210,10 @@ private struct CameraModeButton: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
             }
-            .foregroundStyle(.white)
+            // Selected mode mirrors the zoom control: dark content on a
+            // near-white surface, so the label stays legible over bright
+            // scenes (previously white-on-white glass vanished).
+            .foregroundStyle(isSelected ? Color.black : Color.white)
             .frame(maxWidth: .infinity)
             .frame(height: OFJLayout.cameraModeControlHeight)
             .contentShape(.rect(cornerRadius: OFJRadius.compactCard))
@@ -218,7 +221,7 @@ private struct CameraModeButton: View {
                 .regular
                     .tint(
                         isSelected
-                            ? .white.opacity(0.28)
+                            ? .white.opacity(0.88)
                             : .black.opacity(0.48)
                     )
                     .interactive(),

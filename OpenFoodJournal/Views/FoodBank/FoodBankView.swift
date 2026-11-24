@@ -281,6 +281,7 @@ struct FoodBankView: View {
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .ofjReadableScrollContent()
     }
 
     @ViewBuilder
@@ -291,18 +292,12 @@ struct FoodBankView: View {
             selectedLog = .standard(food)
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                SavedFoodRowView(food: food)
+                // Shelf status renders inside the row's name column so the
+                // name, status, calories, and macro pill read as one unit.
+                SavedFoodRowView(food: food, showsShelfStatus: true)
 
                 if !searchText.isEmpty && food.isArchivedInFoodBank {
                     archiveStatusLine(for: food)
-                }
-
-                if food.isOnShelf {
-                    Label("On Shelf", systemImage: "cabinet.fill")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
-                        .padding(.leading, 56)
-                        .accessibilityLabel("On Shelf: you have this food at home")
                 }
             }
         }

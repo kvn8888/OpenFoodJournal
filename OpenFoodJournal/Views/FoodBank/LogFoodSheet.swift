@@ -141,7 +141,10 @@ struct LogFoodSheet: View {
                     .padding(.horizontal, OFJSpace.s16)
                     .padding(.top, OFJSpace.s12)
                     .padding(.bottom, OFJSpace.s8)
-                    .background(canvasColor.opacity(0.96))
+                    // Opaque so scrolled content never ghosts through the
+                    // footer; extends under the home indicator on iPhone.
+                    .background(canvasColor.ignoresSafeArea(edges: .bottom))
+                    .overlay(alignment: .top) { Divider() }
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

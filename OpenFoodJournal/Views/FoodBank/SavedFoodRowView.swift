@@ -9,6 +9,9 @@ import UIKit
 struct SavedFoodRowView: View {
     // The saved food item to display in this row
     let food: SavedFood
+    /// Food Bank shows the On Shelf badge beneath the name; other callers
+    /// keep the previous row content.
+    var showsShelfStatus: Bool = false
     @AppStorage(FoodBankEmojiSettings.useGeneratedIconImagesKey) private var useGeneratedIconImages = false
     @State private var generatedIconAnimationTrigger = 0
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -105,6 +108,15 @@ struct SavedFoodRowView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                }
+
+                if showsShelfStatus && food.isOnShelf {
+                    Label("On Shelf", systemImage: "cabinet.fill")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .lineLimit(1)
+                        .padding(.top, 2)
+                        .accessibilityLabel("On Shelf: you have this food at home")
                 }
             }
 
