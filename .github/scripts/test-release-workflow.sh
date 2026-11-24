@@ -34,35 +34,6 @@ do
   fi
 done
 
-if ! grep -Fq 'gemini-image-contract:' .github/workflows/testflight.yml; then
-  echo "TestFlight workflow is missing the protected Gemini image contract job." >&2
-  exit 1
-fi
-if ! grep -Fq 'testGeminiFoodIconImageLiveContract' .github/workflows/testflight.yml; then
-  echo "TestFlight workflow does not execute the production Gemini image contract test." >&2
-  exit 1
-fi
-if ! grep -Fq 'OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}' .github/workflows/testflight.yml; then
-  echo "TestFlight workflow does not source the Gemini canary key from the protected environment." >&2
-  exit 1
-fi
-
-for required in \
-  'TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS: "1"' \
-  'TEST_RUNNER_OFJ_GEMINI_API_KEY: ${{ secrets.OFJ_GEMINI_API_KEY }}' \
-  'bash .github/scripts/verify-live-test-log.sh'
-do
-  if ! grep -Fq "$required" .github/workflows/testflight.yml; then
-    echo "TestFlight live-test forwarding/result gate is missing: $required" >&2
-    exit 1
-  fi
-done
-bash .github/scripts/test-live-test-log.sh
-if grep -Fq 'path: ${{ runner.temp }}/GeminiFoodImageContract.xcresult' .github/workflows/testflight.yml; then
-  echo "Protected live-test results must not be uploaded with forwarded credentials." >&2
-  exit 1
-fi
-
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"

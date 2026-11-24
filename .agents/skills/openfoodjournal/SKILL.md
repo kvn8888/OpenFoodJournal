@@ -491,14 +491,7 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 ## Cloud CI and release workflow
 
-**Required live-test forwarding (2026-08-30)**: Host `OFJ_*` environment variables
-alone do not reach the iOS XCTest process. The protected image gate must set
-`TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS=1` and
-`TEST_RUNNER_OFJ_GEMINI_API_KEY` (secret), per Apple's xcodebuild environment
-contract: https://developer.apple.com/documentation/xcode/environment-variable-reference.
-Always verify the exact required test executed and passed, not just that the job
-was green. `verify-live-test-log.sh` rejects missing, skipped, failed, duplicated,
-or mixed outcomes. Normal unprivileged tests remain opt-in and skip live calls.
+**Live Gemini image check removed from CI (2026-11-24)**: `testflight.yml` no longer runs the live `gemini-image-contract` job or requires `OFJ_GEMINI_API_KEY` before archive/upload. `testGeminiFoodIconImageLiveContract` remains in `ChatLiveProviderTests` as an opt-in local test (`TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS=1` and `TEST_RUNNER_OFJ_GEMINI_API_KEY`), and normal CI tests skip live provider calls.
 
 See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) for the old-versus-new comparison, workflow behavior, security model, secrets, branch protections, rollout checklist, and current blockers.
 
