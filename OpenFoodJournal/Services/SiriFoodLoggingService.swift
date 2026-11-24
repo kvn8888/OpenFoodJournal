@@ -7,6 +7,7 @@ import SwiftData
 enum SiriFoodLoggingError: LocalizedError, Equatable {
     case deviceLocked
     case missingFood
+    case foodBankMatchNotFound
     case savedFoodUnavailable
     case invalidQuantity
     case calculatorRequiresIngredients
@@ -18,6 +19,7 @@ enum SiriFoodLoggingError: LocalizedError, Equatable {
         switch self {
         case .deviceLocked: "Unlock your device to log food in OpenFoodJournal."
         case .missingFood: "Tell me which food to log."
+        case .foodBankMatchNotFound: "I couldn't find that in your Food Bank. Try the saved food's name or brand."
         case .savedFoodUnavailable: "This food is no longer available in your Food Bank."
         case .invalidQuantity: "Enter an amount greater than zero."
         case .calculatorRequiresIngredients: "Open this nutrition calculator in the Food Bank to choose ingredients."
@@ -50,6 +52,7 @@ struct SiriFoodLogRequest {
     let meal: MealType
     let date: Date
     let requestedAt: Date
+    let foodBankOnly: Bool
 }
 
 struct SiriNutritionDraft {
@@ -157,17 +160,31 @@ final class SiriFoodLoggingService {
 
     func search(_ query: String) throws -> SiriFoodBankMatch {
         let foods = try activeFoods()
-        let needed = Self.tokens(query)
+        let words = Self.words(query)
+        let needed = Set(words)
         guard !needed.isEmpty else { return .notFound }
         let matches = foods.compactMap { food -> (food: SavedFood, title: Set<String>)? in
-            let title = Self.tokens([food.name, food.brand].compactMap { $0 }.joined(separator: " "))
+            let title = Set(Self.words([food.name, food.brand].compactMap { $0 }.joined(separator: " ")))
             return needed.isSubset(of: title) ? (food, title) : nil
         }
         let exact = matches.filter { $0.title == needed }
         if exact.count == 1 { return .exact(exact[0].food) }
-        if matches.count == 1 { return .exact(matches[0].food) }
-        if matches.isEmpty { return .notFound }
-        return .ambiguous(matches.map(\.food))
+
+        let candidates: [SavedFood]
+        if matches.isEmpty {
+            // Speech recognition can join words, as in "Keylime Pie".
+            let compact = words.joined()
+            candidates = foods.filter { food in
+                let name = Self.words(food.name).joined()
+                let brand = Self.words(food.brand ?? "").joined()
+                return compact == name || compact == brand + name || compact == name + brand
+            }
+        } else {
+            candidates = matches.map(\.food)
+        }
+        if candidates.count == 1 { return .exact(candidates[0]) }
+        if candidates.isEmpty { return .notFound }
+        return .ambiguous(candidates)
     }
 
     func resolve(
@@ -190,7 +207,8 @@ final class SiriFoodLoggingService {
         return SiriFoodLogRequest(
             name: parsed.name, quantity: quantity, unit: unit ?? parsed.unit,
             meal: meal ?? parsed.meal ?? mealTimeSettings.mealType(for: requestedAt, calendar: calendar),
-            date: calendar.startOfDay(for: date ?? day), requestedAt: requestedAt
+            date: calendar.startOfDay(for: date ?? day), requestedAt: requestedAt,
+            foodBankOnly: parsed.foodBankOnly
         )
     }
 
@@ -204,18 +222,24 @@ final class SiriFoodLoggingService {
             quantity: food.servingQuantity ?? 1, unit: food.servingUnit ?? "serving",
             serving: food.serving, mappings: food.servingMappings
         )
-        let quantity = request.quantity ?? food.servingQuantity ?? 1
-        try Self.validateQuantity(quantity)
         let requested = unitOverride ?? request.unit ?? converter.baseUnit
         let available = converter.availableUnits.filter { unit in
             guard let factor = converter.conversionFactor(for: unit) else { return false }
             return factor.isFinite && factor > 0
         }
-        let matchedUnit = available.first { $0 == requested } ??
-            available.first { SiriFoodUnits.matches($0, requested) }
-        guard let unit = matchedUnit else {
+        let unit: String
+        let quantity: Double
+        if let matchedUnit = available.first(where: { $0 == requested }) ??
+            available.first(where: { SiriFoodUnits.matches($0, requested) }) {
+            unit = matchedUnit
+            quantity = request.quantity ?? food.servingQuantity ?? 1
+        } else if SiriFoodUnits.normalized(requested) == "serving" {
+            unit = converter.baseUnit
+            quantity = (request.quantity ?? 1) * converter.baseQuantity
+        } else {
             throw SiriFoodLoggingError.unsupportedUnit(requested: requested, availableUnits: available)
         }
+        try Self.validateQuantity(quantity)
         let draft = SiriNutritionDraft(
             request: request, name: food.name, brand: food.brand, quantity: quantity, unit: unit,
             calories: converter.scaledCalories(quantity: quantity, unit: unit),
@@ -232,6 +256,7 @@ final class SiriFoodLoggingService {
 
     func assistantDraft(for request: SiriFoodLogRequest) async throws -> SiriAssistantLookupResult {
         try requireUnlock()
+        guard !request.foodBankOnly else { throw SiriFoodLoggingError.foodBankMatchNotFound }
         let quantity = request.quantity ?? 1
         let unit = SiriFoodUnits.normalized(request.unit ?? "serving")
         try Self.validateQuantity(quantity)
@@ -294,11 +319,11 @@ final class SiriFoodLoggingService {
         guard quantity.isFinite, quantity > 0 else { throw SiriFoodLoggingError.invalidQuantity }
     }
 
-    private static func tokens(_ text: String) -> Set<String> {
+    private static func words(_ text: String) -> [String] {
         let ignored: Set<Substring> = ["from", "by", "at", "of", "the", "a", "an"]
-        return Set(text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        return text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .split { !$0.isLetter && !$0.isNumber }
             .filter { !ignored.contains($0) }
-            .map(String.init))
+            .map(String.init)
     }
 }
