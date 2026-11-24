@@ -3,6 +3,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 struct CompositeFoodBuilderView: View {
@@ -287,7 +288,7 @@ private struct CompositeIngredientPortionSheet: View {
     }
 
     private var quantity: Double {
-        Double(quantityText) ?? ingredient.selectedQuantity
+        OFJNumericInput.parse(quantityText) ?? ingredient.selectedQuantity
     }
 
     private var availableUnits: [String] {
@@ -306,7 +307,7 @@ private struct CompositeIngredientPortionSheet: View {
     }
 
     private var isValid: Bool {
-        guard let value = Double(quantityText) else { return false }
+        guard let value = OFJNumericInput.parse(quantityText) else { return false }
         return value > 0
     }
 
@@ -334,9 +335,11 @@ private struct CompositeIngredientPortionSheet: View {
                     HStack {
                         Text("Quantity")
                         Spacer()
-                        TextField("Amount", text: $quantityText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
+                        OFJNumericTextField(
+                            placeholder: "Amount",
+                            text: $quantityText,
+                            textAlignment: .right
+                        )
                             .frame(width: 90)
                     }
 

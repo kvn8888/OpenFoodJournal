@@ -2,6 +2,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 import SwiftData
 
 /// Slide-up card showing Gemini's parsed nutrition result. All fields are editable before confirming.
@@ -202,7 +203,7 @@ private struct MacroField: View {
     let color: Color
 
     @State private var text: String = ""
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -212,12 +213,14 @@ private struct MacroField: View {
                 .foregroundStyle(color)
 
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                TextField("0", text: $text)
-                    .keyboardType(.decimalPad)
-                    .font(.system(size: 22, weight: .bold, design: .rounded))
-                    .focused($isFocused)
+                OFJNumericTextField(
+                    placeholder: "0",
+                    text: $text,
+                    isFocused: $isFocused,
+                    font: .ofjRoundedSystemFont(ofSize: 22, weight: .bold)
+                )
                     .onChange(of: text) { _, newVal in
-                        if let d = Double(newVal) { value = d }
+                        if let d = OFJNumericInput.parse(newVal) { value = d }
                     }
                     .onChange(of: isFocused) { _, focused in
                         if !focused {
@@ -282,7 +285,7 @@ private struct MicronutrientField: View {
     let nutrientName: String
 
     @State private var text: String = ""
-    @FocusState private var isFocused: Bool
+    @State private var isFocused = false
 
     private var unit: String {
         entry.micronutrients[nutrientName]?.unit ?? "g"
@@ -295,14 +298,16 @@ private struct MicronutrientField: View {
                 .foregroundStyle(.secondary)
             Spacer()
             HStack(spacing: 2) {
-                TextField("—", text: $text)
-                    .keyboardType(.decimalPad)
-                    .multilineTextAlignment(.trailing)
-                    .font(.subheadline.monospacedDigit())
+                OFJNumericTextField(
+                    placeholder: "—",
+                    text: $text,
+                    isFocused: $isFocused,
+                    font: .monospacedDigitSystemFont(ofSize: UIFont.preferredFont(forTextStyle: .subheadline).pointSize, weight: .regular),
+                    textAlignment: .right
+                )
                     .frame(width: 60)
-                    .focused($isFocused)
                     .onChange(of: text) { _, newVal in
-                        if let d = Double(newVal) {
+                        if let d = OFJNumericInput.parse(newVal) {
                             entry.micronutrients[nutrientName] = MicronutrientValue(value: d, unit: unit)
                         }
                     }

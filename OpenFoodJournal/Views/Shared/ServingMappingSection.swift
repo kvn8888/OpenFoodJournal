@@ -5,6 +5,7 @@
 // AGPL-3.0 License
 
 import SwiftUI
+import UIKit
 
 /// A Form section for viewing and editing per-food serving unit mappings.
 /// Pass a binding to a `[ServingMapping]` array (e.g. from NutritionEntry or SavedFood).
@@ -13,6 +14,8 @@ struct ServingMappingSection: View {
     @Binding var mappings: [ServingMapping]
     @Binding var servingQuantity: Double?
     @Binding var servingUnit: String?
+
+    @State private var servingQuantityText = ""
 
     // ── State for the "Add Mapping" alert ─────────────────────────
     @State private var showAddMapping = false
@@ -51,10 +54,10 @@ struct ServingMappingSection: View {
         }
         .alert("New Unit Mapping", isPresented: $showAddMapping) {
             TextField("Amount (e.g. 1)", text: $fromValue)
-                .keyboardType(.decimalPad)
+                .keyboardType(OFJNumericInput.defaultKeyboardType)
             TextField("Unit (e.g. cup)", text: $fromUnit)
             TextField("Equals (e.g. 244)", text: $toValue)
-                .keyboardType(.decimalPad)
+                .keyboardType(OFJNumericInput.defaultKeyboardType)
             TextField("Unit (e.g. g)", text: $toUnit)
 
             Button("Add") {
@@ -78,10 +81,29 @@ struct ServingMappingSection: View {
             Spacer()
 
             // Quantity
-            TextField("1", value: $servingQuantity, format: .number)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .frame(width: 50)
+            OFJNumericTextField(
+                placeholder: "1",
+                text: Binding(
+                    get: { servingQuantityText },
+                    set: { text in
+                        servingQuantityText = text
+                        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            servingQuantity = nil
+                        } else if let value = OFJNumericInput.parse(text) {
+                            servingQuantity = value
+                        }
+                    }
+                ),
+                textAlignment: .right
+            )
+            .frame(width: 50)
+            .onChange(of: servingQuantity, initial: true) { _, value in
+                if OFJNumericInput.parse(servingQuantityText) != value {
+                    servingQuantityText = value.map {
+                        $0.formatted(.number.grouping(.never).precision(.significantDigits(1...17)))
+                    } ?? ""
+                }
+            }
 
             // Unit
             TextField("unit", text: Binding(
@@ -96,8 +118,8 @@ struct ServingMappingSection: View {
     // MARK: - Helpers
 
     private func addMapping() {
-        guard let fv = Double(fromValue), !fromUnit.isEmpty,
-              let tv = Double(toValue), !toUnit.isEmpty else {
+        guard let fv = OFJNumericInput.parse(fromValue), !fromUnit.isEmpty,
+              let tv = OFJNumericInput.parse(toValue), !toUnit.isEmpty else {
             clearFields()
             return
         }
