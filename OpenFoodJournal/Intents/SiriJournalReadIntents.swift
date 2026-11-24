@@ -208,7 +208,7 @@ struct SiriNutritionSettings: TransientAppEntity {
     @Property(title: "Breakfast starts at local minutes after midnight") var breakfast: Int
     @Property(title: "Lunch starts at local minutes after midnight") var lunch: Int
     @Property(title: "Dinner starts at local minutes after midnight") var dinner: Int
-    @Property(title: "Apple Health sync enabled") var healthSync: Bool
+    @Property(title: "Health sync enabled") var healthSync: Bool
     @Property(title: "Food Shelf recommendations enabled") var shelfEnabled: Bool
     @Property(title: "Number of Food Shelf suggestions") var shelfCount: Int
     @Property(title: "Food Shelf energy goal") var shelfEnergy: String
@@ -368,7 +368,7 @@ extension SiriJournalData {
 }
 
 struct SiriActivityEnergyResult: TransientAppEntity {
-    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Apple Health Active Energy"
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Active Energy from Health"
     @Property(title: "Day") var day: Date
     @Property(title: "Available active energy in kcal") var calories: Double?
 
@@ -379,7 +379,7 @@ struct SiriActivityEnergyResult: TransientAppEntity {
         self.calories = calories
     }
 
-    var displayRepresentation: DisplayRepresentation { "Apple Health Active Energy" }
+    var displayRepresentation: DisplayRepresentation { "Active Energy from Health" }
 }
 
 #if OFJ_SIRI_AI_PREVIEW
@@ -387,7 +387,7 @@ struct SiriActivityEnergyResult: TransientAppEntity {
 #endif
 struct ReadActiveEnergyInFoodJournalIntent: AppIntent {
     static let title: LocalizedStringResource = "Read Active Energy in OpenFoodJournal"
-    static let description = IntentDescription("Read one day's active energy through OpenFoodJournal's linked Apple Health access. An absent value means no accessible sample, not zero.")
+    static let description = IntentDescription("Read one day's active energy from Health when sync is enabled. The value is omitted if no sample is accessible.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: "Date", description: "The local day to read. Omit for today.") var date: Date?
