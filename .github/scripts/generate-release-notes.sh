@@ -60,7 +60,7 @@ call_chat_completions() {
     "${endpoint}" \
     --data-binary "@${request_path}" \
     > "${response_path}"; then
-    jq -r '.choices[0].message.content // empty' "${response_path}"
+    jq -r '.choices[0].message.content // empty' "${response_path}" 2>/dev/null || true
   fi
 }
 
@@ -132,7 +132,7 @@ elif [[ -n "${model}" && "${model}" != "null" ]] &&
       notes_source="bifrost"
       # A fallback may have served this, so report what actually answered
       # rather than what was asked for.
-      notes_model="$(jq -r '.model // empty' "${response_path}")"
+      notes_model="$(jq -r '.model // empty' "${response_path}" 2>/dev/null || true)"
       notes_model="${notes_model:-${model}}"
     else
       echo "Bifrost release-note generation was unusable; trying GitHub Models." >&2
