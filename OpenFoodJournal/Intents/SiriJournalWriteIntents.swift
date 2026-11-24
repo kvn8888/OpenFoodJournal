@@ -5,7 +5,7 @@ import Foundation
 
 #if OFJ_SIRI_AI_PREVIEW
 @AppEntity(.generable)
-nonisolated struct SiriNutritionInput: TransientAppEntity {
+struct SiriNutritionInput: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Portion and Nutrition"
 
     @Property(title: "Name", description: "Food name. Required when creating a food or entry. Omit when keeping the name.")

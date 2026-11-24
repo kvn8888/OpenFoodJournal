@@ -203,7 +203,7 @@ struct ReadAssistantConversationIntent: AppIntent {
     }
 }
 
-nonisolated struct SiriNutritionSettings: TransientAppEntity {
+struct SiriNutritionSettings: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "OpenFoodJournal Nutrition Settings"
     @Property(title: "Breakfast starts at local minutes after midnight") var breakfast: Int
     @Property(title: "Lunch starts at local minutes after midnight") var lunch: Int
@@ -367,7 +367,7 @@ extension SiriJournalData {
     }
 }
 
-nonisolated struct SiriActivityEnergyResult: TransientAppEntity {
+struct SiriActivityEnergyResult: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Apple Health Active Energy"
     @Property(title: "Day") var day: Date
     @Property(title: "Available active energy in kcal") var calories: Double?

@@ -21,7 +21,7 @@ nonisolated enum MealTypeAppEnum: String, AppEnum {
     }
 }
 
-nonisolated struct SavedFoodEntity: AppEntity {
+struct SavedFoodEntity: AppEntity {
     let id: UUID
     @Property(title: "Food name") var name: String
     @Property(title: "Brand") var brand: String?
@@ -41,8 +41,6 @@ nonisolated struct SavedFoodEntity: AppEntity {
 
     @MainActor init(food: SavedFood) {
         id = food.id
-        name = food.name
-        brand = food.brand
         #if OFJ_SIRI_AI_PREVIEW
         subtitle = ""
         #else
@@ -52,6 +50,8 @@ nonisolated struct SavedFoodEntity: AppEntity {
             "\(food.calories.formatted(.number.precision(.fractionLength(0...1)))) kcal per \(portion)"
         subtitle = [food.brand, nutrition].compactMap { $0 }.joined(separator: " · ")
         #endif
+        name = food.name
+        brand = food.brand
     }
 }
 

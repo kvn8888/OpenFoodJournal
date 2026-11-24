@@ -4,7 +4,7 @@ import AppIntents
 import Foundation
 
 // These entities are returned by authenticated reads. They aren't indexed.
-nonisolated struct SiriNutrientAmount: TransientAppEntity {
+struct SiriNutrientAmount: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Nutrient Amount"
     @Property(title: "Nutrient") var name: String
     @Property(title: "Amount") var value: Double
@@ -21,7 +21,7 @@ nonisolated struct SiriNutrientAmount: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
-nonisolated struct SiriNutritionValues: TransientAppEntity {
+struct SiriNutritionValues: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Nutrition Values"
     @Property(title: "Calories in kcal") var calories: Double
     @Property(title: "Protein in grams") var protein: Double
@@ -49,7 +49,7 @@ nonisolated struct SiriNutritionValues: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "Nutrition Values") }
 }
 
-nonisolated struct SiriFoodBankRecord: AppEntity {
+struct SiriFoodBankRecord: AppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Saved Food"
     static let defaultQuery = SiriFoodBankRecordQuery()
     let id: UUID
@@ -92,7 +92,7 @@ struct SiriFoodBankRecordQuery: EntityStringQuery {
     }
 }
 
-nonisolated struct SiriFoodNutritionResult: TransientAppEntity {
+struct SiriFoodNutritionResult: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Saved Food Nutrition"
     @Property(title: "Food name") var name: String
     @Property(title: "Brand") var brand: String?
@@ -122,7 +122,7 @@ nonisolated struct SiriFoodNutritionResult: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
-nonisolated struct SiriFoodComponent: TransientAppEntity {
+struct SiriFoodComponent: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Ingredient Portion"
     @Property(title: "Ingredient") var ingredient: String
     @Property(title: "Portion") var portion: String
@@ -141,7 +141,7 @@ nonisolated struct SiriFoodComponent: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(ingredient) \(portion)") }
 }
 
-nonisolated struct SiriFoodDetailsResult: TransientAppEntity {
+struct SiriFoodDetailsResult: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Bank Details"
     @Property(title: "Food name") var name: String
     @Property(title: "Kind") var kind: String
@@ -164,7 +164,7 @@ nonisolated struct SiriFoodDetailsResult: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
-nonisolated struct SiriJournalEntryRecord: AppEntity {
+struct SiriJournalEntryRecord: AppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Journal Entry"
     static let defaultQuery = SiriJournalEntryRecordQuery()
     let id: UUID
@@ -212,7 +212,7 @@ struct SiriJournalEntryRecordQuery: EntityStringQuery {
     }
 }
 
-nonisolated struct SiriJournalPage: TransientAppEntity {
+struct SiriJournalPage: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Journal Entry Results"
     @Property(title: "Matching entries on this page") var entries: [SiriJournalEntryRecord]
     @Property(title: "Total matching entries") var totalCount: Int
@@ -229,7 +229,7 @@ nonisolated struct SiriJournalPage: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "Journal Entry Results") }
 }
 
-nonisolated struct SiriJournalSummary: TransientAppEntity {
+struct SiriJournalSummary: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Journal Nutrition Summary"
     @Property(title: "First day") var start: Date
     @Property(title: "Last day") var end: Date
@@ -256,7 +256,7 @@ nonisolated struct SiriJournalSummary: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "Journal Nutrition Summary") }
 }
 
-nonisolated struct SiriContainerResult: TransientAppEntity {
+struct SiriContainerResult: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Tracked Container"
     @Property(title: "Food name") var name: String
     @Property(title: "Brand") var brand: String?
@@ -309,7 +309,7 @@ nonisolated struct SiriContainerResult: TransientAppEntity {
     var displayRepresentation: DisplayRepresentation { DisplayRepresentation(title: "\(name)") }
 }
 
-nonisolated struct SiriAssistantConversationRecord: AppEntity {
+struct SiriAssistantConversationRecord: AppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Assistant Conversation"
     static let defaultQuery = SiriAssistantConversationQuery()
     let id: UUID
@@ -341,7 +341,7 @@ struct SiriAssistantConversationQuery: EntityStringQuery {
     }
 }
 
-nonisolated struct SiriAssistantMessageResult: TransientAppEntity {
+struct SiriAssistantMessageResult: TransientAppEntity {
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Assistant Conversation Message"
     @Property(title: "Sender") var sender: String
     @Property(title: "Time") var timestamp: Date
