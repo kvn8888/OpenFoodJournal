@@ -83,9 +83,7 @@ metadata, stage a version, or submit for review.
 
 Triggers on pushes to `testflight` or manual dispatch. The deployment job runs only when the repository variable `ENABLE_TESTFLIGHT_AUTOMATION` equals `true`.
 
-After cloud CI succeeds, a protected `gemini-image-contract` job uses the `testflight-internal` environment to execute the exact production `ScanService.foodIconImageRequest(prompt:)` payload against `gemini-3.1-flash-lite-image`. It requires a real returned image and fails closed on missing credentials, HTTP errors, or response-contract drift. This is a small billable canary and runs before any archive or upload.
-
-The deployment then:
+After cloud CI succeeds, the deployment:
 
 1. Enters the protected `testflight-internal` environment.
 2. Installs the pinned `asc` 3.1.1 binary after SHA-256 verification.
@@ -178,11 +176,8 @@ Secrets:
 - `APPLE_DISTRIBUTION_CERTIFICATE_B64`
 - `APPLE_DISTRIBUTION_CERTIFICATE_PASSWORD`
 - `APPLE_PROVISIONING_PROFILE_B64`
-- `OFJ_GEMINI_API_KEY`
 
 The App Store Connect key must be able to inspect apps/builds, allocate build numbers, upload builds, and manage internal TestFlight distribution. The provisioning profile must match `k3vnc.OpenFoodJournal`, team `83B48K23H4`, and the capabilities used by the Release archive.
-
-`OFJ_GEMINI_API_KEY` is a dedicated, restricted Gemini credential for the billable Nano Banana 2 Lite release canary. Do not reuse a personal unrestricted key. Restrict it to the Gemini API where supported, monitor its usage, and rotate it independently of keys stored on user devices. A missing or rejected key blocks TestFlight before archive/upload.
 
 The repository currently expects the certificate identity `iPhone Distribution`,
 matching the installed project credential. If the certificate is rotated to a
@@ -282,7 +277,7 @@ AI must not own:
 2. Keep the centralized HealthKit, Assistant, container, and cloud-release work together; it is reconciled and pushed.
 3. Keep the remote `testflight` branch aligned with reviewed release candidates.
 4. Keep the existing `testflight-internal` and `app-store-production` GitHub environments.
-5. Keep the verified environment secrets in place, including the dedicated `OFJ_GEMINI_API_KEY` release-canary credential, and rerun **Release Credential Check** after any Apple key, certificate, password, or profile rotation.
+5. Keep the verified environment secrets in place and rerun **Release Credential Check** after any Apple key, certificate, password, or profile rotation.
 6. Keep `testflight-internal` restricted to `testflight`; keep `app-store-production` restricted to `app-store` with Kevin as a required reviewer.
 7. Enable immutable releases in the repository's GitHub settings.
 8. Add the branch protection rules and required `Cloud CI` check.
@@ -297,7 +292,6 @@ AI must not own:
 ## Current blockers
 
 - `testflight-internal` App Store Connect authentication, app/build reads, distribution-certificate decode/password/identity, and provisioning-profile decode/bundle/team/expiration checks all passed on 2026-07-26.
-- `OFJ_GEMINI_API_KEY` is present in `testflight-internal` as of 2026-07-31. Its actual request validity is intentionally checked by every trusted TestFlight candidate before archive/upload.
 - `app-store-production` App Store Connect credentials passed app and build-list reads on 2026-07-26. These checks prove authentication/read access and signing-asset integrity, not upload or App Store mutation permissions.
 - `testflight-internal` accepts deployments only from `testflight`; `app-store-production` accepts only `app-store` and requires approval from `kvn8888`.
 - Both release branches require pull requests, resolved review conversations, and the GitHub Actions-owned `Compile and unit tests` check; force pushes and deletion are disabled. `testflight` is linear, while `app-store` deliberately permits auditable merge commits so a tested TestFlight commit remains in production ancestry.
