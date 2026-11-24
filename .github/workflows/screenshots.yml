@@ -37,10 +37,10 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       (contains(github.event.pull_request.labels.*.name, 'ci:screenshots') &&
       (github.event.action != 'labeled' || github.event.label.name == 'ci:screenshots'))
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 35
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
       SCREENSHOT_SCREENS: ${{ inputs.screens || 'all' }}
       SCREENSHOT_APPEARANCE: ${{ inputs.appearance || 'both' }}
       SCREENSHOT_DEVICE: ${{ inputs.device || 'iPhone 17 Pro' }}

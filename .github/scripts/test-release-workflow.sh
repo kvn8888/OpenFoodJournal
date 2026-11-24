@@ -14,6 +14,7 @@ developer_dir="/Applications/Xcode_${xcode_app_version}.app/Contents/Developer"
 for workflow in \
   .github/workflows/cloud-ci.yml \
   .github/workflows/testflight.yml \
+  .github/workflows/screenshots.yml \
   .github/workflows/app-store.yml \
   .github/workflows/release-credentials-check.yml
 do
@@ -26,6 +27,7 @@ done
 for workflow in \
   .github/workflows/cloud-ci.yml \
   .github/workflows/testflight.yml \
+  .github/workflows/screenshots.yml \
   .github/workflows/app-store.yml
 do
   if ! grep -Fq "DEVELOPER_DIR: ${developer_dir}" "${workflow}"; then
