@@ -879,17 +879,26 @@ final class ChatService {
         if permissionContinuation != nil { resolvePermission(.denied) }
     }
 
-    func applicationDidBecomeActive() { applicationIsBackgrounded = false }
+    func applicationDidBecomeActive() {
+        applicationIsBackgrounded = false
+        backgroundExecution?.endBackgroundTransition()
+    }
 
     func applicationDidEnterBackground() {
         applicationIsBackgrounded = true
-        guard backgroundExecution?.canContinue == true, pendingPermission == nil else {
+        guard activeRun != nil,
+              activeRunTask != nil,
+              pendingPermission == nil,
+              backgroundExecution?.beginBackgroundTransition() == true else {
             suspendForBackgrounding()
             return
         }
         activeRun?.partialVisibleAnswer = streamingText
         do { try modelContext.save() }
-        catch { suspendForBackgrounding() }
+        catch {
+            backgroundExecution?.endBackgroundTransition()
+            suspendForBackgrounding()
+        }
     }
 
     private func beginBackgroundExecution(for run: ChatAgentRun) {
