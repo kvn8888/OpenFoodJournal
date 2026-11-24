@@ -17,13 +17,13 @@ struct LogFoodBankItemIntent: AppIntent {
     @Parameter(title: "Quantity", description: "How much the person had in the chosen unit.", requestValueDialog: "How much did you have?")
     var quantity: Double
 
-    @Parameter(title: "Unit")
+    @Parameter(title: "Unit", description: "Serving unit for the quantity, such as grams or cups.")
     var unit: String?
 
-    @Parameter(title: "Meal")
+    @Parameter(title: "Meal", description: "Meal to log. Omit to use the current meal schedule.")
     var meal: MealTypeAppEnum?
 
-    @Parameter(title: "Date")
+    @Parameter(title: "Date", description: "Local journal day to log. Omit for today.")
     var date: Date?
 
     @Dependency private var runtime: SiriAppRuntime
@@ -63,20 +63,17 @@ struct LogFoodWithSiriIntent: AppIntent, ProgressReportingIntent {
     @Parameter(title: "Food", description: "The food, amount, brand, meal and date the person asked to log. Search saved foods first, then estimate if allowed.", requestValueDialog: "What did you eat? You can include the amount and meal.")
     var foodQuery: String
 
-    @Parameter(title: "Quantity")
+    @Parameter(title: "Quantity", description: "Amount to log. Omit when the food request already supplies the amount.")
     var quantity: Double?
 
-    @Parameter(title: "Unit")
+    @Parameter(title: "Unit", description: "Serving unit, such as grams or cups. Omit when supplied by the food request.")
     var unit: String?
 
-    @Parameter(title: "Meal")
+    @Parameter(title: "Meal", description: "Meal to log. Omit to use the meal stated in the request or the current meal.")
     var meal: MealTypeAppEnum?
 
-    @Parameter(title: "Date")
+    @Parameter(title: "Date", description: "Local journal day to log. Omit to use the date in the food request or today.")
     var date: Date?
-
-    @Parameter(title: "Food Bank Match")
-    var foodBankMatch: SavedFoodEntity?
 
     @Parameter(title: "Food Bank Reply", description: "Clarification of the saved brand or food name only when several items match.")
     var foodBankReply: String?
@@ -140,10 +137,13 @@ struct LogFoodWithSiriIntent: AppIntent, ProgressReportingIntent {
         guard !current.isEmpty else { throw SiriFoodLoggingError.savedFoodUnavailable }
         let matching = SiriFoodLoggingService.matchingChoice(reply, in: current)
         if matching.count == 1 { return matching[0].id }
-        let options = matching.isEmpty ? current : matching
-        return try await $foodBankMatch.requestDisambiguation(
-            among: options.map(SavedFoodEntity.init(food:)), dialog: "Choose the exact saved food to log."
-        ).id
+        let candidates = matching.isEmpty ? current : matching
+        let choices = candidates.enumerated().map { index, food in
+            IntentChoiceOption(title: "\(index + 1). \(SavedFoodEntity(food: food).choiceTitle)")
+        }
+        let selected = try await requestChoice(between: choices + [.cancel], dialog: "Choose the exact saved food to log.")
+        guard let index = choices.firstIndex(of: selected) else { throw CancellationError() }
+        return candidates[index].id
     }
 }
 

@@ -1,6 +1,6 @@
 # OpenFoodJournal Siri AI preview
 
-The preview exposes authenticated App Intents for iOS 27.3 Siri AI. The standard build keeps the existing App Shortcut provider and compiles these actions as ordinary App Intents. The preview build enables `OFJ_SIRI_AI_PREVIEW` to register tool intents.
+The preview exposes authenticated App Intents for iOS 27.3 Siri AI. The standard build keeps the existing App Shortcut provider and exposes the new read actions as ordinary App Intents. The preview build enables `OFJ_SIRI_AI_PREVIEW` to register tools and enable the new confirmed write actions.
 
 Apple says enabling any tool intent changes how Siri uses the app's App Shortcuts. The preview also registers the existing saved-food logger, spoken logger, and Assistant handoff as tools. The App Shortcut definitions remain available for Shortcuts and other system surfaces. Verify all three Siri flows on the preview build before distributing it to internal testers.
 

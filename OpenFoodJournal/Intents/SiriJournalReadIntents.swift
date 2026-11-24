@@ -13,7 +13,8 @@ struct FindFoodBankItemsIntent: AppIntent {
 
     @Parameter(title: "Food or Brand", description: "A name or brand to find, such as Amazon milk. Leave empty to list saved foods.")
     var query: String?
-    @Parameter(title: "Include Archived Foods", default: false) var includeArchived: Bool
+    @Parameter(title: "Include Archived Foods", description: "Include manually and automatically archived Food Bank items in the search.", default: false)
+    var includeArchived: Bool
     @Parameter(title: "Page", description: "Results are returned 25 at a time. Start at page 1.", default: 1) var page: Int
 
     @Dependency private var runtime: SiriAppRuntime
@@ -142,7 +143,8 @@ struct ReadTrackedFoodContainersIntent: AppIntent {
     static let description = IntentDescription("Read measured weights, remaining weight, and consumed nutrition for OpenFoodJournal's active or completed tracked food containers.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
-    @Parameter(title: "Active Containers Only", default: false) var activeOnly: Bool
+    @Parameter(title: "Active Containers Only", description: "Include only containers that are still being tracked.", default: false)
+    var activeOnly: Bool
     @Parameter(title: "Page", description: "Containers are returned 25 at a time, newest first. Start at page 1.", default: 1)
     var page: Int
 

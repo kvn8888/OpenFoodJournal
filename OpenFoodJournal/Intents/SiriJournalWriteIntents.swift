@@ -4,23 +4,65 @@ import AppIntents
 import Foundation
 
 #if OFJ_SIRI_AI_PREVIEW
+@AppEntity(.generable)
+nonisolated struct SiriNutritionInput: TransientAppEntity {
+    static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Portion and Nutrition"
+
+    @Property(title: "Name", description: "Food name. Required when creating a food or entry. Omit when keeping the name.")
+    var name: String?
+    @Property(title: "Brand", description: "Brand or manufacturer, such as Kirkland Signature. Omit when unchanged.")
+    var brand: String?
+    @Property(title: "Quantity", description: "Positive amount in the supplied unit. For a new food, the default is one.")
+    var quantity: Double?
+    @Property(title: "Unit", description: "Serving unit, such as grams, cups, or servings. Omit when unchanged.")
+    var unit: String?
+    @Property(title: "Calories", description: "Known energy for the entire portion, in kilocalories. Required for a new food.")
+    var calories: Double?
+    @Property(title: "Protein", description: "Grams of protein in the entire portion. Omit if the person did not specify.")
+    var protein: Double?
+    @Property(title: "Carbohydrates", description: "Grams of carbohydrates in the entire portion. Omit when unspecified.")
+    var carbs: Double?
+    @Property(title: "Fat", description: "Grams of fat in the entire portion. Omit when unspecified.")
+    var fat: Double?
+    @Property(title: "Micronutrient", description: "Name of a micronutrient to set, such as sodium. Supply its amount as well.")
+    var nutrientName: String?
+    @Property(title: "Micronutrient Amount", description: "Amount of the named micronutrient in the supplied or standard unit.")
+    var nutrientAmount: Double?
+    @Property(title: "Micronutrient Unit", description: "Unit of the supplied micronutrient amount, such as mg or mcg.")
+    var nutrientUnit: String?
+
+    init() {}
+
+    var displayRepresentation: DisplayRepresentation {
+        DisplayRepresentation(title: "Food Portion and Nutrition")
+    }
+
+    @MainActor var edit: SiriNutritionEdit {
+        SiriNutritionEdit(name: name, brand: brand, quantity: quantity, unit: unit, calories: calories,
+                         protein: protein, carbs: carbs, fat: fat, nutrientName: nutrientName,
+                         nutrientAmount: nutrientAmount, nutrientUnit: nutrientUnit)
+    }
+
+    @MainActor func manualValues() throws -> SiriStoredNutrition {
+        guard let name, let calories else { throw SiriJournalDataError.invalidEdit }
+        let original = try SiriStoredNutrition.manual(name: name, brand: brand, quantity: quantity ?? 1,
+                                                     unit: unit ?? "serving", calories: calories,
+                                                     protein: protein ?? 0, carbs: carbs ?? 0, fat: fat ?? 0)
+        let micronutrient = SiriNutritionEdit(nutrientName: nutrientName, nutrientAmount: nutrientAmount, nutrientUnit: nutrientUnit)
+        return try micronutrient.apply(to: original, serving: nil, mappings: [])
+    }
+}
+
 @AppIntent(.tool)
-#endif
 struct LogMeasuredFoodIntent: AppIntent {
     static let title: LocalizedStringResource = "Log Food With Known Nutrition"
     static let description = IntentDescription("Log a food in OpenFoodJournal when the person supplies its actual nutrition. Calories and macros describe the entire portion. Ask for confirmation before saving.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
-    @Parameter(title: "Name") var name: String
-    @Parameter(title: "Brand") var brand: String?
-    @Parameter(title: "Quantity", default: 1) var quantity: Double
-    @Parameter(title: "Unit", default: "serving") var unit: String
-    @Parameter(title: "Calories", description: "Known calories for the whole portion in kcal.") var calories: Double
-    @Parameter(title: "Protein in Grams", default: 0) var protein: Double
-    @Parameter(title: "Carbohydrates in Grams", default: 0) var carbs: Double
-    @Parameter(title: "Fat in Grams", default: 0) var fat: Double
-    @Parameter(title: "Meal") var meal: MealTypeAppEnum?
-    @Parameter(title: "Journal Day") var date: Date?
+    @Parameter(title: "Portion and Nutrition", description: "Food name, portion, and known calories and macronutrients supplied by the person.")
+    var portion: SiriNutritionInput
+    @Parameter(title: "Meal", description: "Meal to log. Omit to use the current meal schedule.") var meal: MealTypeAppEnum?
+    @Parameter(title: "Journal Day", description: "Local day to log. Omit for today.") var date: Date?
 
     @Dependency private var runtime: SiriAppRuntime
 
@@ -30,8 +72,7 @@ struct LogMeasuredFoodIntent: AppIntent {
         let now = data.now()
         let day = data.calendar.startOfDay(for: date ?? now)
         let meal = meal?.meal ?? data.mealTimes.mealType(for: now, calendar: data.calendar)
-        let values = try SiriStoredNutrition.manual(name: name, brand: brand, quantity: quantity, unit: unit,
-                                                    calories: calories, protein: protein, carbs: carbs, fat: fat)
+        let values = try portion.manualValues()
         try await confirmJournalAddition(values: values, meal: meal, day: day, requestedAt: now, data: data,
                                          dialog: "Add \(values.portionLabel) for \(meal.rawValue.lowercased()) on \(day.formatted(date: .long, time: .omitted))? It has \(values.macrosLabel).")
         let saved = try data.createEntry(values, meal: meal, day: day, requestedAt: now)
@@ -39,9 +80,7 @@ struct LogMeasuredFoodIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct EditJournalFoodIntent: AppIntent {
     static let title: LocalizedStringResource = "Edit Journal Food"
     static let description = IntentDescription("Edit one identified OpenFoodJournal entry. Only fields supplied are changed. Amount changes scale the saved nutrition unless replacement values are supplied. Requires confirmation.")
@@ -49,19 +88,10 @@ struct EditJournalFoodIntent: AppIntent {
 
     @Parameter(title: "Entry", description: "A specific entry from the journal. Resolve the correct day and meal first.")
     var item: SiriJournalEntryRecord
-    @Parameter(title: "New Name") var name: String?
-    @Parameter(title: "New Brand") var brand: String?
-    @Parameter(title: "New Quantity") var quantity: Double?
-    @Parameter(title: "New Unit") var unit: String?
-    @Parameter(title: "New Calories in kcal") var calories: Double?
-    @Parameter(title: "New Protein in Grams") var protein: Double?
-    @Parameter(title: "New Carbohydrates in Grams") var carbs: Double?
-    @Parameter(title: "New Fat in Grams") var fat: Double?
-    @Parameter(title: "Micronutrient to Change", description: "Name of one micronutrient to set, such as sodium.") var nutrientName: String?
-    @Parameter(title: "Micronutrient Amount") var nutrientAmount: Double?
-    @Parameter(title: "Micronutrient Unit", description: "Unit for the named micronutrient, such as mg or mcg.") var nutrientUnit: String?
-    @Parameter(title: "New Meal") var meal: MealTypeAppEnum?
-    @Parameter(title: "New Journal Day") var date: Date?
+    @Parameter(title: "Food and Nutrition Changes", description: "Only the updated food, portion, and nutrition fields the person specified.")
+    var changes: SiriNutritionInput?
+    @Parameter(title: "New Meal", description: "The replacement meal to use. Omit to keep the current meal.") var meal: MealTypeAppEnum?
+    @Parameter(title: "New Journal Day", description: "The replacement local date. Omit to keep the current day.") var date: Date?
 
     @Dependency private var runtime: SiriAppRuntime
 
@@ -69,9 +99,7 @@ struct EditJournalFoodIntent: AppIntent {
         let data = runtime.journalData
         guard let entry = try data.entry(id: item.id) else { throw SiriJournalDataError.itemUnavailable }
         let expected = SiriJournalEntrySnapshot(entry)
-        let edit = SiriNutritionEdit(name: name, brand: brand, quantity: quantity, unit: unit, calories: calories,
-                                     protein: protein, carbs: carbs, fat: fat, nutrientName: nutrientName,
-                                     nutrientAmount: nutrientAmount, nutrientUnit: nutrientUnit)
+        let edit = changes?.edit ?? SiriNutritionEdit()
         let values = try edit.apply(to: expected.nutrition, serving: expected.serving, mappings: expected.mappings)
         let day = data.calendar.startOfDay(for: date ?? expected.day)
         let meal = meal?.meal ?? expected.meal
@@ -86,9 +114,7 @@ struct EditJournalFoodIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct DeleteJournalFoodIntent: AppIntent {
     static let title: LocalizedStringResource = "Delete Journal Food"
     static let description = IntentDescription("Remove one identified food entry from the OpenFoodJournal journal. Confirm the specific food, meal, and date before deleting.")
@@ -110,39 +136,28 @@ struct DeleteJournalFoodIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct CreateFoodBankItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Create Saved Food"
     static let description = IntentDescription("Save a new reusable food to the OpenFoodJournal Food Bank with its known nutrition per saved portion. Requires confirmation.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
-    @Parameter(title: "Food Name") var name: String
-    @Parameter(title: "Brand") var brand: String?
-    @Parameter(title: "Portion Quantity", default: 1) var quantity: Double
-    @Parameter(title: "Portion Unit", default: "serving") var unit: String
-    @Parameter(title: "Calories", description: "Known calories for this saved portion in kcal.") var calories: Double
-    @Parameter(title: "Protein in Grams", default: 0) var protein: Double
-    @Parameter(title: "Carbohydrates in Grams", default: 0) var carbs: Double
-    @Parameter(title: "Fat in Grams", default: 0) var fat: Double
+    @Parameter(title: "Portion and Nutrition", description: "Food name, saved portion, and known nutrition the person provided.")
+    var portion: SiriNutritionInput
 
     @Dependency private var runtime: SiriAppRuntime
 
     @MainActor func perform() async throws -> some IntentResult & ReturnsValue<SiriFoodBankRecord> & ProvidesDialog {
         let data = runtime.journalData
         try data.requireUnlock()
-        let values = try SiriStoredNutrition.manual(name: name, brand: brand, quantity: quantity, unit: unit,
-                                                    calories: calories, protein: protein, carbs: carbs, fat: fat)
+        let values = try portion.manualValues()
         try await requestConfirmation(actionName: .create,
                                       dialog: "Save \(values.label) to your Food Bank with \(values.macrosLabel) per \(values.quantity.formatted()) \(values.unit)?")
         return .result(value: data.foodRecord(try data.createFood(values)), dialog: "Saved \(values.label) to your Food Bank.")
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct SaveJournalFoodToFoodBankIntent: AppIntent {
     static let title: LocalizedStringResource = "Save Journal Food to Food Bank"
     static let description = IntentDescription("Save the exact portion and all nutrition from one journal entry as a reusable OpenFoodJournal Food Bank item. Requires confirmation.")
@@ -163,26 +178,15 @@ struct SaveJournalFoodToFoodBankIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct EditFoodBankItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Edit Saved Food"
     static let description = IntentDescription("Edit a saved food's name, brand, portion, or nutrition, or archive, restore, or change its Food Shelf status. Changes affect the saved item and future logging. Requires confirmation.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
     @Parameter(title: "Saved Food", description: "The specific Food Bank item to change.") var item: SiriFoodBankRecord
-    @Parameter(title: "New Name") var name: String?
-    @Parameter(title: "New Brand") var brand: String?
-    @Parameter(title: "New Quantity") var quantity: Double?
-    @Parameter(title: "New Unit") var unit: String?
-    @Parameter(title: "New Calories in kcal") var calories: Double?
-    @Parameter(title: "New Protein in Grams") var protein: Double?
-    @Parameter(title: "New Carbohydrates in Grams") var carbs: Double?
-    @Parameter(title: "New Fat in Grams") var fat: Double?
-    @Parameter(title: "Micronutrient to Change") var nutrientName: String?
-    @Parameter(title: "Micronutrient Amount") var nutrientAmount: Double?
-    @Parameter(title: "Micronutrient Unit") var nutrientUnit: String?
+    @Parameter(title: "Food and Nutrition Changes", description: "Only the replacement fields the person specified for this saved food.")
+    var changes: SiriNutritionInput?
     @Parameter(title: "Archived", description: "True archives the food. False restores it to the active Food Bank.")
     var archived: Bool?
     @Parameter(title: "On Food Shelf", description: "True adds the food to the Food Shelf. False removes it from the shelf.")
@@ -194,9 +198,7 @@ struct EditFoodBankItemIntent: AppIntent {
         let data = runtime.journalData
         guard let food = try data.food(id: item.id) else { throw SiriJournalDataError.itemUnavailable }
         let expected = SiriSavedFoodSnapshot(food)
-        let edit = SiriNutritionEdit(name: name, brand: brand, quantity: quantity, unit: unit, calories: calories,
-                                     protein: protein, carbs: carbs, fat: fat, nutrientName: nutrientName,
-                                     nutrientAmount: nutrientAmount, nutrientUnit: nutrientUnit)
+        let edit = changes?.edit ?? SiriNutritionEdit()
         if expected.kind != .single && edit.hasNutritionChange {
             throw SiriJournalDataError.derivedNutrition
         }
@@ -212,9 +214,7 @@ struct EditFoodBankItemIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct DeleteFoodBankItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Delete Saved Food"
     static let description = IntentDescription("Permanently remove one specific OpenFoodJournal Food Bank item. Use Edit Saved Food instead when the person asked to archive. Requires confirmation.")
@@ -235,18 +235,16 @@ struct DeleteFoodBankItemIntent: AppIntent {
     }
 }
 
-#if OFJ_SIRI_AI_PREVIEW
 @AppIntent(.tool)
-#endif
 struct EditNutritionGoalsIntent: AppIntent {
     static let title: LocalizedStringResource = "Edit OpenFoodJournal Nutrition Goals"
     static let description = IntentDescription("Change specified OpenFoodJournal daily calorie or macro targets. Keep targets whose new values were omitted. Requires confirmation.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresLocalDeviceAuthentication
 
-    @Parameter(title: "Daily Calories in kcal") var calories: Double?
-    @Parameter(title: "Daily Protein in Grams") var protein: Double?
-    @Parameter(title: "Daily Carbohydrates in Grams") var carbs: Double?
-    @Parameter(title: "Daily Fat in Grams") var fat: Double?
+    @Parameter(title: "Daily Calories", description: "New daily energy goal in kcal. Omit to keep the current goal.") var calories: Double?
+    @Parameter(title: "Daily Protein", description: "New daily grams of protein. Omit to keep the current goal.") var protein: Double?
+    @Parameter(title: "Daily Carbohydrates", description: "New daily grams of carbohydrates. Omit when unchanged.") var carbs: Double?
+    @Parameter(title: "Daily Fat", description: "New daily grams of fat. Omit when unchanged.") var fat: Double?
 
     @Dependency private var runtime: SiriAppRuntime
 
@@ -276,6 +274,24 @@ struct EditNutritionGoalsIntent: AppIntent {
     }
 }
 
+private extension SiriStoredNutrition {
+    static func manual(name: String, brand: String?, quantity: Double, unit: String, calories: Double,
+                       protein: Double, carbs: Double, fat: Double) throws -> Self {
+        let brand = brand?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return try Self(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+                        brand: brand?.isEmpty == true ? nil : brand, quantity: quantity, unit: SiriFoodUnits.normalized(unit),
+                        calories: calories, protein: protein, carbs: carbs, fat: fat).validated()
+    }
+}
+
+private extension SiriNutritionEdit {
+    func nutrientSummary(in nutrition: SiriStoredNutrition) -> String {
+        guard let nutrientName, let value = nutrition.micronutrients[KnownMicronutrients.normalize(nutrientName)] else { return "" }
+        return ", and \(value.value.formatted()) \(value.unit) \(nutrientName)"
+    }
+}
+#endif
+
 extension AppIntent {
     @MainActor
     func confirmJournalAddition(values: SiriStoredNutrition, meal: MealType, day: Date, requestedAt: Date, data: SiriJournalData,
@@ -293,22 +309,5 @@ extension AppIntent {
     @MainActor
     private func duplicateAdditionDialog(_ values: SiriStoredNutrition) -> IntentDialog {
         "A matching \(values.portionLabel) is already logged around this time. Add another with \(values.macrosLabel)?"
-    }
-}
-
-private extension SiriStoredNutrition {
-    static func manual(name: String, brand: String?, quantity: Double, unit: String, calories: Double,
-                       protein: Double, carbs: Double, fat: Double) throws -> Self {
-        let brand = brand?.trimmingCharacters(in: .whitespacesAndNewlines)
-        return try Self(name: name.trimmingCharacters(in: .whitespacesAndNewlines),
-                        brand: brand?.isEmpty == true ? nil : brand, quantity: quantity, unit: SiriFoodUnits.normalized(unit),
-                        calories: calories, protein: protein, carbs: carbs, fat: fat).validated()
-    }
-}
-
-private extension SiriNutritionEdit {
-    func nutrientSummary(in nutrition: SiriStoredNutrition) -> String {
-        guard let nutrientName, let value = nutrition.micronutrients[KnownMicronutrients.normalize(nutrientName)] else { return "" }
-        return ", and \(value.value.formatted()) \(value.unit) \(nutrientName)"
     }
 }

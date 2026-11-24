@@ -23,8 +23,8 @@ nonisolated enum MealTypeAppEnum: String, AppEnum {
 
 nonisolated struct SavedFoodEntity: AppEntity {
     let id: UUID
-    let name: String
-    let brand: String?
+    @Property(title: "Food name") var name: String
+    @Property(title: "Brand") var brand: String?
     let subtitle: String
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Bank Item"
