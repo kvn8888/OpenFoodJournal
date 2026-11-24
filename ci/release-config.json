@@ -28,12 +28,12 @@
   "testFlightTagPrefix": "preview/",
   "releaseCandidateTagPrefix": "release-rc/",
   "preview": {
-    "appStoreAppID": "",
+    "appStoreAppID": "6838807947",
     "bundleIdentifier": "k3vnc.OpenFoodJournal.preview",
     "cloudKitContainerIdentifier": "iCloud.k3vnc.OpenFoodJournal.preview",
     "xcodeConfiguration": "Preview",
     "displayName": "OFJ Preview",
-    "testFlightGroupID": "",
+    "testFlightGroupID": "aacee59f-91fb-4623-8fd1-2eb8ed69948b",
     "tagPrefix": "preview/"
   }
 }

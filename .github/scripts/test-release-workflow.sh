@@ -50,6 +50,10 @@ if grep -Fq -- '--submit' .github/workflows/testflight.yml; then
   echo "testflight.yml must remain internal-only for OFJ Preview and not submit to external Beta App Review." >&2
   exit 1
 fi
+if ! grep -Fq 'testFlightInternalTestingOnly bool true' .github/workflows/testflight.yml; then
+  echo "testflight.yml must set testFlightInternalTestingOnly=true on OFJ Preview exports." >&2
+  exit 1
+fi
 if ! grep -Fq -- '--configuration Release' .github/workflows/app-store.yml; then
   echo "app-store.yml must archive production binaries using the Release configuration." >&2
   exit 1

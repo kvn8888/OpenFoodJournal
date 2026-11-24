@@ -203,6 +203,9 @@ jobs:
           /usr/libexec/PlistBuddy \
             -c "Set :signingCertificate ${signing_certificate}" \
             "${export_options}"
+          /usr/libexec/PlistBuddy \
+            -c "Add :testFlightInternalTestingOnly bool true" \
+            "${export_options}"
           plutil -lint "${export_options}"
           printf 'OFJ_EXPORT_OPTIONS=%s\n' "${export_options}" >> "${GITHUB_ENV}"
 

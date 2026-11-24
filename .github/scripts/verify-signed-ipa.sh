@@ -73,16 +73,32 @@ embedded_profile="${app_bundle}/embedded.mobileprovision"
 if [[ -f "${embedded_profile}" ]]; then
   profile_plist="${work_dir}/embedded-profile.plist"
   security cms -D -i "${embedded_profile}" > "${profile_plist}"
-  profile_json="$(plutil -convert json -o - "${profile_plist}")"
-  if ! jq -e \
-    --arg app_id "${expected_app_id}" \
-    --arg team_id "${expected_team_id}" \
-    --arg ck "${expected_cloudkit_container}" \
-    '
-      .Entitlements["application-identifier"] == $app_id
-      and (.TeamIdentifier | index($team_id) != null)
-      and ((.Entitlements["com.apple.developer.icloud-container-identifiers"] // []) | index($ck) != null)
-    ' <<< "${profile_json}" >/dev/null
+  if ! python3 - "${profile_plist}" "${expected_app_id}" "${expected_team_id}" "${expected_cloudkit_container}" <<'PY'
+import plistlib, sys
+
+plist_path, expected_app_id, expected_team_id, expected_ck = sys.argv[1:5]
+with open(plist_path, "rb") as f:
+    profile = plistlib.load(f)
+
+entitlements = profile.get("Entitlements", {})
+app_id = entitlements.get("application-identifier")
+team_ids = profile.get("TeamIdentifier", [])
+ck_containers = entitlements.get("com.apple.developer.icloud-container-identifiers", [])
+if isinstance(ck_containers, str):
+    ck_containers = [ck_containers]
+
+ok = (
+    app_id == expected_app_id
+    and expected_team_id in team_ids
+    and ck_containers == [expected_ck]
+)
+if not ok:
+    print(
+        f"Embedded provisioning profile mismatch: app_id={app_id}, teams={team_ids}, ck={ck_containers}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
   then
     echo "Embedded provisioning profile failed isolation verification." >&2
     exit 1
