@@ -121,6 +121,7 @@ struct MacrosApp: App {
         _mealTimeSettings = State(initialValue: mealTimeSettings)
         let navigation = AppNavigationRouter()
         _navigation = State(initialValue: navigation)
+        let goals = UserGoals()
         let foodLogging = SiriFoodLoggingService(
             modelContext: container.mainContext,
             nutritionStore: store,
@@ -130,7 +131,8 @@ struct MacrosApp: App {
                 try await SiriAssistantNutritionLookup().lookup(request: request, quantity: quantity, unit: unit)
             }
         )
-        let siriRuntime = SiriAppRuntime(foodLogging: foodLogging, navigation: navigation)
+        let journalData = SiriJournalData(store: store, goals: goals, mealTimes: mealTimeSettings, foodLogging: foodLogging)
+        let siriRuntime = SiriAppRuntime(foodLogging: foodLogging, journalData: journalData, navigation: navigation, healthKit: health)
         AppDependencyManager.shared.add(dependency: siriRuntime)
         if !isTest { SiriAppRuntime.refreshShortcutParameters() }
         let scanService = ScanService(
@@ -140,7 +142,6 @@ struct MacrosApp: App {
         )
         store.configureFoodImageGenerationQueue(scanService)
         _scanService = State(initialValue: scanService)
-        let goals = UserGoals()
         _userGoals = State(initialValue: goals)
         #if DEBUG
         if isUITest {

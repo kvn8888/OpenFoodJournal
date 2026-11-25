@@ -413,13 +413,17 @@ final class HealthKitService {
     // MARK: - Read Active Energy
 
     func fetchActiveEnergy(for date: Date) async -> Double {
+        await activeEnergySample(for: date) ?? 0
+    }
+
+    func activeEnergySample(for date: Date) async -> Double? {
         guard isAvailable, isAuthorized,
               let type = HKQuantityType.quantityType(forIdentifier: .activeEnergyBurned)
-        else { return 0 }
+        else { return nil }
 
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: date)
-        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return 0 }
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return nil }
 
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
 
@@ -429,7 +433,7 @@ final class HealthKitService {
                 quantitySamplePredicate: predicate,
                 options: .cumulativeSum
             ) { _, result, _ in
-                let value = result?.sumQuantity()?.doubleValue(for: .kilocalorie()) ?? 0
+                let value = result?.sumQuantity()?.doubleValue(for: .kilocalorie())
                 continuation.resume(returning: value)
             }
             store.execute(query)

@@ -27,6 +27,7 @@ struct SiriFoodLoggingTests {
         #expect(draft.fat == 45)
         #expect(draft.micronutrients["Sodium"] == MicronutrientValue(value: 300, unit: "mg"))
         #expect(try fixture.entries().isEmpty)
+        try fixture.context.save()
         let id = try fixture.service.commit(draft, invocationID: UUID())
         let entry = try #require(fixture.entries().first)
         #expect(entry.id == id)
@@ -339,6 +340,7 @@ struct SiriFoodLoggingTests {
         #expect(yesterday.date == priorDay.date)
         #expect(nextDay.meal == MealTimeSettings().mealType(for: fixture.now, calendar: fixture.calendar))
         let draft = try fixture.service.foodBankDraft(for: food.id, request: priorDay)
+        try fixture.context.save()
         _ = try fixture.service.commit(draft, invocationID: UUID())
         let entry = try #require(fixture.entries().first)
         #expect(entry.dailyLog?.date == priorDay.date)
@@ -354,6 +356,7 @@ struct SiriFoodLoggingTests {
         let food = fixture.addFood("Cashews")
         let request = try fixture.service.resolve("100 grams of cashews")
         let draft = try fixture.service.foodBankDraft(for: food.id, request: request)
+        try fixture.context.save()
         fixture.isUnlocked = false
         #expect(throws: SiriFoodLoggingError.deviceLocked) { try fixture.service.search("cashews") }
         #expect(throws: SiriFoodLoggingError.deviceLocked) { try fixture.service.activeFoods(ids: [food.id]) }

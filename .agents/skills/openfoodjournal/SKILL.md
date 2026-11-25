@@ -491,6 +491,8 @@ Already configured in `OpenFoodJournal.entitlements`:
 
 ## Cloud CI and release workflow
 
+- **Siri AI Developer Preview** (iOS 27.3): The shared `OpenFoodJournalSiriAIPreview` scheme enables `OFJ_SIRI_AI_PREVIEW` and authenticated tool intents; see [docs/siri-ai-preview.md](../../../docs/siri-ai-preview.md). One root-level `Skills.skillsbundle` contains six Apple App Skills guiding Siri through the existing tools. Keep them as narrow Markdown workflows with only name/description frontmatter and bold, current tool titles. They never replace existing confirmation, device protection, or persistence validation. Normal Debug and Release exclude the resource; `ci/validate-siri-skills.py` checks source and built resource isolation, and the existing Siri AI Preview Verification Xcode Cloud workflow must check compiled skills before internal TestFlight distribution. Actual Siri routing requires iOS 27.3 hardware; the current Siri preview uses the production app identity, so use fictional data on a dedicated test device.
+
 **Live Gemini image check removed from CI (2026-11-24)**: `testflight.yml` no longer runs the live `gemini-image-contract` job or requires `OFJ_GEMINI_API_KEY` before archive/upload. `testGeminiFoodIconImageLiveContract` remains in `ChatLiveProviderTests` as an opt-in local test (`TEST_RUNNER_OFJ_RUN_LIVE_GEMINI_IMAGE_TESTS=1` and `TEST_RUNNER_OFJ_GEMINI_API_KEY`), and normal CI tests skip live provider calls.
 
 See [`docs/cloud-release-workflow.md`](../../../docs/cloud-release-workflow.md) for the old-versus-new comparison, workflow behavior, security model, secrets, branch protections, rollout checklist, and current blockers.

@@ -159,16 +159,22 @@ final class SiriFoodLoggingService {
     }
 
     func search(_ query: String) throws -> SiriFoodBankMatch {
-        let foods = try activeFoods()
+        let (exact, candidates) = Self.matches(query, in: try activeFoods())
+        if exact.count == 1 { return .exact(exact[0]) }
+        if candidates.count == 1 { return .exact(candidates[0]) }
+        if candidates.isEmpty { return .notFound }
+        return .ambiguous(candidates)
+    }
+
+    static func matches(_ query: String, in foods: [SavedFood]) -> (exact: [SavedFood], candidates: [SavedFood]) {
         let words = Self.words(query)
         let needed = Set(words)
-        guard !needed.isEmpty else { return .notFound }
+        guard !needed.isEmpty else { return ([], []) }
         let matches = foods.compactMap { food -> (food: SavedFood, title: Set<String>)? in
             let title = Set(Self.words([food.name, food.brand].compactMap { $0 }.joined(separator: " ")))
             return needed.isSubset(of: title) ? (food, title) : nil
         }
-        let exact = matches.filter { $0.title == needed }
-        if exact.count == 1 { return .exact(exact[0].food) }
+        let exact = matches.filter { $0.title == needed }.map(\.food)
 
         let candidates: [SavedFood]
         if matches.isEmpty {
@@ -182,9 +188,14 @@ final class SiriFoodLoggingService {
         } else {
             candidates = matches.map(\.food)
         }
-        if candidates.count == 1 { return .exact(candidates[0]) }
-        if candidates.isEmpty { return .notFound }
-        return .ambiguous(candidates)
+        return (exact, candidates)
+    }
+
+    static func matchingChoice(_ reply: String, in foods: [SavedFood]) -> [SavedFood] {
+        let ignored: Set<String> = ["it", "its", "s", "is", "brand", "please", "one"]
+        let query = words(reply).filter { !ignored.contains($0) }.joined(separator: " ")
+        let matches = Self.matches(query, in: foods)
+        return matches.exact.count == 1 ? matches.exact : matches.candidates
     }
 
     func resolve(
@@ -216,6 +227,11 @@ final class SiriFoodLoggingService {
         guard let food = try activeFoods(ids: [id]).first else {
             throw SiriFoodLoggingError.savedFoodUnavailable
         }
+        return try foodBankDraft(for: food, request: request, unitOverride: unitOverride)
+    }
+
+    func foodBankDraft(for food: SavedFood, request: SiriFoodLogRequest, unitOverride: String? = nil) throws -> SiriNutritionDraft {
+        try requireUnlock()
         guard food.kind != .calculator else { throw SiriFoodLoggingError.calculatorRequiresIngredients }
         let converter = ServingConverter(
             calories: food.calories, protein: food.protein, carbs: food.carbs, fat: food.fat,
@@ -247,7 +263,7 @@ final class SiriFoodLoggingService {
             carbs: converter.scaledCarbs(quantity: quantity, unit: unit),
             fat: converter.scaledFat(quantity: quantity, unit: unit),
             micronutrients: converter.scaledMicronutrients(food.micronutrients, quantity: quantity, unit: unit),
-            savedFoodID: id, scanMode: food.originalScanMode, serving: food.serving,
+            savedFoodID: food.id, scanMode: food.originalScanMode, serving: food.serving,
             servingsPerContainer: food.servingsPerContainer, servingMappings: food.servingMappings
         )
         guard draft.hasValidNutrition else { throw SiriFoodLoggingError.invalidNutrition }
@@ -298,6 +314,7 @@ final class SiriFoodLoggingService {
         var descriptor = FetchDescriptor<NutritionEntry>(predicate: #Predicate { $0.id == invocationID })
         descriptor.fetchLimit = 1
         if let existing = try modelContext.fetch(descriptor).first { return existing.id }
+        guard !modelContext.hasChanges else { throw SiriJournalDataError.unsavedChanges }
         if let foodID = draft.savedFoodID, try activeFoods(ids: [foodID]).isEmpty {
             throw SiriFoodLoggingError.savedFoodUnavailable
         }

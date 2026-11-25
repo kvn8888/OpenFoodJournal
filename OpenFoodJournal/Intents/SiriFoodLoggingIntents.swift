@@ -3,24 +3,27 @@
 import AppIntents
 import Foundation
 
+#if OFJ_SIRI_AI_PREVIEW
+@AppIntent(.tool)
+#endif
 struct LogFoodBankItemIntent: AppIntent {
     static let title: LocalizedStringResource = "Log a Food Bank Item"
     static let description = IntentDescription("Log a portion of a saved food after reviewing its nutrition.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
-    @Parameter(title: "Food", requestValueDialog: "Which Food Bank item?")
+    @Parameter(title: "Food", description: "The exact saved Food Bank item to log, including brand if needed.", requestValueDialog: "Which Food Bank item?")
     var food: SavedFoodEntity
 
-    @Parameter(title: "Quantity", requestValueDialog: "How much did you have?")
+    @Parameter(title: "Quantity", description: "How much the person had in the chosen unit.", requestValueDialog: "How much did you have?")
     var quantity: Double
 
-    @Parameter(title: "Unit")
+    @Parameter(title: "Unit", description: "Serving unit for the quantity, such as grams or cups.")
     var unit: String?
 
-    @Parameter(title: "Meal")
+    @Parameter(title: "Meal", description: "Meal to log. Omit to use the current meal schedule.")
     var meal: MealTypeAppEnum?
 
-    @Parameter(title: "Date")
+    @Parameter(title: "Date", description: "Local journal day to log. Omit for today.")
     var date: Date?
 
     @Dependency private var runtime: SiriAppRuntime
@@ -41,34 +44,39 @@ struct LogFoodBankItemIntent: AppIntent {
             food.name, quantity: quantity, unit: unit, meal: meal?.meal, date: date, parseSpokenPhrase: false
         )
         let draft = try await foodBankDraft(logging, foodID: food.id, request: request, unitParameter: $unit)
-        try await requestConfirmation(actionName: .add, dialog: draft.confirmation(in: logging))
+        try await confirmJournalAddition(values: .draft(draft), meal: request.meal, day: request.date,
+                                         requestedAt: request.requestedAt, data: runtime.journalData,
+                                         dialog: draft.confirmation(in: logging))
         _ = try logging.commit(draft, invocationID: invocationID)
         return .result(dialog: "Logged \(draft.foodLabel) for \(request.meal.rawValue.lowercased()).")
     }
 }
 
+#if OFJ_SIRI_AI_PREVIEW
+@AppIntent(.tool)
+#endif
 struct LogFoodWithSiriIntent: AppIntent, ProgressReportingIntent {
     static let title: LocalizedStringResource = "Log Food"
     static let description = IntentDescription("Look up food and review the nutrition before logging it.")
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
-    @Parameter(title: "Food", requestValueDialog: "What did you eat? You can include the amount and meal.")
+    @Parameter(title: "Food", description: "The food, amount, brand, meal and date the person asked to log. Search saved foods first, then estimate if allowed.", requestValueDialog: "What did you eat? You can include the amount and meal.")
     var foodQuery: String
 
-    @Parameter(title: "Quantity")
+    @Parameter(title: "Quantity", description: "Amount to log. Omit when the food request already supplies the amount.")
     var quantity: Double?
 
-    @Parameter(title: "Unit")
+    @Parameter(title: "Unit", description: "Serving unit, such as grams or cups. Omit when supplied by the food request.")
     var unit: String?
 
-    @Parameter(title: "Meal")
+    @Parameter(title: "Meal", description: "Meal to log. Omit to use the meal stated in the request or the current meal.")
     var meal: MealTypeAppEnum?
 
-    @Parameter(title: "Date")
+    @Parameter(title: "Date", description: "Local journal day to log. Omit to use the date in the food request or today.")
     var date: Date?
 
-    @Parameter(title: "Food Bank Match")
-    var foodBankMatch: SavedFoodEntity?
+    @Parameter(title: "Food Bank Reply", description: "Clarification of the saved brand or food name only when several items match.")
+    var foodBankReply: String?
 
     @Dependency private var runtime: SiriAppRuntime
 
@@ -95,11 +103,8 @@ struct LogFoodWithSiriIntent: AppIntent, ProgressReportingIntent {
         case .exact(let food):
             draft = try await foodBankDraft(logging, foodID: food.id, request: request, unitParameter: $unit)
         case .ambiguous(let foods):
-            let selected = try await $foodBankMatch.requestDisambiguation(
-                among: foods.map(SavedFoodEntity.init(food:)),
-                dialog: "Which Food Bank item did you have?"
-            )
-            draft = try await foodBankDraft(logging, foodID: selected.id, request: request, unitParameter: $unit)
+            let id = try await selectFood(in: foods, logging: logging)
+            draft = try await foodBankDraft(logging, foodID: id, request: request, unitParameter: $unit)
         case .notFound:
             switch try await logging.assistantDraft(for: request) {
             case .estimate(let estimate):
@@ -111,19 +116,47 @@ struct LogFoodWithSiriIntent: AppIntent, ProgressReportingIntent {
         }
 
         progress.completedUnitCount = 2
-        try await requestConfirmation(actionName: .add, dialog: draft.confirmation(in: logging))
+        try await confirmJournalAddition(values: .draft(draft), meal: request.meal, day: request.date,
+                                         requestedAt: request.requestedAt, data: runtime.journalData,
+                                         dialog: draft.confirmation(in: logging))
         _ = try logging.commit(draft, invocationID: invocationID)
         return .result(dialog: "Logged \(draft.foodLabel) for \(request.meal.rawValue.lowercased()).")
     }
+
+    @MainActor
+    private func selectFood(in foods: [SavedFood], logging: SiriFoodLoggingService) async throws -> UUID {
+        let IDs = foods.map(\.id)
+        let examples = foods.prefix(3).map { SavedFoodEntity(food: $0).choiceTitle }.formatted(.list(type: .or))
+        let reply: String
+        if let foodBankReply {
+            reply = foodBankReply
+        } else {
+            reply = try await $foodBankReply.requestValue("Which Food Bank item? Say the brand or full name, such as \(examples).")
+        }
+        let current = try logging.activeFoods(ids: IDs)
+        guard !current.isEmpty else { throw SiriFoodLoggingError.savedFoodUnavailable }
+        let matching = SiriFoodLoggingService.matchingChoice(reply, in: current)
+        if matching.count == 1 { return matching[0].id }
+        let candidates = matching.isEmpty ? current : matching
+        let choices = candidates.enumerated().map { index, food in
+            IntentChoiceOption(title: "\(index + 1). \(SavedFoodEntity(food: food).choiceTitle)")
+        }
+        let selected = try await requestChoice(between: choices + [.cancel], dialog: "Choose the exact saved food to log.")
+        guard let index = choices.firstIndex(of: selected) else { throw CancellationError() }
+        return candidates[index].id
+    }
 }
 
+#if OFJ_SIRI_AI_PREVIEW
+@AppIntent(.tool)
+#endif
 struct OpenAssistantFoodLogIntent: AppIntent {
     static let title: LocalizedStringResource = "Ask Assistant to Log Food"
     static let description = IntentDescription("Continue a food lookup in OpenFoodJournal’s Assistant.")
     static let openAppWhenRun = true
     static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
-    @Parameter(title: "Food Request", requestValueDialog: "What food should Assistant help you log?")
+    @Parameter(title: "Food Request", description: "The food and portion the person wants to research in the in-app Assistant.", requestValueDialog: "What food should Assistant help you log?")
     var prompt: String
 
     @Dependency private var runtime: SiriAppRuntime

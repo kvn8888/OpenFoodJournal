@@ -21,26 +21,37 @@ nonisolated enum MealTypeAppEnum: String, AppEnum {
     }
 }
 
-nonisolated struct SavedFoodEntity: AppEntity {
+struct SavedFoodEntity: AppEntity {
     let id: UUID
-    let name: String
+    @Property(title: "Food name") var name: String
+    @Property(title: "Brand") var brand: String?
     let subtitle: String
 
     static let typeDisplayRepresentation: TypeDisplayRepresentation = "Food Bank Item"
     static let defaultQuery = SavedFoodEntityQuery()
 
     var displayRepresentation: DisplayRepresentation {
-        DisplayRepresentation(title: "\(name)", subtitle: "\(subtitle)")
+        DisplayRepresentation(title: "\(choiceTitle)", subtitle: "\(subtitle)", synonyms: ["\(name)"])
+    }
+
+    var choiceTitle: String {
+        if let brand, !name.localizedCaseInsensitiveContains(brand) { return "\(brand) \(name)" }
+        return name
     }
 
     @MainActor init(food: SavedFood) {
         id = food.id
-        name = food.name
+        #if OFJ_SIRI_AI_PREVIEW
+        subtitle = ""
+        #else
         let portion = food.servingSize ??
             "\((food.servingQuantity ?? 1).formatted()) \(food.servingUnit ?? "serving")"
         let nutrition = food.kind == .calculator ? "Nutrition calculator" :
             "\(food.calories.formatted(.number.precision(.fractionLength(0...1)))) kcal per \(portion)"
         subtitle = [food.brand, nutrition].compactMap { $0 }.joined(separator: " · ")
+        #endif
+        name = food.name
+        brand = food.brand
     }
 }
 
