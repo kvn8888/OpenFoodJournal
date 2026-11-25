@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		6BA07CA26131443B8C9A1F76 /* Skills.skillsbundle in Resources */ = {isa = PBXBuildFile; fileRef = 6BA07CA26131443B8C9A1F75 /* Skills.skillsbundle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		0EC7C2DA2F6CD5D40012BC87 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		6BA07CA26131443B8C9A1F75 /* Skills.skillsbundle */ = {isa = PBXFileReference; path = Skills.skillsbundle; sourceTree = "<group>"; };
 		0EC7C2C72F6CD5D30012BC87 /* OpenFoodJournal.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenFoodJournal.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		0EC7C2D92F6CD5D40012BC87 /* OpenFoodJournalTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenFoodJournalTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		0EC7C2E32F6CD5D40012BC87 /* OpenFoodJournalUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OpenFoodJournalUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -91,6 +96,7 @@
 				0EC7C2C92F6CD5D30012BC87 /* OpenFoodJournal */,
 				0EC7C2DC2F6CD5D40012BC87 /* OpenFoodJournalTests */,
 				0EC7C2E62F6CD5D40012BC87 /* OpenFoodJournalUITests */,
+				6BA07CA26131443B8C9A1F75 /* Skills.skillsbundle */,
 				0EC7C2C82F6CD5D30012BC87 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -225,6 +231,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				6BA07CA26131443B8C9A1F76 /* Skills.skillsbundle in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -469,6 +476,7 @@
 				CURRENT_PROJECT_VERSION = 0;
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) Skills.skillsbundle";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OpenFoodJournal/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";
@@ -509,6 +517,7 @@
 				CURRENT_PROJECT_VERSION = 10;
 				DEVELOPMENT_TEAM = 83B48K23H4;
 				ENABLE_PREVIEWS = YES;
+				EXCLUDED_SOURCE_FILE_NAMES = "$(inherited) Skills.skillsbundle";
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OpenFoodJournal/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "OpenFoodJournal uses the camera to scan food items and nutrition labels.";

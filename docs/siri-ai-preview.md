@@ -19,6 +19,23 @@ Siri can log a known portion, use the existing Food Bank-first spoken logging fl
 
 Writes require explicit confirmation and recheck device protection before persistence. The SwiftData writes refuse to run while the app has unsaved changes. Edits and deletes re-read the selected record after confirmation and ask the person to review it again if it changed. Recent matching logs prompt before adding another.
 
+## Siri App Skills
+
+The preview includes one Xcode resource, [Skills.skillsbundle](../Skills.skillsbundle/Skills/), containing six Apple App Skills. These are instructions for Siri to coordinate the existing tools, not additional intents, scripts, or the in-app Assistant's prompts.
+
+| Skill | Guides Siri through |
+| --- | --- |
+| `log-food` | Food Bank-first logging, brand/portion clarification, known-nutrition logging, research handoff and post-save verification |
+| `compare-saved-foods` | Finding exact saved brands, comparing equal portions, inspecting stored conversions and calculator options |
+| `review-journal-nutrition` | Date/meal-specific summaries and entries, comparable periods, actual logged data, and current settings |
+| `correct-journal-entry` | Resolving the exact historical entry, applying a targeted edit or deletion, and verifying the result |
+| `manage-food-bank` | Saving logged portions, creating known-nutrition foods, editing templates, archive/restore, shelf membership, and deletion |
+| `review-assistant-conversation` | Finding and reading selected saved Assistant conversations and distinguishing past chat from actual journal records |
+
+Each skill is a `SKILL.md` in a lowercase, hyphenated directory. Only the `name` and `description` frontmatter fields are used; the description determines when Siri considers the body's guidance. Refer to tool intent titles in bold so the local validator can catch renamed or missing tools. Keep skills focused on multi-tool decisions rather than repeating intent parameters. No user records, credentials, supporting files, or executable code belong in the bundle.
+
+Skills are advisory, not deterministic workflows. In particular, the app's existing authentication, conversion, confirmation, duplicate detection, and persistence checks still apply even if Siri doesn't load a skill. Use the same existing tool intents, not duplicate implementations. The source bundle is excluded from normal Debug and Release builds; Xcode 27.3 compiles it for `SiriAIPreview`.
+
 ## Build and verify
 
 Use Xcode 27.3 beta 2 or newer for the preview. The stable CI and TestFlight workflows keep their pinned toolchain and omit the preview flag.
@@ -28,7 +45,9 @@ DEVELOPER_DIR=/Applications/Xcode-27.3-beta-2.app/Contents/Developer \
     ./ci/verify-siri-ai-preview.sh
 ```
 
-The script builds the shared `OpenFoodJournalSiriAIPreview` scheme for a generic iOS device without signing and checks the app's minimum iOS version and Siri tool metadata. The scheme uses the `SiriAIPreview` build configuration, which enables the tools and requires iOS 27.3. Apple's preview supports development-signed builds and internal TestFlight.
+The script validates the skill files, builds the shared `OpenFoodJournalSiriAIPreview` scheme for a generic iOS device without signing, and requires compiled `Metadata.appintents/Skills.skillsc`, the iOS 27.3 minimum, and Siri tool metadata in the app. The scheme uses the `SiriAIPreview` build configuration, which enables the tools and requires iOS 27.3. Apple's preview supports development-signed builds and internal TestFlight.
+
+On any toolchain, `python3 ci/validate-siri-skills.py` checks the source bundle's format, limits, and tool references. Stable CI also checks that the standard built app contains neither the uncompiled source bundle nor the compiled skill resource.
 
 Run the manual **Siri AI Preview Verification** Xcode Cloud workflow to publish an internal TestFlight preview. It uses Xcode 27.3 beta 2, runs `OpenFoodJournalUnitTests` on an iOS 27.3 simulator, and archives the preview scheme for TestFlight Internal Only. The post-build script checks the archived app for Siri tools before distribution. Confirm the processed build is available to the **Testing** internal group in App Store Connect.
 
@@ -45,6 +64,19 @@ On an Apple Intelligence-capable device running iOS 27.3 beta 2, enable Siri AI 
 | Request personal values while the phone is locked | The values are withheld until the device is authenticated. |
 | Invoke each of the three existing voice flows on the preview and standard builds | Saved-food logging, freeform logging, and Assistant handoff each have a working entry point. |
 
-When scripting Siri Evaluations, assert both the selected tool and the returned value. A correct-looking Siri reply alone doesn't verify that OFJ provided the data.
+### Skill selection and chaining
 
-[Apple's custom actions guidance](https://developer.apple.com/documentation/appintents/bringing-custom-actions-and-content-to-siri) · [iOS 27.3 beta release notes](https://developer.apple.com/documentation/ios-ipados-release-notes/ios-ipados-27_3-release-notes) · [Siri Evaluations](https://developer.apple.com/documentation/sirievaluations/evaluating-your-apps-integration-with-siri)
+Use a dedicated test device with fictional journal and Food Bank records and an Apple Intelligence-supported system language. The current Siri AI preview uses the production app identity, not an isolated journal store; do not run automated destructive tests against a real journal. Include the app name in each new background conversation.
+
+| Skill | Example request | Expected behavior |
+| --- | --- | --- |
+| `log-food` | “In OpenFoodJournal, log a cup of milk for breakfast yesterday, then tell me yesterday's totals.” | Ask which saved brand if ambiguous, confirm the correct portion and date, then read yesterday's summary only after saving. |
+| `compare-saved-foods` | “In OpenFoodJournal, compare 100 grams of my two saved yogurts.” | Resolve both brands and compare stored values if both support grams. No writes. |
+| `review-journal-nutrition` | “In OpenFoodJournal, compare my logged protein for the last seven days with the previous seven days, and tell me which days have entries.” | Use two non-overlapping summary ranges, optionally read entries for coverage details, and label calendar days versus tracked days. |
+| `correct-journal-entry` | “In OpenFoodJournal, change yesterday's lunch yogurt from 150 grams to 200 grams.” | Find the historical record, clarify if necessary, use the edit tool, and let the person confirm. Cancellation changes nothing. |
+| `manage-food-bank` | “In OpenFoodJournal, save that yogurt I logged yesterday to my Food Bank.” | Resolve one journal entry then save its actual portion as a reusable food after confirmation; no extra journal entry. |
+| `review-assistant-conversation` | “In OpenFoodJournal, what did we discuss in my yogurt Assistant conversation, and did I actually log it yesterday?” | Find/read the correct conversation, then query the journal independently. No writes. |
+
+Repeat requests using different wording and check the confirmation, cancellation, ambiguous match, unsupported-unit, and no-result cases as appropriate. With [Siri Evaluations](https://developer.apple.com/documentation/sirievaluations/evaluating-your-apps-integration-with-siri), assert skill selection with `Loads`, tool calls and their parameters with `Calls`, and disallowed mutations for read-only scenarios. A correct-looking Siri reply alone doesn't verify that OFJ provided the data. Siri Evaluations require compatible physical hardware and cannot run in Simulator.
+
+[Apple's App Skills guidance](https://developer.apple.com/documentation/appintents/orchestrating-complex-actions-with-app-skills) · [Custom actions guidance](https://developer.apple.com/documentation/appintents/bringing-custom-actions-and-content-to-siri) · [iOS 27.3 beta release notes](https://developer.apple.com/documentation/ios-ipados-release-notes/ios-ipados-27_3-release-notes)

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python3 "$project_dir/ci/validate-siri-skills.py"
+
 sdk_version="$(xcrun --sdk iphoneos --show-sdk-version)"
 if [[ ! "$sdk_version" =~ ^([0-9]+)\.([0-9]+) ]] ||
     (( BASH_REMATCH[1] < 27 || (BASH_REMATCH[1] == 27 && BASH_REMATCH[2] < 3) )); then
@@ -11,7 +14,6 @@ fi
 if [[ "${1:-}" == --app ]]; then
     app="${2:?Provide the path to OpenFoodJournal.app}"
 else
-    project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
     derived_data="${1:-$(mktemp -d "${TMPDIR:-/tmp}/ofj-siri-ai-preview.XXXXXX")}"
 
     xcodebuild \
@@ -25,6 +27,8 @@ else
 
     app="$derived_data/Build/Products/SiriAIPreview-iphoneos/OpenFoodJournal.app"
 fi
+
+python3 "$project_dir/ci/validate-siri-skills.py" --app "$app"
 
 minimum_os="$(/usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$app/Info.plist")"
 if [[ "$minimum_os" != 27.3 ]]; then
