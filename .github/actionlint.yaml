@@ -1,6 +1,5 @@
 self-hosted-runner:
-  # GitHub introduced this hosted preview label after actionlint 1.7.12's
-  # built-in runner catalog was published.
+  # Allow GitHub's hosted Xcode label in older actionlint versions.
   labels:
     - xcode-27
 

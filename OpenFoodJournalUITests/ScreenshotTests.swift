@@ -49,9 +49,10 @@ final class ScreenshotTests: XCTestCase {
         if screens.contains("scan") {
             let add = app.descendants(matching: .any)["journal.add"]
             XCTAssertTrue(add.waitForExistence(timeout: 10))
-            add.tap()
+            // The radial menu recognizes a short press. A synthesized tap may be too brief.
+            add.press(forDuration: 0.1)
             let scan = app.descendants(matching: .any)["journal.action.scan"]
-            XCTAssertTrue(scan.waitForExistence(timeout: 10))
+            XCTAssertTrue(scan.waitForExistence(timeout: 10), "The Journal add menu did not open")
             scan.tap()
             let preview = app.descendants(matching: .any)["scan.screenshot-preview"]
             XCTAssertTrue(preview.waitForExistence(timeout: 10), "Expected camera-free screenshot mode")

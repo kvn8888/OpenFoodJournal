@@ -116,16 +116,18 @@ def main():
     boot = None
     boot_stream = None
     try:
+        _, sdk_version = run("simulator-sdk", ["xcrun", "--sdk", "iphonesimulator", "--show-sdk-version"])
+        runtime = f"com.apple.CoreSimulator.SimRuntime.iOS-{sdk_version.strip().replace('.', '-')}"
         _, devices_json = run("list-devices", ["xcrun", "simctl", "list", "devices", "available", "--json"])
-        available = json.loads(devices_json)["devices"]
-        candidates = [(runtime, device) for runtime, devices in available.items()
-                      if ".iOS-26-" in runtime for device in devices if device["name"] == device_name]
-        if not candidates:
-            raise RuntimeError(f"No available iOS 26 simulator named {device_name}")
-        runtime, device = max(candidates, key=lambda item: tuple(int(n) for n in re.findall(r"\d+", item[0])))
-        identifier = device["udid"]
+        devices = json.loads(devices_json)["devices"].get(runtime, [])
+        device = next((device for device in devices if device["name"] == device_name), None)
+        if device is None:
+            _, created_id = run("create-device", ["xcrun", "simctl", "create", device_name, device_name, runtime])
+            identifier = created_id.strip()
+        else:
+            identifier = device["udid"]
         manifest["runtime"] = runtime
-        if device["state"] != "Booted":
+        if device is None or device["state"] != "Booted":
             run("boot", ["xcrun", "simctl", "boot", identifier])
         boot_stream = (diagnostics / "boot-status.log").open("w")
         boot = subprocess.Popen(["xcrun", "simctl", "bootstatus", identifier, "-b"],
