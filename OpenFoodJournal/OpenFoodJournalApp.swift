@@ -28,19 +28,16 @@ struct MacrosApp: App {
 
     /// CloudKit container for this build configuration.
     ///
-    /// Debug and Release name *different containers*, not the same container in
-    /// different CloudKit environments. Environment routing is decided by code
-    /// signing and is invisible in source; this is explicit and cannot drift.
-    /// Must stay in sync with the `com.apple.developer.icloud-container-identifiers`
-    /// entry in the matching entitlements file.
+    /// Debug, Preview, and Release name *different containers*, not the same
+    /// container in different CloudKit environments. Environment routing is
+    /// decided by code signing and is invisible in source; this is explicit and
+    /// cannot drift. Must stay in sync with the
+    /// `com.apple.developer.icloud-container-identifiers` entry in the matching
+    /// entitlements file.
     // Internal so the Debug unit suite can enforce the runtime half of the
     // source-entitlements contract without launching CloudKit.
     static var cloudKitContainerIdentifier: String {
-        #if DEBUG
-        return "iCloud.k3vnc.OpenFoodJournal.dev"
-        #else
-        return "iCloud.k3vnc.OpenFoodJournal"
-        #endif
+        OFJBuildEnvironment.current.cloudKitContainerIdentifier
     }
 
     init() {

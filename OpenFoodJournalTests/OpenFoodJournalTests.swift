@@ -212,8 +212,37 @@ struct OpenFoodJournalTests {
     #if DEBUG
     @MainActor
     @Test func developerBuildUsesIsolatedCloudKitAndDisablesHealthKit() {
+        #expect(OFJBuildEnvironment.current == .debug)
         #expect(MacrosApp.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal.dev")
         #expect(!HealthKitService().isAvailable)
+        #expect(KeychainService.service == (Bundle.main.bundleIdentifier ?? "k3vnc.OpenFoodJournal"))
+    }
+
+    @Test func buildEnvironmentsAreMutuallyIsolatedAndPreviewGuardsSharedIntegrations() {
+        let containers = Set(OFJBuildEnvironment.allCases.map(\.cloudKitContainerIdentifier))
+        let bundles = Set(OFJBuildEnvironment.allCases.map(\.expectedBundleIdentifier))
+        #expect(containers.count == OFJBuildEnvironment.allCases.count)
+        #expect(bundles.count == OFJBuildEnvironment.allCases.count)
+
+        #expect(OFJBuildEnvironment.debug.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal.dev")
+        #expect(OFJBuildEnvironment.preview.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal.preview")
+        #expect(OFJBuildEnvironment.release.cloudKitContainerIdentifier == "iCloud.k3vnc.OpenFoodJournal")
+
+        #expect(OFJBuildEnvironment.debug.expectedBundleIdentifier == "k3vnc.OpenFoodJournal.dev")
+        #expect(OFJBuildEnvironment.preview.expectedBundleIdentifier == "k3vnc.OpenFoodJournal.preview")
+        #expect(OFJBuildEnvironment.release.expectedBundleIdentifier == "k3vnc.OpenFoodJournal")
+
+        // Preview UAT keeps Apple Health off by default and warns before opt-in or Turso use.
+        #expect(!OFJBuildEnvironment.preview.showsHealthKitInOnboarding)
+        #expect(OFJBuildEnvironment.preview.requiresHealthKitOptInWarning)
+        #expect(OFJBuildEnvironment.preview.showsTursoPreviewWarning)
+        #expect(OFJBuildEnvironment.preview.showsEnvironmentDiagnosticsInSettings)
+
+        // Production keeps standard onboarding and no preview-only banners.
+        #expect(OFJBuildEnvironment.release.showsHealthKitInOnboarding)
+        #expect(!OFJBuildEnvironment.release.requiresHealthKitOptInWarning)
+        #expect(!OFJBuildEnvironment.release.showsTursoPreviewWarning)
+        #expect(!OFJBuildEnvironment.release.showsEnvironmentDiagnosticsInSettings)
     }
 
     @MainActor

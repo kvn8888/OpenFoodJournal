@@ -15,9 +15,12 @@ enum KeychainService {
 
     // MARK: - Constants
 
-    /// The Keychain service identifier — scoped to our app's bundle.
-    /// All keys stored by this service share this identifier.
-    private static let service = "k3vnc.OpenFoodJournal"
+    /// The Keychain service identifier — scoped to the active app bundle so
+    /// Production (`k3vnc.OpenFoodJournal`), Preview, and Dev stay explicitly
+    /// partitioned. Production keeps the exact historical service string.
+    static var service: String {
+        Bundle.main.bundleIdentifier ?? "k3vnc.OpenFoodJournal"
+    }
 
     /// The specific Keychain account name for the Gemini API key.
     /// Think of (service, account) as a composite key in a database.

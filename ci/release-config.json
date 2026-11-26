@@ -1,7 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "appStoreAppID": "6761086648",
   "bundleIdentifier": "k3vnc.OpenFoodJournal",
+  "cloudKitContainerIdentifier": "iCloud.k3vnc.OpenFoodJournal",
+  "displayName": "OpenFoodJournal",
   "teamID": "83B48K23H4",
   "signingCertificateName": "iPhone Distribution",
   "testFlightGroupID": "12593eb5-970d-4a68-a2a8-921f09fd2c8a",
@@ -23,5 +25,15 @@
     "arm64": "47d9be058359ab29c4f562361abfed710b7f24acdaa79c78777bc6e25e118fef",
     "x86_64": "8fbb62de183d62828bf94a433d446bcc5dfd3b26f51de9d4105200df9aacd806"
   },
-  "testFlightTagPrefix": "testflight/"
+  "testFlightTagPrefix": "preview/",
+  "releaseCandidateTagPrefix": "release-rc/",
+  "preview": {
+    "appStoreAppID": "6838807947",
+    "bundleIdentifier": "k3vnc.OpenFoodJournal.preview",
+    "cloudKitContainerIdentifier": "iCloud.k3vnc.OpenFoodJournal.preview",
+    "xcodeConfiguration": "Preview",
+    "displayName": "OFJ Preview",
+    "testFlightGroupID": "aacee59f-91fb-4623-8fd1-2eb8ed69948b",
+    "tagPrefix": "preview/"
+  }
 }

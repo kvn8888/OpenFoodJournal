@@ -33,7 +33,7 @@ jobs:
       - name: Verify release workflow contracts
         run: bash .github/scripts/test-release-workflow.sh
 
-      - name: Verify Debug and Release isolation contracts
+      - name: Verify Debug, Preview, and Release isolation contracts
         run: bash .github/scripts/test-debug-isolation.sh
 
       - name: Compile app and all test targets
@@ -45,6 +45,17 @@ jobs:
             -derivedDataPath "${RUNNER_TEMP}/DerivedData-generic" \
             CODE_SIGNING_ALLOWED=NO \
             build-for-testing
+
+      - name: Compile Preview configuration
+        run: |
+          xcodebuild \
+            -project OpenFoodJournal.xcodeproj \
+            -scheme OpenFoodJournal \
+            -configuration Preview \
+            -destination generic/platform=iOS \
+            -derivedDataPath "${RUNNER_TEMP}/DerivedData-preview" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
       - name: Select unit-test simulator
         run: bash .github/scripts/select-unit-test-simulator.sh

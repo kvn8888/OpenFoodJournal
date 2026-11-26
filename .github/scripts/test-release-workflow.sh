@@ -36,6 +36,31 @@ do
   fi
 done
 
+# Ensure Preview UAT and Production workflows both enforce signed IPA isolation.
+for workflow in .github/workflows/testflight.yml .github/workflows/app-store.yml; do
+  if ! grep -Fq "bash .github/scripts/verify-signed-ipa.sh" "${workflow}"; then
+    echo "${workflow} does not invoke verify-signed-ipa.sh before upload." >&2
+    exit 1
+  fi
+done
+
+if ! grep -Fq -- '--configuration "${{ steps.preview_config.outputs.xcode_config }}"' .github/workflows/testflight.yml; then
+  echo "testflight.yml must archive using the Preview configuration." >&2
+  exit 1
+fi
+if grep -Fq -- '--submit' .github/workflows/testflight.yml; then
+  echo "testflight.yml must remain internal-only for OFJ Preview and not submit to external Beta App Review." >&2
+  exit 1
+fi
+if ! grep -Fq 'testFlightInternalTestingOnly bool true' .github/workflows/testflight.yml; then
+  echo "testflight.yml must set testFlightInternalTestingOnly=true on OFJ Preview exports." >&2
+  exit 1
+fi
+if ! grep -Fq -- '--configuration Release' .github/workflows/app-store.yml; then
+  echo "app-store.yml must archive production binaries using the Release configuration." >&2
+  exit 1
+fi
+
 valid_notes="${fixture_root}/valid-notes.txt"
 empty_notes="${fixture_root}/empty-notes.txt"
 long_notes="${fixture_root}/long-notes.txt"
@@ -121,6 +146,18 @@ if jq -e '[.releaseNotesModel] + .releaseNotesFallbackModels | any(test("/"))' \
   exit 1
 fi
 
+# Verify ExportOptions.plist supports clean per-lane bundle ID injection.
+export_fixture="${fixture_root}/ExportOptions.plist"
+cp ci/ExportOptions.plist "${export_fixture}"
+/usr/libexec/PlistBuddy \
+  -c "Add :provisioningProfiles:k3vnc.OpenFoodJournal.preview string PreviewProfile" \
+  "${export_fixture}"
+/usr/libexec/PlistBuddy \
+  -c "Set :signingCertificate iPhone Distribution" \
+  "${export_fixture}"
+plutil -lint "${export_fixture}" >/dev/null
+
+# Verify schema-3 Preview UAT and Production RC promotion provenance contracts.
 promotion_repo="${fixture_root}/promotion-repo"
 mkdir -p \
   "${promotion_repo}/.github/scripts" \
@@ -129,7 +166,19 @@ mkdir -p \
   "${promotion_repo}/ci"
 cp .github/scripts/validate-release-notes.sh "${promotion_repo}/.github/scripts/"
 cp .github/scripts/verify-promotion.sh "${promotion_repo}/.github/scripts/"
-printf '%s\n' '{"appStoreAppID":"6761086648"}' > "${promotion_repo}/ci/release-config.json"
+cat > "${promotion_repo}/ci/release-config.json" <<'EOF'
+{
+  "appStoreAppID": "6761086648",
+  "bundleIdentifier": "k3vnc.OpenFoodJournal",
+  "cloudKitContainerIdentifier": "iCloud.k3vnc.OpenFoodJournal",
+  "preview": {
+    "appStoreAppID": "9999999999",
+    "bundleIdentifier": "k3vnc.OpenFoodJournal.preview",
+    "cloudKitContainerIdentifier": "iCloud.k3vnc.OpenFoodJournal.preview",
+    "xcodeConfiguration": "Preview"
+  }
+}
+EOF
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal/App.swift"
 printf '%s\n' 'fixture' > "${promotion_repo}/OpenFoodJournal.xcodeproj/project.pbxproj"
 
@@ -138,51 +187,192 @@ git -C "${promotion_repo}" config user.name "Release Contract"
 git -C "${promotion_repo}" config user.email "release-contract@example.invalid"
 git -C "${promotion_repo}" add .
 git -C "${promotion_repo}" commit -qm "fixture"
-git -C "${promotion_repo}" tag testflight/1.4-11
+git -C "${promotion_repo}" tag preview/1.6-1
+git -C "${promotion_repo}" tag release-rc/1.6-1
 
 fixture_commit="$(git -C "${promotion_repo}" rev-parse HEAD)"
 fixture_whats_new="${promotion_repo}/whats-new.txt"
 printf '%s\n' '• Health data now matches the journal.' > "${fixture_whats_new}"
 fixture_notes_sha="$(shasum -a 256 "${fixture_whats_new}" | awk '{print $1}')"
-fixture_manifest="${promotion_repo}/release-manifest.json"
+
+preview_manifest="${promotion_repo}/preview-manifest.json"
 jq -n \
   --arg commitSHA "${fixture_commit}" \
   --arg whatsNewSHA256 "${fixture_notes_sha}" \
   '{
-    schemaVersion: 2,
-    appStoreAppID: "6761086648",
-    buildID: "build-id",
-    buildNumber: "11",
-    version: "1.4",
-    ipaSHA256: "ipa-sha",
+    schemaVersion: 3,
+    manifestKind: "preview-uat",
+    appStoreAppID: "9999999999",
+    bundleIdentifier: "k3vnc.OpenFoodJournal.preview",
+    cloudKitContainerIdentifier: "iCloud.k3vnc.OpenFoodJournal.preview",
+    xcodeConfiguration: "Preview",
+    buildID: "preview-build-id",
+    buildNumber: "1",
+    version: "1.6",
+    ipaSHA256: "preview-ipa-sha",
     primaryLocale: "en-US",
     whatsNew: "• Health data now matches the journal.",
     whatsNewSHA256: $whatsNewSHA256,
     whatToTest: "Verify Health data reconciliation.",
     commitSHA: $commitSHA,
     releaseNotes: {
-      source: "github-models",
+      source: "bifrost",
       requiresHumanApproval: true
     }
-  }' > "${fixture_manifest}"
+  }' > "${preview_manifest}"
+
+prod_rc_manifest="${promotion_repo}/prod-rc-manifest.json"
+jq -n \
+  --arg commitSHA "${fixture_commit}" \
+  --arg whatsNewSHA256 "${fixture_notes_sha}" \
+  '{
+    schemaVersion: 3,
+    manifestKind: "production-rc",
+    sourcePreviewTag: "preview/1.6-1",
+    appStoreAppID: "6761086648",
+    bundleIdentifier: "k3vnc.OpenFoodJournal",
+    cloudKitContainerIdentifier: "iCloud.k3vnc.OpenFoodJournal",
+    xcodeConfiguration: "Release",
+    buildID: "prod-build-id",
+    buildNumber: "1",
+    version: "1.6",
+    ipaSHA256: "prod-ipa-sha",
+    primaryLocale: "en-US",
+    whatsNew: "• Health data now matches the journal.",
+    whatsNewSHA256: $whatsNewSHA256,
+    whatToTest: "Verify Health data reconciliation.",
+    commitSHA: $commitSHA,
+    releaseNotes: {
+      source: "bifrost",
+      requiresHumanApproval: true
+    }
+  }' > "${prod_rc_manifest}"
 
 (
   cd "${promotion_repo}"
   bash .github/scripts/verify-promotion.sh \
-    testflight/1.4-11 \
-    "${fixture_manifest}" \
+    --kind preview-uat \
+    preview/1.6-1 \
+    "${preview_manifest}" \
+    "${fixture_whats_new}" >/dev/null
+  bash .github/scripts/verify-promotion.sh \
+    --kind production-rc \
+    release-rc/1.6-1 \
+    "${prod_rc_manifest}" \
     "${fixture_whats_new}" >/dev/null
 )
 
-jq '.schemaVersion = 1' "${fixture_manifest}" > "${fixture_manifest}.invalid"
+# Reject cross-kind promotion (e.g., passing Preview manifest as production RC).
 if (
   cd "${promotion_repo}"
   bash .github/scripts/verify-promotion.sh \
-    testflight/1.4-11 \
-    "${fixture_manifest}.invalid" \
+    --kind production-rc \
+    preview/1.6-1 \
+    "${preview_manifest}" \
+    "${fixture_whats_new}" >/dev/null 2>&1
+); then
+  echo "Preview manifest unexpectedly passed production-rc verification." >&2
+  exit 1
+fi
+
+# Reject legacy schema-2 manifests.
+jq '.schemaVersion = 2' "${preview_manifest}" > "${preview_manifest}.legacy"
+if (
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-promotion.sh \
+    --kind preview-uat \
+    preview/1.6-1 \
+    "${preview_manifest}.legacy" \
     "${fixture_whats_new}" >/dev/null 2>&1
 ); then
   echo "Legacy manifest schema unexpectedly passed promotion verification." >&2
+  exit 1
+fi
+
+# Reject mismatched CloudKit container in manifest.
+jq '.cloudKitContainerIdentifier = "iCloud.k3vnc.OpenFoodJournal"' "${preview_manifest}" > "${preview_manifest}.wrongck"
+if (
+  cd "${promotion_repo}"
+  bash .github/scripts/verify-promotion.sh \
+    --kind preview-uat \
+    preview/1.6-1 \
+    "${preview_manifest}.wrongck" \
+    "${fixture_whats_new}" >/dev/null 2>&1
+); then
+  echo "Preview manifest targeting production CloudKit unexpectedly passed." >&2
+  exit 1
+fi
+
+# Verify verify-signed-ipa.sh with a real ad-hoc signed .app fixture.
+ipa_stage="${fixture_root}/ipa-fixture"
+app_dir="${ipa_stage}/Payload/OFJPreview.app"
+mkdir -p "${app_dir}"
+cp /bin/echo "${app_dir}/OFJPreview"
+cat > "${app_dir}/Info.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>k3vnc.OpenFoodJournal.preview</string>
+  <key>CFBundleDisplayName</key>
+  <string>OFJ Preview</string>
+  <key>CFBundleExecutable</key>
+  <string>OFJPreview</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+EOF
+cat > "${ipa_stage}/entitlements.plist" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>application-identifier</key>
+  <string>83B48K23H4.k3vnc.OpenFoodJournal.preview</string>
+  <key>com.apple.developer.healthkit</key>
+  <true/>
+  <key>com.apple.developer.icloud-container-identifiers</key>
+  <array>
+    <string>iCloud.k3vnc.OpenFoodJournal.preview</string>
+  </array>
+  <key>com.apple.developer.icloud-services</key>
+  <array>
+    <string>CloudKit</string>
+  </array>
+</dict>
+</plist>
+EOF
+codesign --force --sign - --entitlements "${ipa_stage}/entitlements.plist" "${app_dir}" >/dev/null 2>&1
+(cd "${ipa_stage}" && zip -qr "${fixture_root}/OFJPreview.ipa" Payload)
+
+bash .github/scripts/verify-signed-ipa.sh \
+  "${fixture_root}/OFJPreview.ipa" \
+  k3vnc.OpenFoodJournal.preview \
+  83B48K23H4 \
+  iCloud.k3vnc.OpenFoodJournal.preview \
+  "OFJ Preview" >/dev/null
+
+if bash .github/scripts/verify-signed-ipa.sh \
+  "${fixture_root}/OFJPreview.ipa" \
+  k3vnc.OpenFoodJournal \
+  83B48K23H4 \
+  iCloud.k3vnc.OpenFoodJournal \
+  "OpenFoodJournal" >/dev/null 2>&1
+then
+  echo "Preview IPA unexpectedly passed production IPA verification." >&2
+  exit 1
+fi
+
+if bash .github/scripts/verify-signed-ipa.sh \
+  "${fixture_root}/OFJPreview.ipa" \
+  k3vnc.OpenFoodJournal.preview \
+  83B48K23H4 \
+  iCloud.k3vnc.OpenFoodJournal \
+  "OFJ Preview" >/dev/null 2>&1
+then
+  echo "IPA with preview CloudKit unexpectedly matched production CloudKit expectation." >&2
   exit 1
 fi
 
