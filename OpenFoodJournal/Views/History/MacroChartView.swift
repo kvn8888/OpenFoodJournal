@@ -89,7 +89,7 @@ struct MacroChartView: View {
     }
 
     private var microGoalValue: Double {
-        selectedMicro?.dailyValue ?? 0
+        selectedMicro.map { goals.dailyValue(for: $0) } ?? 0
     }
 
     private var microUnit: String {

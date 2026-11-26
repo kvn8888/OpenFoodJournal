@@ -364,6 +364,9 @@ TextField("Calories", text: $caloriesText)
 ### History Micronutrient Pins
 Long-press a History micronutrient chip to open a **Pin** / **Unpin** menu. Pins persist in `UserDefaults` (`history.pinnedMicronutrientIDs`) via `PinnedMicronutrientSettings` and appear in a dedicated row above the full chip scroller. Macros are not pinnable. Pinnable chips use `Menu` with `primaryAction` (tap selects, hold opens the menu) rather than `Button` + `contextMenu`, which does not present inside a horizontal `ScrollView` with interactive Liquid Glass.
 
+### Micronutrient Goals
+Settings → Goals → **Micronutrient Goals** opens `MicronutrientGoalsEditorView`: a searchable list of every known nutrient grouped by category. An empty field shows the FDA Daily Value as its placeholder and means "use the FDA value"; typing a number overrides it, and clearing the field or swiping Reset restores it. Rows commit on focus loss rather than behind a Save button, because the list is long enough to lose buffered edits. Never read `KnownMicronutrient.dailyValue` in a view — use `UserGoals.dailyValue(for:)` so custom targets are honoured.
+
 ### Confirmation Dialogs
 ```swift
 .confirmationDialog(

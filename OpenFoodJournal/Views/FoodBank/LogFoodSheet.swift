@@ -285,7 +285,7 @@ struct LogFoodSheet: View {
                             name: known?.name ?? key,
                             value: scaledValue.value,
                             unit: baseValue.unit,
-                            dailyValue: known?.dailyValue,
+                            dailyValue: known.map { goals.dailyValue(for: $0) },
                             accentColor: accentTheme.accentColor,
                             onValueChanged: { newValue in
                                 editedMicros[key] = MicronutrientValue(

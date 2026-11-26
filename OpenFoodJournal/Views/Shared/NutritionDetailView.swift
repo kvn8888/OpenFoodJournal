@@ -43,7 +43,9 @@ struct NutritionDetailView: View {
                     ForEach(KnownMicronutrient.Category.allCases, id: \.self) { category in
                         let nutrients = KnownMicronutrients.common.filter { $0.category == category }
                         if !nutrients.isEmpty {
-                            nutrientSection(category.rawValue, metrics: nutrients.map(NutritionMetric.known), analytics: analytics)
+                            nutrientSection(category.rawValue,
+                                            metrics: nutrients.map { NutritionMetric.known($0, overrides: goals.micronutrientOverrides) },
+                                            analytics: analytics)
                         }
                     }
 
@@ -54,7 +56,7 @@ struct NutritionDetailView: View {
                                 if !nutrients.isEmpty {
                                     Text(category.rawValue).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                     ForEach(nutrients) { known in
-                                        nutrientRow(.known(known), analytics: analytics)
+                                        nutrientRow(.known(known, overrides: goals.micronutrientOverrides), analytics: analytics)
                                     }
                                 }
                             }

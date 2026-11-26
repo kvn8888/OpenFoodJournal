@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct NutritionLogQuery<Content: View>: View {
+    @Environment(UserGoals.self) private var goals
     @Query private var logs: [DailyLog]
     let foodName: String?
     let content: (NutritionAnalytics) -> Content
@@ -15,7 +16,10 @@ struct NutritionLogQuery<Content: View>: View {
         self.foodName = foodName
         self.content = content
     }
-    var body: some View { content(NutritionAnalytics(logs: logs, foodName: foodName)) }
+    var body: some View {
+        content(NutritionAnalytics(logs: logs, foodName: foodName,
+                                   micronutrientGoals: goals.micronutrientOverrides))
+    }
 }
 
 extension NutritionMetric {
