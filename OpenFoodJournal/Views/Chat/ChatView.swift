@@ -19,6 +19,8 @@ struct ChatView: View {
     @Environment(ChatService.self) private var chatService
     @Environment(AppNavigationRouter.self) private var navigation
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // Most recently active thread first — the tab always resumes the latest.
     @Query(sort: \ChatThread.updatedAt, order: .reverse)
@@ -35,6 +37,9 @@ struct ChatView: View {
     @State private var showCameraPicker = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var showFileImporter = false
+    /// Where staged photos came from when they arrived from a Journal scan;
+    /// drives the contextual suggestion tray. Cleared on send.
+    @State private var scanHandoffContext: AssistantComposerScanContext?
 
     // Calculator review flow (create/update_calculator permission cards)
     @State private var calculatorReview: CalculatorReviewSession?
@@ -128,9 +133,22 @@ struct ChatView: View {
         }
         .onChange(of: isSelected, initial: true) {
             acceptAssistantHandoff()
+            acceptAssistantPhotoHandoff()
+            if !isSelected {
+                // Leaving mid-flight: drop the decoration, keep the photos.
+                navigation.attachmentTransition.cancel()
+            }
         }
         .onChange(of: navigation.pendingAssistantHandoff) {
             acceptAssistantHandoff()
+        }
+        .onChange(of: navigation.pendingAssistantPhotoHandoff?.id) {
+            acceptAssistantPhotoHandoff()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                navigation.attachmentTransition.cancel()
+            }
         }
     }
 
@@ -485,8 +503,24 @@ struct ChatView: View {
                 .accessibilityIdentifier("assistant.editing-message")
             }
 
+            if let scanHandoffContext, scanHandoffContext.isVisible(with: pendingAttachments) {
+                AssistantScanSuggestionTray(
+                    context: scanHandoffContext,
+                    imageLimit: Self.maximumImageAttachments,
+                    onSelect: applySuggestion,
+                    onDismiss: { withAnimation(composerAnimation) { self.scanHandoffContext = nil } }
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+
             if !pendingAttachments.isEmpty {
-                pendingAttachmentsRow
+                AssistantComposerAttachmentStrip(
+                    attachments: pendingAttachments,
+                    scanContext: scanHandoffContext,
+                    transition: navigation.attachmentTransition,
+                    onRemove: removePendingAttachment
+                )
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
 
             GlassEffectContainer(spacing: 8) {
@@ -597,38 +631,16 @@ struct ChatView: View {
         .padding(.bottom, 4)
     }
 
-    private var pendingAttachmentsRow: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(pendingAttachments) { attachment in
-                    HStack(spacing: 6) {
-                        if attachment.isImage, let image = UIImage(data: attachment.data) {
-                            Image(uiImage: image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 28, height: 28)
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
-                        } else {
-                            Image(systemName: "doc.fill")
-                                .foregroundStyle(.secondary)
-                        }
-                        Text(attachment.isImage ? "Photo" : attachment.filename)
-                            .font(.caption)
-                            .lineLimit(1)
-                        Button {
-                            pendingAttachments.removeAll { $0.id == attachment.id }
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .glassEffect(in: .capsule)
-                }
-            }
+    private var composerAnimation: Animation? {
+        reduceMotion ? nil : OFJMotion.standardSpring
+    }
+
+    private func removePendingAttachment(_ attachment: ChatDraftAttachment) {
+        if navigation.attachmentTransition.concealedAttachmentID == attachment.id {
+            navigation.attachmentTransition.cancel()
+        }
+        withAnimation(composerAnimation) {
+            pendingAttachments.removeAll { $0.id == attachment.id }
         }
     }
 
@@ -697,6 +709,67 @@ struct ChatView: View {
 
     // MARK: - Actions
 
+    /// Stages scan photos in the composer. Never submits, never cancels or
+    /// replaces an active run, and never discards an unsent draft.
+    private func acceptAssistantPhotoHandoff() {
+        guard isSelected, let handoff = navigation.takeAssistantPhotoHandoff() else { return }
+
+        // An in-progress edit would turn the scan photos into a rewrite of an
+        // old message. Leave edit mode first; the original message is intact.
+        if editingMessageID != nil {
+            cancelEditing()
+        }
+
+        let placement = AssistantComposerHandoffReducer.placement(
+            isStreaming: chatService.isStreaming,
+            threadHasMessages: !messages.isEmpty,
+            composerHasContent: !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || !pendingAttachments.isEmpty
+        )
+        if placement == .startNewThread {
+            startNewThread()
+        }
+
+        let merge = AssistantComposerHandoffReducer.merge(
+            handoff.attachments,
+            into: pendingAttachments,
+            maximumImages: Self.maximumImageAttachments
+        )
+        let landingID = handoff.leadAttachmentID.flatMap { merge.addedIDs.contains($0) ? $0 : nil }
+            ?? merge.addedIDs.first
+        // Conceal the landing tile in the same update that inserts it, so the
+        // real tile never flashes in before the layered photo arrives.
+        navigation.attachmentTransition.land(handoffID: handoff.id, on: landingID)
+
+        withAnimation(composerAnimation) {
+            pendingAttachments = merge.attachments
+            if !merge.addedIDs.isEmpty {
+                scanHandoffContext = AssistantComposerScanContext(
+                    handoffID: handoff.id,
+                    source: handoff.source,
+                    attachmentIDs: Set(merge.addedIDs),
+                    suggestions: handoff.suggestions,
+                    droppedCount: merge.droppedCount
+                )
+            }
+        }
+        draft = AssistantComposerHandoffReducer.draft(existing: draft, userContext: handoff.userContext)
+
+        UIAccessibility.post(
+            notification: .announcement,
+            argument: AssistantComposerHandoffReducer.announcement(
+                addedCount: merge.addedIDs.count,
+                droppedCount: merge.droppedCount
+            )
+        )
+    }
+
+    /// Fills the draft only; the user still reviews and taps Send.
+    private func applySuggestion(_ suggestion: AssistantComposerSuggestion) {
+        draft = suggestion.prompt
+        inputFocused = true
+    }
+
     private func acceptAssistantHandoff() {
         guard isSelected, let prompt = navigation.takeAssistantPrompt() else { return }
         if chatService.isStreaming {
@@ -744,6 +817,7 @@ struct ChatView: View {
             pendingAttachments = []
             draft = ""
             self.editingMessageID = nil
+            scanHandoffContext = nil
         }
     }
 
