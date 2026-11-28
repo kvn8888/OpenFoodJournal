@@ -62,6 +62,7 @@ struct AssistantComposerSuggestion: Identifiable, Equatable, Sendable {
 
 /// One scan's worth of photos on its way to the Assistant composer.
 struct AssistantPhotoHandoff: Identifiable, Sendable {
+    static let maximumImages = 4
     let id: UUID
     let source: AssistantScanHandoffSource
     /// Already downscaled to the Assistant's upload policy. Attachment IDs are
@@ -253,6 +254,22 @@ enum AssistantComposerHandoffReducer {
         return userContext ?? existing
     }
 
+    /// A starter can replace another starter or the original scan context,
+    /// but must preserve text the user wrote independently.
+    static func applyingSuggestion(
+        _ suggestion: AssistantComposerSuggestion,
+        to existing: String,
+        context: AssistantComposerScanContext?
+    ) -> String {
+        let trimmed = existing.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              trimmed != context?.userContext,
+              context?.suggestions.contains(where: { $0.prompt == trimmed }) != true
+        else { return suggestion.prompt }
+        if trimmed == suggestion.prompt || trimmed.hasSuffix("\n\n" + suggestion.prompt) { return existing }
+        return trimmed + "\n\n" + suggestion.prompt
+    }
+
     static func announcement(addedCount: Int, droppedCount: Int) -> String {
         let added = addedCount == 1 ? "1 photo" : "\(addedCount) photos"
         var text = "\(added) added to the Assistant message. Review before sending."
@@ -270,6 +287,7 @@ struct AssistantComposerScanContext: Equatable {
     let source: AssistantScanHandoffSource
     let attachmentIDs: Set<UUID>
     let suggestions: [AssistantComposerSuggestion]
+    let userContext: String?
     let droppedCount: Int
 
     func isVisible(with attachments: [ChatDraftAttachment]) -> Bool {

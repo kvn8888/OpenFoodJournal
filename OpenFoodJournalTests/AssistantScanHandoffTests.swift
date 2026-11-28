@@ -138,6 +138,19 @@ struct AssistantScanHandoffTests {
         #expect(router.pendingAssistantPhotoHandoff == nil)
     }
 
+    @Test("router keeps queued photos and rejects scans exceeding remaining composer capacity")
+    func routerProtectsPendingPhotos() {
+        let router = AppNavigationRouter()
+        let handoff = Self.handoff()
+        router.updateAssistantImageSlots(1)
+        #expect(!router.openAssistant(withPhotos: handoff, environment: .preview))
+        #expect(router.pendingAssistantPhotoHandoff == nil)
+        router.updateAssistantImageSlots(2)
+        #expect(router.openAssistant(withPhotos: handoff, environment: .preview))
+        #expect(!router.openAssistant(withPhotos: Self.handoff(), environment: .preview))
+        #expect(router.takeAssistantPhotoHandoff()?.id == handoff.id)
+    }
+
     // MARK: Composer rules
 
     @Test("an active run, unsent draft, or empty thread keeps the current composer")
@@ -181,6 +194,21 @@ struct AssistantScanHandoffTests {
         #expect(AssistantComposerHandoffReducer.draft(existing: "  ", userContext: nil) == "  ")
     }
 
+    @Test("a scan suggestion preserves custom draft text and can replace the original scan context")
+    func suggestionDraftRules() throws {
+        let handoff = Self.handoff(context: "ramen")
+        let suggestion = try #require(handoff.suggestions.first)
+        let context = AssistantComposerScanContext(
+            handoffID: handoff.id, source: handoff.source,
+            attachmentIDs: Set(handoff.attachmentIDs), suggestions: handoff.suggestions,
+            userContext: handoff.userContext, droppedCount: 0
+        )
+        typealias R = AssistantComposerHandoffReducer
+        #expect(R.applyingSuggestion(suggestion, to: "ramen", context: context) == suggestion.prompt)
+        #expect(R.applyingSuggestion(suggestion, to: "Please check the brand", context: context) == "Please check the brand\n\n" + suggestion.prompt)
+        #expect(R.applyingSuggestion(suggestion, to: suggestion.prompt, context: context) == suggestion.prompt)
+    }
+
     @Test("VoiceOver announcement reports added and dropped photos")
     func announcement() {
         let text = AssistantComposerHandoffReducer.announcement(addedCount: 2, droppedCount: 1)
@@ -194,7 +222,7 @@ struct AssistantScanHandoffTests {
         let scan = Self.image("scan")
         let other = Self.image("other")
         let context = AssistantComposerScanContext(
-            handoffID: UUID(), source: .foodPhoto, attachmentIDs: [scan.id], suggestions: [], droppedCount: 0
+            handoffID: UUID(), source: .foodPhoto, attachmentIDs: [scan.id], suggestions: [], userContext: nil, droppedCount: 0
         )
         #expect(context.isVisible(with: [other, scan]))
         #expect(!context.isVisible(with: [other]))

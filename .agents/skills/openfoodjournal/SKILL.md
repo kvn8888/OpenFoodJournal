@@ -166,14 +166,16 @@ Gated by `AssistantScanHandoffFeature.isEnabled()` (`OFJBuildEnvironment != .rel
 ```
 Scan Food / Food Label capture or library pick → review overlay (multi-photo unchanged)
   → "Ask Assistant": AssistantPhotoHandoffEncoder (off-main, 1200px JPEG 0.8, stable ChatDraftAttachment IDs)
+  → AppNavigationRouter.openAssistant(withPhotos:) accepts only if capacity remains and no pending handoff exists
   → attachmentTransition.stage(...) freezes the visible photo in a pass-through overlay UIWindow
-  → AppNavigationRouter.openAssistant(withPhotos:) → ContentView selects .assistant → sheet dismisses
+  → ContentView selects .assistant → sheet dismisses
   → ChatView.acceptAssistantPhotoHandoff(): consume-once take, merge (dedupe by ID, 4-image cap),
     never auto-sends, never cancels a live run, keeps unsent drafts; suggestion tray fills draft only
   → coordinator.land(...) waits for the composer tile's settled frame, flies, reveals the real tile
 ```
 
 - Barcode never hands off (direct Open Food Facts lookup stays). Siri text handoff (`openAssistant(with:)`) still auto-submits and is separate.
+- A rejected or failed handoff retains the scan review photos. An existing unsent edit becomes a regular draft without changing the original message. The enlarged attachment strip is Preview/Debug only; Release retains its established composer layout.
 - Reduce Motion, missing anchors, timeouts, tab switches, and backgrounding all fall back to showing the tile without a flight; attachments are staged before any animation.
 - Debug fixture: launch OFJ Dev with `-ofj-fixture-scan-handoff food|label`.
 - Tests: `OpenFoodJournalTests/AssistantScanHandoffTests.swift`.

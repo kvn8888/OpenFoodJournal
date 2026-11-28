@@ -99,6 +99,7 @@ private struct LiveScanCaptureView: View {
     /// mode change clears it, so a stale encode can never hand off photos the
     /// user already discarded.
     @State private var assistantHandoffToken: UUID?
+    @State private var assistantHandoffError: String?
     @State private var captureFeedbackCount = 0
     @State private var showCaptureFlash = false
 
@@ -193,7 +194,16 @@ private struct LiveScanCaptureView: View {
             }
         }
         .onDisappear {
+            assistantHandoffToken = nil
             camera.stop()
+        }
+        .alert("Could not attach photos", isPresented: Binding(
+            get: { assistantHandoffError != nil },
+            set: { if !$0 { assistantHandoffError = nil } }
+        )) {
+            Button("OK", role: .cancel) { assistantHandoffError = nil }
+        } message: {
+            Text(assistantHandoffError ?? "")
         }
         .photosPicker(
             isPresented: $showPhotoPicker,
@@ -339,6 +349,7 @@ private struct LiveScanCaptureView: View {
                         }
                     }
                     .padding(.horizontal, 32)
+                    .disabled(assistantHandoffToken != nil)
                 }
 
                 // Optional prompt — only shown for food photos, not label scans.
@@ -366,6 +377,7 @@ private struct LiveScanCaptureView: View {
                     }
                     .glassEffect(in: .capsule)
                     .padding(.horizontal, 32)
+                    .disabled(assistantHandoffToken != nil)
                 }
 
                 // Action buttons
@@ -409,7 +421,7 @@ private struct LiveScanCaptureView: View {
                             .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.glassProminent)
-                        .disabled(assistantHandoffToken != nil)
+                        .disabled(assistantHandoffToken != nil || !photoSelections.isEmpty)
                         .accessibilityHint("Adds these photos to a new Assistant message for review. Nothing is sent automatically.")
                         .accessibilityIdentifier("scan.ask-assistant")
                     } else {
@@ -475,6 +487,10 @@ private struct LiveScanCaptureView: View {
               let source = AssistantScanHandoffSource(scanMode: mode),
               !capturedPhotos.isEmpty
         else { return }
+        guard capturedPhotos.count <= navigation.assistantRemainingImageSlots else {
+            assistantHandoffError = "The Assistant composer does not have room for all these photos. Remove a photo here, or use Quick Analyze Instead."
+            return
+        }
         let token = UUID()
         assistantHandoffToken = token
         isPromptFocused = false
@@ -487,8 +503,9 @@ private struct LiveScanCaptureView: View {
         Task {
             let payload = await AssistantPhotoHandoffEncoder.prepare(images: images, leadIndex: leadIndex)
             guard assistantHandoffToken == token else { return }
-            guard !payload.attachments.isEmpty else {
+            guard payload.attachments.count == images.count else {
                 assistantHandoffToken = nil
+                assistantHandoffError = "One or more photos could not be prepared. Your captured photos are still here; please try again."
                 return
             }
             let handoff = AssistantPhotoHandoff(
@@ -498,12 +515,16 @@ private struct LiveScanCaptureView: View {
                 logDate: logDate,
                 userContext: context
             )
+            guard navigation.openAssistant(withPhotos: handoff) else {
+                assistantHandoffToken = nil
+                assistantHandoffError = "The Assistant composer is busy or does not have room for all these photos. Your photos are still here."
+                return
+            }
             navigation.attachmentTransition.stage(
                 handoffID: handoff.id,
                 snapshot: payload.transitionSnapshot,
                 cornerRadius: Self.reviewPhotoCornerRadius
             )
-            navigation.openAssistant(withPhotos: handoff)
             dismiss()
         }
     }

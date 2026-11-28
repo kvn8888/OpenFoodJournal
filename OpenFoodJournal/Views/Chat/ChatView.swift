@@ -12,7 +12,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 struct ChatView: View {
-    private static let maximumImageAttachments = 4
+    private static let maximumImageAttachments = AssistantPhotoHandoff.maximumImages
 
     let isSelected: Bool
 
@@ -40,6 +40,7 @@ struct ChatView: View {
     /// Where staged photos came from when they arrived from a Journal scan;
     /// drives the contextual suggestion tray. Cleared on send.
     @State private var scanHandoffContext: AssistantComposerScanContext?
+    @State private var scanHandoffNotice: String?
 
     // Calculator review flow (create/update_calculator permission cards)
     @State private var calculatorReview: CalculatorReviewSession?
@@ -145,10 +146,21 @@ struct ChatView: View {
         .onChange(of: navigation.pendingAssistantPhotoHandoff?.id) {
             acceptAssistantPhotoHandoff()
         }
+        .onChange(of: remainingImageAttachmentSlots, initial: true) { _, slots in
+            navigation.updateAssistantImageSlots(slots)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 navigation.attachmentTransition.cancel()
             }
+        }
+        .alert("Assistant attachments", isPresented: Binding(
+            get: { scanHandoffNotice != nil },
+            set: { if !$0 { scanHandoffNotice = nil } }
+        )) {
+            Button("OK", role: .cancel) { scanHandoffNotice = nil }
+        } message: {
+            Text(scanHandoffNotice ?? "")
         }
     }
 
@@ -452,10 +464,15 @@ struct ChatView: View {
                 Text("It can read your journal, log foods (with your approval), search the web, and build nutrition calculators from menus or PDFs.")
             }
 
-            VStack(spacing: 8) {
-                suggestionChip("How am I doing today?")
-                suggestionChip("What did I eat yesterday?")
-                suggestionChip("Suggest a high-protein snack")
+            // Generic starters auto-send in the established empty state. Do
+            // not offer them alongside staged photos in Preview: the scan
+            // starters deliberately fill the draft instead.
+            if !AssistantScanHandoffFeature.isEnabled() || pendingAttachments.isEmpty {
+                VStack(spacing: 8) {
+                    suggestionChip("How am I doing today?")
+                    suggestionChip("What did I eat yesterday?")
+                    suggestionChip("Suggest a high-protein snack")
+                }
             }
         }
         .padding(.top, 40)
@@ -514,13 +531,17 @@ struct ChatView: View {
             }
 
             if !pendingAttachments.isEmpty {
-                AssistantComposerAttachmentStrip(
-                    attachments: pendingAttachments,
-                    scanContext: scanHandoffContext,
-                    transition: navigation.attachmentTransition,
-                    onRemove: removePendingAttachment
-                )
-                .transition(.opacity.combined(with: .move(edge: .bottom)))
+                if AssistantScanHandoffFeature.isEnabled() {
+                    AssistantComposerAttachmentStrip(
+                        attachments: pendingAttachments,
+                        scanContext: scanHandoffContext,
+                        transition: navigation.attachmentTransition,
+                        onRemove: removePendingAttachment
+                    )
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                } else {
+                    legacyPendingAttachmentsRow
+                }
             }
 
             GlassEffectContainer(spacing: 8) {
@@ -631,6 +652,41 @@ struct ChatView: View {
         .padding(.bottom, 4)
     }
 
+    private var legacyPendingAttachmentsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pendingAttachments) { attachment in
+                    HStack(spacing: 6) {
+                        if attachment.isImage, let image = UIImage(data: attachment.data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 28, height: 28)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        } else {
+                            Image(systemName: "doc.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        Text(attachment.isImage ? "Photo" : attachment.filename)
+                            .font(.caption)
+                            .lineLimit(1)
+                        Button {
+                            pendingAttachments.removeAll { $0.id == attachment.id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .glassEffect(in: .capsule)
+                }
+            }
+        }
+    }
+
     private var composerAnimation: Animation? {
         reduceMotion ? nil : OFJMotion.standardSpring
     }
@@ -669,6 +725,7 @@ struct ChatView: View {
                 guard let data = try? await item.loadTransferable(type: Data.self),
                       let jpeg = ChatService.downscaledJPEG(from: data)
                 else { continue }
+                guard remainingImageAttachmentSlots > 0 else { break }
                 pendingAttachments.append(ChatDraftAttachment(
                     data: jpeg,
                     mimeType: "image/jpeg",
@@ -715,9 +772,9 @@ struct ChatView: View {
         guard isSelected, let handoff = navigation.takeAssistantPhotoHandoff() else { return }
 
         // An in-progress edit would turn the scan photos into a rewrite of an
-        // old message. Leave edit mode first; the original message is intact.
+        // old message. Leave edit mode without discarding the draft or photos.
         if editingMessageID != nil {
-            cancelEditing()
+            editingMessageID = nil
         }
 
         let placement = AssistantComposerHandoffReducer.placement(
@@ -736,7 +793,6 @@ struct ChatView: View {
             maximumImages: Self.maximumImageAttachments
         )
         let landingID = handoff.leadAttachmentID.flatMap { merge.addedIDs.contains($0) ? $0 : nil }
-            ?? merge.addedIDs.first
         // Conceal the landing tile in the same update that inserts it, so the
         // real tile never flashes in before the layered photo arrives.
         navigation.attachmentTransition.land(handoffID: handoff.id, on: landingID)
@@ -749,9 +805,13 @@ struct ChatView: View {
                     source: handoff.source,
                     attachmentIDs: Set(merge.addedIDs),
                     suggestions: handoff.suggestions,
+                    userContext: handoff.userContext,
                     droppedCount: merge.droppedCount
                 )
             }
+        }
+        if merge.droppedCount > 0 {
+            scanHandoffNotice = "\(merge.droppedCount) scan photo(s) could not be added because the composer is full. Your existing draft is preserved."
         }
         draft = AssistantComposerHandoffReducer.draft(existing: draft, userContext: handoff.userContext)
 
@@ -766,7 +826,7 @@ struct ChatView: View {
 
     /// Fills the draft only; the user still reviews and taps Send.
     private func applySuggestion(_ suggestion: AssistantComposerSuggestion) {
-        draft = suggestion.prompt
+        draft = AssistantComposerHandoffReducer.applyingSuggestion(suggestion, to: draft, context: scanHandoffContext)
         inputFocused = true
     }
 
