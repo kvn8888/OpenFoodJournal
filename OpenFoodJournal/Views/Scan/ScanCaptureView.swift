@@ -66,6 +66,8 @@ private struct LiveScanCaptureView: View {
     @Environment(NutritionStore.self) private var nutritionStore
     @Environment(ScanService.self) private var scanService
     @Environment(OpenFoodFactsService.self) private var offService
+    @Environment(AppNavigationRouter.self) private var navigation
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
 
     /// The date the scanned entry will be logged to (passed from DailyLogView)
@@ -91,6 +93,15 @@ private struct LiveScanCaptureView: View {
     // Barcode scanning state
     @State private var barcodeProduct: OFFProduct?
     @State private var isLookingUpBarcode = false
+
+    // Preview-lane Assistant handoff state
+    /// Non-nil while photos are being encoded for the Assistant. Retake or a
+    /// mode change clears it, so a stale encode can never hand off photos the
+    /// user already discarded.
+    @State private var assistantHandoffToken: UUID?
+    @State private var assistantHandoffError: String?
+    @State private var captureFeedbackCount = 0
+    @State private var showCaptureFlash = false
 
     var body: some View {
         ZStack {
@@ -158,7 +169,18 @@ private struct LiveScanCaptureView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.black.opacity(0.5))
             }
+
+            // Shutter acknowledgement for the Assistant handoff lane: a soft
+            // flash (skipped with Reduce Motion) plus a light haptic.
+            if showCaptureFlash {
+                Color.white
+                    .opacity(0.35)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
+        .sensoryFeedback(.impact(weight: .light), trigger: captureFeedbackCount)
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -172,7 +194,16 @@ private struct LiveScanCaptureView: View {
             }
         }
         .onDisappear {
+            assistantHandoffToken = nil
             camera.stop()
+        }
+        .alert("Could not attach photos", isPresented: Binding(
+            get: { assistantHandoffError != nil },
+            set: { if !$0 { assistantHandoffError = nil } }
+        )) {
+            Button("OK", role: .cancel) { assistantHandoffError = nil }
+        } message: {
+            Text(assistantHandoffError ?? "")
         }
         .photosPicker(
             isPresented: $showPhotoPicker,
@@ -239,7 +270,17 @@ private struct LiveScanCaptureView: View {
                     Image(uiImage: photo.image)
                         .resizable()
                         .scaledToFit()
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                        .clipShape(RoundedRectangle(cornerRadius: Self.reviewPhotoCornerRadius))
+                        .background {
+                            // Exact on-screen frame of the fitted photo; the
+                            // shared-element layer starts here.
+                            if assistantHandoffEnabled {
+                                AssistantTransitionAnchor(
+                                    key: .scanSource,
+                                    coordinator: navigation.attachmentTransition
+                                )
+                            }
+                        }
                         .frame(maxHeight: supportsMultiplePhotos ? 230 : 300)
                         .padding(.horizontal, 24)
                 }
@@ -308,6 +349,7 @@ private struct LiveScanCaptureView: View {
                         }
                     }
                     .padding(.horizontal, 32)
+                    .disabled(assistantHandoffToken != nil)
                 }
 
                 // Optional prompt — only shown for food photos, not label scans.
@@ -335,6 +377,7 @@ private struct LiveScanCaptureView: View {
                     }
                     .glassEffect(in: .capsule)
                     .padding(.horizontal, 32)
+                    .disabled(assistantHandoffToken != nil)
                 }
 
                 // Action buttons
@@ -362,18 +405,29 @@ private struct LiveScanCaptureView: View {
                         }
                         .buttonStyle(.glassProminent)
                         .disabled(isLookingUpBarcode)
+                    } else if assistantHandoffEnabled {
+                        // Preview lane: stage the photos in the Assistant
+                        // composer for review. Nothing is sent from here.
+                        Button {
+                            handOffToAssistant()
+                        } label: {
+                            Group {
+                                if assistantHandoffToken != nil {
+                                    ProgressView()
+                                } else {
+                                    Label("Ask Assistant", systemImage: "sparkles")
+                                }
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .disabled(assistantHandoffToken != nil || !photoSelections.isEmpty)
+                        .accessibilityHint("Adds these photos to a new Assistant message for review. Nothing is sent automatically.")
+                        .accessibilityIdentifier("scan.ask-assistant")
                     } else {
                         // Label/Food Photo mode — send to Gemini
                         Button {
-                            isPromptFocused = false
-                            let prompt = promptText.isEmpty ? nil : promptText
-                            scanService.scanInBackground(
-                                images: capturedPhotos.map(\.image),
-                                mode: mode,
-                                prompt: prompt,
-                                useProModel: useProModel
-                            )
-                            dismiss()
+                            startLegacyAnalysis()
                         } label: {
                             Label(analyzeButtonTitle, systemImage: "wand.and.sparkles")
                                 .frame(maxWidth: .infinity)
@@ -382,7 +436,107 @@ private struct LiveScanCaptureView: View {
                     }
                 }
                 .padding(.horizontal, 32)
+
+                // Keep the legacy one-tap scan reachable in Preview so UAT
+                // can compare both paths on the same photos.
+                if assistantHandoffEnabled {
+                    Button {
+                        startLegacyAnalysis()
+                    } label: {
+                        Text("Quick \(analyzeButtonTitle) Instead")
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .frame(minHeight: OFJLayout.minimumHitTarget)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(assistantHandoffToken != nil)
+                    .accessibilityIdentifier("scan.quick-analyze")
+                }
             }
+        }
+    }
+
+    // MARK: - Analysis / Assistant Handoff
+
+    private static let reviewPhotoCornerRadius: CGFloat = 16
+
+    /// Preview/Debug only, and only for the two Gemini modes. Barcode keeps
+    /// its direct Open Food Facts lookup in every build.
+    private var assistantHandoffEnabled: Bool {
+        AssistantScanHandoffFeature.isEnabled() && AssistantScanHandoffSource(scanMode: mode) != nil
+    }
+
+    /// The legacy production path: background Gemini scan → ScanResultCard.
+    private func startLegacyAnalysis() {
+        isPromptFocused = false
+        let prompt = promptText.isEmpty ? nil : promptText
+        scanService.scanInBackground(
+            images: capturedPhotos.map(\.image),
+            mode: mode,
+            prompt: prompt,
+            useProModel: useProModel
+        )
+        dismiss()
+    }
+
+    /// Encodes the photos once (stable attachment IDs), freezes the visible
+    /// photo into the shared-element layer, stages the handoff, and only then
+    /// dismisses. No scan request, network call, or journal write happens.
+    private func handOffToAssistant() {
+        guard assistantHandoffToken == nil,
+              let source = AssistantScanHandoffSource(scanMode: mode),
+              !capturedPhotos.isEmpty
+        else { return }
+        guard capturedPhotos.count <= navigation.assistantRemainingImageSlots else {
+            assistantHandoffError = "The Assistant composer does not have room for all these photos. Remove a photo here, or use Quick Analyze Instead."
+            return
+        }
+        let token = UUID()
+        assistantHandoffToken = token
+        isPromptFocused = false
+
+        let images = capturedPhotos.map(\.image)
+        let leadIndex = capturedPhotos.firstIndex { $0.id == selectedCapturedPhoto?.id } ?? 0
+        let context = mode == .foodPhoto ? promptText : nil
+        let logDate = logDate
+
+        Task {
+            let payload = await AssistantPhotoHandoffEncoder.prepare(images: images, leadIndex: leadIndex)
+            guard assistantHandoffToken == token else { return }
+            guard payload.attachments.count == images.count else {
+                assistantHandoffToken = nil
+                assistantHandoffError = "One or more photos could not be prepared. Your captured photos are still here; please try again."
+                return
+            }
+            let handoff = AssistantPhotoHandoff(
+                source: source,
+                attachments: payload.attachments,
+                leadAttachmentID: payload.leadAttachmentID,
+                logDate: logDate,
+                userContext: context
+            )
+            guard navigation.openAssistant(withPhotos: handoff) else {
+                assistantHandoffToken = nil
+                assistantHandoffError = "The Assistant composer is busy or does not have room for all these photos. Your photos are still here."
+                return
+            }
+            navigation.attachmentTransition.stage(
+                handoffID: handoff.id,
+                snapshot: payload.transitionSnapshot,
+                cornerRadius: Self.reviewPhotoCornerRadius
+            )
+            dismiss()
+        }
+    }
+
+    private func playCaptureFeedback() {
+        guard assistantHandoffEnabled else { return }
+        captureFeedbackCount += 1
+        guard !reduceMotion else { return }
+        withAnimation(.easeOut(duration: 0.06)) { showCaptureFlash = true }
+        Task {
+            try? await Task.sleep(for: .milliseconds(90))
+            withAnimation(.easeIn(duration: 0.18)) { showCaptureFlash = false }
         }
     }
 
@@ -393,6 +547,7 @@ private struct LiveScanCaptureView: View {
         guard !scanService.isScanning, camera.isReady else { return }
         let image = await camera.capturePhoto()
         guard let image else { return }
+        playCaptureFeedback()
         withAnimation { addCapturedPhoto(image) }
     }
 
@@ -438,6 +593,7 @@ private struct LiveScanCaptureView: View {
     }
 
     private func resetCapturedPhotos() {
+        assistantHandoffToken = nil
         capturedPhotos.removeAll()
         selectedPhotoID = nil
         isCapturingAdditionalPhoto = false
@@ -878,4 +1034,6 @@ private extension UIImage.Orientation {
     ScanCaptureView()
         .environment(NutritionStore(modelContext: ModelContainer.preview.mainContext))
         .environment(ScanService())
+        .environment(OpenFoodFactsService())
+        .environment(AppNavigationRouter())
 }

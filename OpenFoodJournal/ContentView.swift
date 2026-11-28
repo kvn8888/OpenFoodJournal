@@ -52,6 +52,14 @@ struct ContentView: View {
                 selectedTab = .assistant
             }
         }
+        // Scan photos switch tabs the same way, but only stage into the
+        // composer — ChatView never auto-sends them.
+        .onChange(of: navigation.pendingAssistantPhotoHandoff?.id, initial: true) { _, handoffID in
+            if handoffID != nil {
+                showWhatsNew = false
+                selectedTab = .assistant
+            }
+        }
         .tabBarMinimizeBehavior(.never)
         .safeAreaInset(edge: .top, spacing: 0) {
             if chatService.isStreaming && selectedTab != .assistant {
@@ -62,10 +70,21 @@ struct ContentView: View {
         }
         .onAppear {
             // Show What's New sheet if the user hasn't seen this version yet
-            if lastSeenVersion != currentVersion && selectedTab != .assistant && navigation.pendingAssistantHandoff == nil {
+            if lastSeenVersion != currentVersion && selectedTab != .assistant && navigation.pendingAssistantHandoff == nil
+                && navigation.pendingAssistantPhotoHandoff == nil {
                 showWhatsNew = true
             }
         }
+        #if DEBUG
+        .task {
+            // OFJ Dev only: `-ofj-fixture-scan-handoff food|label` stages a
+            // generated two-photo handoff so the composer flow can be
+            // exercised without a camera or real meals.
+            if let source = AssistantScanHandoffFixture.requestedSource() {
+                navigation.openAssistant(withPhotos: AssistantScanHandoffFixture.handoff(source: source))
+            }
+        }
+        #endif
         .sheet(isPresented: $showWhatsNew, onDismiss: {
             // Mark this version as seen so the sheet isn't shown again
             lastSeenVersion = currentVersion
